@@ -13,7 +13,38 @@ import {
   MiniSatFormulaBuilder,
   MiniSatSolver,
 } from "../sat";
-import type { SolveResult } from "../sat";
+import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
+
+/**
+ * Available solver types
+ * This list can be extended as new solvers are added
+ */
+export const AVAILABLE_SOLVERS = ["minisat"] as const;
+export type SolverType = (typeof AVAILABLE_SOLVERS)[number];
+
+/**
+ * Solver metadata for UI display
+ */
+export interface SolverInfo {
+  id: SolverType;
+  name: string;
+  description: string;
+}
+
+/**
+ * Registry of available solvers with their metadata
+ * Add new solvers here to make them available in the UI
+ */
+export const SOLVER_REGISTRY: SolverInfo[] = [
+  {
+    id: "minisat",
+    name: "MiniSat",
+    description: "Fast, lightweight SAT solver (default)",
+  },
+  // Future solvers can be added here:
+  // { id: "z3", name: "Z3", description: "Powerful SMT solver from Microsoft" },
+  // { id: "cadical", name: "CaDiCaL", description: "State-of-the-art SAT solver" },
+];
 
 /**
  * Represents a point in the grid
@@ -732,6 +763,533 @@ export function solveGridColoring(
   }
 
   return { keptEdges, wallEdges, assignedColors };
+}
+
+/**
+ * Encoding context returned by the encoding function
+ */
+interface EncodingContext {
+  solver: SATSolver;
+  builder: FormulaBuilder;
+  edgeVars: Map<string, number>;
+  allEdges: Edge[];
+  colorVars: Map<string, number>;
+  activeColors: number[];
+  grid: ColorGrid;
+}
+
+/**
+ * Encode the grid coloring problem into a SAT formula
+ */
+function encodeGridColoring(
+  grid: ColorGrid,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _solverType: SolverType
+): EncodingContext | "trivial" | null {
+  const { width, height, colors } = grid;
+
+  // Fast path: All-blank grid
+  const isAllBlank = colors.every((row) => row.every((c) => c === null));
+  if (isAllBlank) {
+    return "trivial";
+  }
+
+  // Create solver based on type
+  // Currently only MiniSat is supported, but architecture allows adding more
+  const solver: SATSolver = new MiniSatSolver();
+  const builder: FormulaBuilder = new MiniSatFormulaBuilder(solver);
+
+  // Determine which colors are actually used
+  const usedColors = new Set<number>();
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const c = colors[row][col];
+      if (c !== null) {
+        usedColors.add(c);
+      }
+    }
+  }
+  const activeColors = Array.from(usedColors).sort((a, b) => a - b);
+  
+  if (activeColors.length === 0) {
+    return null;
+  }
+
+  // Color assignment variables for blank cells
+  const colorVars = new Map<string, number>();
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      if (colors[row][col] === null) {
+        const varsForCell: number[] = [];
+        for (const c of activeColors) {
+          const varNum = builder.createNamedVariable(colorVarKey(row, col, c));
+          colorVars.set(colorVarKey(row, col, c), varNum);
+          varsForCell.push(varNum);
+        }
+        builder.addExactlyOne(varsForCell);
+      }
+    }
+  }
+
+  // Helper to get color variables for a cell
+  function getCellColorInfo(
+    row: number,
+    col: number
+  ): { color: number; var: number | null }[] {
+    const fixedColor = colors[row][col];
+    if (fixedColor !== null) {
+      return [{ color: fixedColor, var: null }];
+    }
+    const result: { color: number; var: number | null }[] = [];
+    for (const c of activeColors) {
+      const v = colorVars.get(colorVarKey(row, col, c))!;
+      result.push({ color: c, var: v });
+    }
+    return result;
+  }
+
+  // Collect all edges and create edge variables
+  const edgeVars = new Map<string, number>();
+  const allEdges: Edge[] = [];
+
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const u: GridPoint = { row, col };
+      if (col + 1 < width) {
+        const v: GridPoint = { row, col: col + 1 };
+        const key = edgeKey(u, v);
+        const varNum = builder.createNamedVariable(`edge_${key}`);
+        edgeVars.set(key, varNum);
+        allEdges.push({ u, v });
+      }
+      if (row + 1 < height) {
+        const v: GridPoint = { row: row + 1, col };
+        const key = edgeKey(u, v);
+        const varNum = builder.createNamedVariable(`edge_${key}`);
+        edgeVars.set(key, varNum);
+        allEdges.push({ u, v });
+      }
+    }
+  }
+
+  // Disconnection between different colors
+  for (const edge of allEdges) {
+    const uColors = getCellColorInfo(edge.u.row, edge.u.col);
+    const vColors = getCellColorInfo(edge.v.row, edge.v.col);
+    const edgeVar = edgeVars.get(edgeKey(edge.u, edge.v))!;
+
+    for (const uInfo of uColors) {
+      for (const vInfo of vColors) {
+        if (uInfo.color !== vInfo.color) {
+          const clause: number[] = [-edgeVar];
+          if (uInfo.var !== null) clause.push(-uInfo.var);
+          if (vInfo.var !== null) clause.push(-vInfo.var);
+          builder.solver.addClause(clause);
+        }
+      }
+    }
+  }
+
+  // Degree constraints (1-3 edges per cell)
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const incidentEdges: number[] = [];
+      const neighbors = getNeighbors({ row, col }, width, height);
+      for (const n of neighbors) {
+        const key = edgeKey({ row, col }, n);
+        const edgeVar = edgeVars.get(key);
+        if (edgeVar !== undefined) {
+          incidentEdges.push(edgeVar);
+        }
+      }
+
+      if (incidentEdges.length > 0) {
+        builder.addOr(incidentEdges);
+        if (incidentEdges.length >= 4) {
+          builder.solver.addClause(incidentEdges.map((e) => -e));
+        }
+      }
+    }
+  }
+
+  // Connectivity within each color (spanning tree encoding)
+  for (const color of activeColors) {
+    const potentialVertices: GridPoint[] = [];
+    const fixedVertices: GridPoint[] = [];
+
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const cellColor = colors[row][col];
+        if (cellColor === color) {
+          potentialVertices.push({ row, col });
+          fixedVertices.push({ row, col });
+        } else if (cellColor === null) {
+          potentialVertices.push({ row, col });
+        }
+      }
+    }
+
+    if (potentialVertices.length <= 1) {
+      continue;
+    }
+
+    function getMemberVar(v: GridPoint): number | null {
+      const cellColor = colors[v.row][v.col];
+      if (cellColor === color) {
+        return null;
+      }
+      return colorVars.get(colorVarKey(v.row, v.col, color))!;
+    }
+
+    potentialVertices.sort((a, b) => {
+      if (a.row !== b.row) return a.row - b.row;
+      return a.col - b.col;
+    });
+
+    const potentialSet = new Set(
+      potentialVertices.map((v) => `${v.row},${v.col}`)
+    );
+
+    const potentialNeighbors = new Map<string, GridPoint[]>();
+    for (const v of potentialVertices) {
+      const key = `${v.row},${v.col}`;
+      const neighbors = getNeighbors(v, width, height).filter((n) =>
+        potentialSet.has(`${n.row},${n.col}`)
+      );
+      potentialNeighbors.set(key, neighbors);
+    }
+
+    const hasFixedRoot = fixedVertices.length > 0;
+    const fixedRoot = hasFixedRoot
+      ? fixedVertices.reduce((min, v) => {
+          if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
+            return v;
+          }
+          return min;
+        }, fixedVertices[0])
+      : null;
+
+    const isRootVars = new Map<string, number>();
+    if (!hasFixedRoot) {
+      for (let i = 0; i < potentialVertices.length; i++) {
+        const v = potentialVertices[i];
+        const vKey = `${v.row},${v.col}`;
+        const isRootVar = builder.createNamedVariable(
+          `isRoot_${color}_${v.row},${v.col}`
+        );
+        isRootVars.set(vKey, isRootVar);
+
+        const vMember = getMemberVar(v)!;
+
+        if (i === 0) {
+          builder.addImplies(isRootVar, vMember);
+          builder.addImplies(vMember, isRootVar);
+        } else {
+          const prevMembers: number[] = [];
+          for (let j = 0; j < i; j++) {
+            const u = potentialVertices[j];
+            const uMember = getMemberVar(u)!;
+            prevMembers.push(uMember);
+          }
+
+          builder.addImplies(isRootVar, vMember);
+
+          for (const uMember of prevMembers) {
+            builder.solver.addClause([-isRootVar, -uMember]);
+          }
+
+          builder.solver.addClause([isRootVar, -vMember, ...prevMembers]);
+        }
+      }
+    }
+
+    function isRoot(v: GridPoint): boolean | number {
+      if (hasFixedRoot) {
+        return v.row === fixedRoot!.row && v.col === fixedRoot!.col;
+      }
+      return isRootVars.get(`${v.row},${v.col}`)!;
+    }
+
+    const parentVars = new Map<string, number>();
+
+    for (const v of potentialVertices) {
+      const neighbors = potentialNeighbors.get(`${v.row},${v.col}`)!;
+      for (const u of neighbors) {
+        const pKey = parentKey(color, u, v);
+        const pVar = builder.createNamedVariable(pKey);
+        parentVars.set(pKey, pVar);
+
+        const eKey = edgeKey(u, v);
+        const edgeVar = edgeVars.get(eKey)!;
+        builder.addImplies(pVar, edgeVar);
+
+        const uMember = getMemberVar(u);
+        const vMember = getMemberVar(v);
+        if (uMember !== null) {
+          builder.addImplies(pVar, uMember);
+        }
+        if (vMember !== null) {
+          builder.addImplies(pVar, vMember);
+        }
+      }
+    }
+
+    for (const v of potentialVertices) {
+      const vIsRoot = isRoot(v);
+      const neighbors = potentialNeighbors.get(`${v.row},${v.col}`)!;
+      const vMember = getMemberVar(v);
+
+      const parentVarsForV: number[] = [];
+      for (const u of neighbors) {
+        const pKey = parentKey(color, u, v);
+        const pVar = parentVars.get(pKey);
+        if (pVar !== undefined) {
+          parentVarsForV.push(pVar);
+        }
+      }
+
+      if (typeof vIsRoot === "boolean" && vIsRoot) {
+        for (const pVar of parentVarsForV) {
+          builder.addUnit(-pVar);
+        }
+      } else if (typeof vIsRoot === "boolean" && !vIsRoot) {
+        if (parentVarsForV.length > 1) {
+          builder.addAtMostOne(parentVarsForV);
+        }
+
+        if (parentVarsForV.length > 0) {
+          if (vMember !== null) {
+            builder.solver.addClause([-vMember, ...parentVarsForV]);
+          } else {
+            builder.addOr(parentVarsForV);
+          }
+        } else {
+          if (vMember === null) {
+            return null;
+          }
+          builder.addUnit(-vMember);
+        }
+      } else {
+        const isRootVar = vIsRoot as number;
+
+        if (parentVarsForV.length > 1) {
+          builder.addAtMostOne(parentVarsForV);
+        }
+
+        for (const pVar of parentVarsForV) {
+          builder.solver.addClause([-isRootVar, -pVar]);
+        }
+
+        if (parentVarsForV.length > 0) {
+          if (vMember !== null) {
+            builder.solver.addClause([-vMember, isRootVar, ...parentVarsForV]);
+          } else {
+            builder.solver.addClause([isRootVar, ...parentVarsForV]);
+          }
+        } else {
+          if (vMember !== null) {
+            builder.addImplies(vMember, isRootVar);
+          } else {
+            builder.addUnit(isRootVar);
+          }
+        }
+      }
+    }
+
+    const numBits = bitsNeeded(potentialVertices.length);
+    const levelVars = new Map<string, number[]>();
+
+    for (const v of potentialVertices) {
+      const lKey = levelKey(color, v);
+      const bits = createBinaryIntVariables(builder, lKey, numBits);
+      levelVars.set(`${v.row},${v.col}`, bits);
+    }
+
+    if (hasFixedRoot) {
+      const rootBits = levelVars.get(`${fixedRoot!.row},${fixedRoot!.col}`)!;
+      for (const bit of rootBits) {
+        builder.addUnit(-bit);
+      }
+    } else {
+      for (const v of potentialVertices) {
+        const vKey = `${v.row},${v.col}`;
+        const isRootVar = isRootVars.get(vKey)!;
+        const vBits = levelVars.get(vKey)!;
+        for (const bit of vBits) {
+          builder.solver.addClause([-isRootVar, -bit]);
+        }
+      }
+    }
+
+    let auxCounter = 0;
+    for (const v of potentialVertices) {
+      const neighbors = potentialNeighbors.get(`${v.row},${v.col}`)!;
+      const vBits = levelVars.get(`${v.row},${v.col}`)!;
+
+      for (const u of neighbors) {
+        const pKey = parentKey(color, u, v);
+        const pVar = parentVars.get(pKey);
+        if (pVar === undefined) continue;
+
+        const uBits = levelVars.get(`${u.row},${u.col}`)!;
+        const auxPrefix = `cmp_${color}_${u.row}${u.col}_${v.row}${v.col}_${auxCounter++}`;
+        const n = numBits;
+
+        const eq: number[] = [];
+        const lt: number[] = [];
+
+        for (let i = 0; i < n; i++) {
+          const eqVar = builder.createNamedVariable(`${auxPrefix}_eq_${i}`);
+          eq.push(eqVar);
+
+          builder.solver.addClause([-eqVar, -uBits[i], vBits[i]]);
+          builder.solver.addClause([-eqVar, uBits[i], -vBits[i]]);
+          builder.solver.addClause([eqVar, uBits[i], vBits[i]]);
+          builder.solver.addClause([eqVar, -uBits[i], -vBits[i]]);
+        }
+
+        for (let i = 0; i < n; i++) {
+          lt.push(builder.createNamedVariable(`${auxPrefix}_lt_${i}`));
+        }
+
+        for (let bitIdx = n - 1; bitIdx >= 0; bitIdx--) {
+          const ltVar = lt[bitIdx];
+
+          if (bitIdx === n - 1) {
+            builder.solver.addClause([-ltVar, -uBits[bitIdx]]);
+            builder.solver.addClause([-ltVar, vBits[bitIdx]]);
+            builder.solver.addClause([ltVar, uBits[bitIdx], -vBits[bitIdx]]);
+          } else {
+            const prevLt = lt[bitIdx + 1];
+            const prefixEq = builder.createNamedVariable(
+              `${auxPrefix}_prefixEq_${bitIdx}`
+            );
+
+            if (bitIdx === n - 2) {
+              builder.solver.addClause([-prefixEq, eq[n - 1]]);
+              builder.solver.addClause([prefixEq, -eq[n - 1]]);
+            } else {
+              const prevPrefix = builder.getVariable(
+                `${auxPrefix}_prefixEq_${bitIdx + 1}`
+              )!;
+              builder.solver.addClause([-prefixEq, prevPrefix]);
+              builder.solver.addClause([-prefixEq, eq[bitIdx + 1]]);
+              builder.solver.addClause([prefixEq, -prevPrefix, -eq[bitIdx + 1]]);
+            }
+
+            const strictHere = builder.createNamedVariable(
+              `${auxPrefix}_strict_${bitIdx}`
+            );
+            builder.solver.addClause([-strictHere, prefixEq]);
+            builder.solver.addClause([-strictHere, -uBits[bitIdx]]);
+            builder.solver.addClause([-strictHere, vBits[bitIdx]]);
+            builder.solver.addClause([
+              strictHere,
+              -prefixEq,
+              uBits[bitIdx],
+              -vBits[bitIdx],
+            ]);
+
+            builder.solver.addClause([-ltVar, prevLt, strictHere]);
+            builder.solver.addClause([ltVar, -prevLt]);
+            builder.solver.addClause([ltVar, -strictHere]);
+          }
+        }
+
+        builder.solver.addClause([-pVar, lt[0]]);
+      }
+    }
+  }
+
+  return { solver, builder, edgeVars, allEdges, colorVars, activeColors, grid };
+}
+
+/**
+ * Extract solution from SAT result
+ */
+function extractSolution(
+  result: SolveResult,
+  context: EncodingContext
+): GridSolution | null {
+  if (!result.satisfiable) {
+    return null;
+  }
+
+  const { edgeVars, allEdges, colorVars, activeColors, grid } = context;
+  const { width, height, colors } = grid;
+
+  const keptEdges: Edge[] = [];
+  const wallEdges: Edge[] = [];
+
+  for (const edge of allEdges) {
+    const key = edgeKey(edge.u, edge.v);
+    const edgeVar = edgeVars.get(key)!;
+    const isKept = result.assignment.get(edgeVar) ?? false;
+
+    if (isKept) {
+      keptEdges.push(edge);
+    } else {
+      wallEdges.push(edge);
+    }
+  }
+
+  const assignedColors: number[][] = Array.from({ length: height }, () =>
+    Array.from({ length: width }, () => 0)
+  );
+
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const fixedColor = colors[row][col];
+      if (fixedColor !== null) {
+        assignedColors[row][col] = fixedColor;
+      } else {
+        let foundColor = false;
+        for (const c of activeColors) {
+          const varNum = colorVars.get(colorVarKey(row, col, c));
+          if (varNum !== undefined && result.assignment.get(varNum)) {
+            assignedColors[row][col] = c;
+            foundColor = true;
+            break;
+          }
+        }
+        if (!foundColor && activeColors.length > 0) {
+          assignedColors[row][col] = activeColors[0];
+        }
+      }
+    }
+  }
+
+  return { keptEdges, wallEdges, assignedColors };
+}
+
+/**
+ * Solve the grid coloring problem with a specific solver
+ * This is the main entry point that supports solver selection.
+ * 
+ * @param grid The grid with colors assigned to cells
+ * @param solverType The solver to use (default: "minisat")
+ * @param numColors Number of available colors (kept for API compatibility)
+ */
+export function solveGridColoringWithSolver(
+  grid: ColorGrid,
+  solverType: SolverType = "minisat",
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _numColors: number = 6
+): GridSolution | null {
+  const context = encodeGridColoring(grid, solverType);
+  
+  if (context === "trivial") {
+    return createTrivialSolution(grid.width, grid.height);
+  }
+  
+  if (context === null) {
+    return null;
+  }
+
+  // Solve synchronously (all current solvers support sync solving)
+  const result = context.solver.solve();
+  
+  return extractSolution(result, context);
 }
 
 /**

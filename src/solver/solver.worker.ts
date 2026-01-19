@@ -2,18 +2,20 @@
  * Web Worker for running the SAT solver in a background thread
  */
 
-import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution } from "./grid-coloring";
+import { solveGridColoringWithSolver } from "./grid-coloring";
+import type { ColorGrid, GridSolution, SolverType } from "./grid-coloring";
 
 export interface SolverRequest {
   grid: ColorGrid;
   numColors: number;
+  solverType?: SolverType;
 }
 
 export interface SolverResponse {
   success: boolean;
   solution: GridSolution | null;
   error?: string;
+  solveTimeMs?: number;
 }
 
 /**
@@ -36,13 +38,18 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { grid, numColors } = event.data;
+  const { grid, numColors, solverType = "minisat" } = event.data;
 
   try {
-    const solution = solveGridColoring(grid, numColors);
+    const startTime = performance.now();
+    const solution = solveGridColoringWithSolver(grid, solverType, numColors);
+    const endTime = performance.now();
+    const solveTimeMs = endTime - startTime;
+    
     const response: SolverResponse = {
       success: true,
       solution,
+      solveTimeMs,
     };
     self.postMessage(response);
   } catch (error) {

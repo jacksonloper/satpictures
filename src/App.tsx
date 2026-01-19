@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, Grid } from "./components";
-import type { ColorGrid, GridSolution, SolverRequest, SolverResponse } from "./solver";
+import type { ColorGrid, GridSolution, SolverRequest, SolverResponse, SolverType } from "./solver";
+import { SOLVER_REGISTRY } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import "./App.css";
 
@@ -41,6 +42,8 @@ function App() {
     "none" | "found" | "unsatisfiable" | "error"
   >("none");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [solveTimeMs, setSolveTimeMs] = useState<number | null>(null);
+  const [selectedSolver, setSelectedSolver] = useState<SolverType>("minisat");
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -131,7 +134,8 @@ function App() {
     workerRef.current = worker;
 
     worker.onmessage = (event: MessageEvent<SolverResponse>) => {
-      const { success, solution, error } = event.data;
+      const { success, solution, error, solveTimeMs } = event.data;
+      setSolveTimeMs(solveTimeMs ?? null);
       if (success && solution) {
         setSolution(solution);
         setSolutionStatus("found");
@@ -161,9 +165,9 @@ function App() {
     };
 
     // Send the solve request
-    const request: SolverRequest = { grid, numColors };
+    const request: SolverRequest = { grid, numColors, solverType: selectedSolver };
     worker.postMessage(request);
-  }, [grid, numColors]);
+  }, [grid, numColors, selectedSolver]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -201,6 +205,10 @@ function App() {
           solving={solving}
           solutionStatus={solutionStatus}
           errorMessage={errorMessage}
+          solveTimeMs={solveTimeMs}
+          selectedSolver={selectedSolver}
+          onSolverChange={setSelectedSolver}
+          solverRegistry={SOLVER_REGISTRY}
         />
 
         <h3>Colors</h3>

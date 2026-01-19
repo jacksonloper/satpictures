@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution } from "../solver";
+import type { ColorGrid, GridSolution, SolverInfo, SolverType } from "../solver";
 
 // Predefined color palette
 const COLORS = [
@@ -243,6 +243,10 @@ interface ControlsProps {
   solving: boolean;
   solutionStatus: "none" | "found" | "unsatisfiable" | "error";
   errorMessage?: string | null;
+  solveTimeMs?: number | null;
+  selectedSolver: SolverType;
+  onSolverChange: (solver: SolverType) => void;
+  solverRegistry: SolverInfo[];
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -256,6 +260,10 @@ export const Controls: React.FC<ControlsProps> = ({
   solving,
   solutionStatus,
   errorMessage,
+  solveTimeMs,
+  selectedSolver,
+  onSolverChange,
+  solverRegistry,
 }) => {
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -290,6 +298,28 @@ export const Controls: React.FC<ControlsProps> = ({
             style={{ flex: 1, cursor: "pointer" }}
           />
           <span style={{ minWidth: "24px", textAlign: "right" }}>{gridHeight}</span>
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ minWidth: "50px" }}>Solver:</span>
+          <select
+            value={selectedSolver}
+            onChange={(e) => onSolverChange(e.target.value as SolverType)}
+            style={{
+              flex: 1,
+              padding: "6px 10px",
+              borderRadius: "4px",
+              border: "1px solid #bdc3c7",
+              backgroundColor: "white",
+              cursor: "pointer",
+              fontSize: "14px",
+            }}
+          >
+            {solverRegistry.map((solver) => (
+              <option key={solver.id} value={solver.id} title={solver.description}>
+                {solver.name}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -356,10 +386,10 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? "Solution found! Each color region is now connected."
+            ? `Solution found in ${solveTimeMs !== null && solveTimeMs !== undefined ? (solveTimeMs < 1000 ? `${Math.round(solveTimeMs)}ms` : `${(solveTimeMs / 1000).toFixed(2)}s`) : "unknown time"}! Each color region is now connected.`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
-              : "No solution exists - some color regions cannot be connected."}
+              : `No solution exists${solveTimeMs !== null && solveTimeMs !== undefined ? ` (checked in ${solveTimeMs < 1000 ? `${Math.round(solveTimeMs)}ms` : `${(solveTimeMs / 1000).toFixed(2)}s`})` : ""} - some color regions cannot be connected.`}
         </div>
       )}
     </div>
