@@ -32,11 +32,12 @@ h3 {
 
 .controls-panel {
   min-width: 280px;
+  flex-shrink: 0;
 }
 
 .grid-panel {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: flex-start;
 }
 
