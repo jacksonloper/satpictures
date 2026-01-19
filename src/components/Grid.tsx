@@ -84,25 +84,11 @@ export const Grid: React.FC<GridProps> = ({
   const hasWall = useCallback(
     (r1: number, c1: number, r2: number, c2: number): boolean => {
       if (!solution) {
-        // No solution yet - show walls between cells with different fixed colors
-        // Blank cells (null) don't show walls since their color is undetermined
-        if (
-          r2 >= 0 &&
-          r2 < grid.height &&
-          c2 >= 0 &&
-          c2 < grid.width
-        ) {
-          const color1 = grid.colors[r1][c1];
-          const color2 = grid.colors[r2][c2];
-          // If either is blank, no wall (color undetermined)
-          if (color1 === null || color2 === null) {
-            return false;
-          }
-          return color1 !== color2;
-        }
-        return true; // Edge of grid
+        // No solution yet - don't show any internal walls
+        // Only show walls at grid boundary
+        return !(r2 >= 0 && r2 < grid.height && c2 >= 0 && c2 < grid.width);
       }
-      // With solution - check if edge is kept
+      // With solution - check if edge is kept (no wall) or blocked (wall)
       const key = `${r1},${c1}-${r2},${c2}`;
       return !keptEdgeSet.has(key);
     },

@@ -219,6 +219,38 @@ export function solveGridColoring(
   }
 
   // ============================================
+  // 1b. DEGREE CONSTRAINTS (1-3 edges per cell)
+  // ============================================
+  // Each cell must have between 1 and 3 edges (passages)
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      // Get all edge variables incident to this cell
+      const incidentEdges: number[] = [];
+      const neighbors = getNeighbors({ row, col }, width, height);
+      for (const n of neighbors) {
+        const key = edgeKey({ row, col }, n);
+        const edgeVar = edgeVars.get(key);
+        if (edgeVar !== undefined) {
+          incidentEdges.push(edgeVar);
+        }
+      }
+
+      if (incidentEdges.length > 0) {
+        // At least 1 edge: OR of all incident edges
+        builder.addOr(incidentEdges);
+
+        // At most 3 edges: for each subset of 4 edges, at least one must be false
+        // This is equivalent to: NOT(all 4 true) for each 4-combination
+        if (incidentEdges.length >= 4) {
+          // Only corner cells can't have 4 edges, but interior cells have exactly 4
+          // If all 4 are present, add constraint that at least one must be false
+          builder.solver.addClause(incidentEdges.map((e) => -e)); // At least one false = at most 3 true
+        }
+      }
+    }
+  }
+
+  // ============================================
   // 2. CONNECTIVITY WITHIN EACH COLOR
   // ============================================
   // For each color, encode spanning tree constraints
