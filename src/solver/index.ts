@@ -11,6 +11,7 @@ export {
   type Edge,
   type GridPoint,
   type GridSolution,
+  type SolveOptions,
 } from "./grid-coloring";
 
-export type { SolverRequest, SolverResponse } from "./solver.worker";
+export type { SolverRequest, SolverResponse, SolverType } from "./solver.worker";
