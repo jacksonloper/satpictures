@@ -143,7 +143,7 @@ function App() {
       } else {
         // Error occurred (e.g., out of memory)
         setSolutionStatus("error");
-        setErrorMessage(error || "Unknown error");
+        setErrorMessage(error || "An unexpected error occurred while solving the grid.");
         console.error("Solver error:", error);
       }
       setSolving(false);
