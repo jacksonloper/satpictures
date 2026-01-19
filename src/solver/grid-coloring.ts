@@ -160,12 +160,9 @@ function createTrivialSolution(width: number, height: number): GridSolution {
  */
 export function solveGridColoring(
   grid: ColorGrid,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _numColors: number = 6
 ): GridSolution | null {
-  // Note: _numColors is no longer used - blank cells only use colors that have fixed cells.
-  // This optimization dramatically reduces memory usage for grids with many blank cells.
-  void _numColors;
-  
   const { width, height, colors } = grid;
 
   // ============================================
@@ -197,6 +194,12 @@ export function solveGridColoring(
   }
   // Convert to sorted array for consistent ordering
   const activeColors = Array.from(usedColors).sort((a, b) => a - b);
+  
+  // Safety check: if somehow no colors are fixed (shouldn't happen given isAllBlank check),
+  // return null as we can't create a valid encoding
+  if (activeColors.length === 0) {
+    return null;
+  }
 
   // ============================================
   // 0. COLOR ASSIGNMENT VARIABLES FOR BLANK CELLS
@@ -710,12 +713,19 @@ export function solveGridColoring(
         assignedColors[row][col] = fixedColor;
       } else {
         // Find which color variable is true (only check active colors)
+        let foundColor = false;
         for (const c of activeColors) {
           const varNum = colorVars.get(colorVarKey(row, col, c));
           if (varNum !== undefined && result.assignment.get(varNum)) {
             assignedColors[row][col] = c;
+            foundColor = true;
             break;
           }
+        }
+        // If no color variable is true, default to first active color
+        // This should not happen with a valid SAT solution, but handles edge cases
+        if (!foundColor && activeColors.length > 0) {
+          assignedColors[row][col] = activeColors[0];
         }
       }
     }
