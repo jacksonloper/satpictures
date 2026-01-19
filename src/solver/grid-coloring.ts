@@ -114,29 +114,104 @@ function colorVarKey(row: number, col: number, color: number): string {
 }
 
 /**
+ * Create a trivial solution for an all-blank grid.
+ * Assigns all cells to color 0 and keeps all edges (fully connected).
+ * This satisfies the connectivity constraint trivially since all cells
+ * are the same color and form one connected component.
+ */
+function createTrivialSolution(width: number, height: number): GridSolution {
+  const keptEdges: Edge[] = [];
+  const wallEdges: Edge[] = [];
+
+  // Keep all internal edges (no walls within the grid)
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      // Add right edge
+      if (col + 1 < width) {
+        keptEdges.push({
+          u: { row, col },
+          v: { row, col: col + 1 },
+        });
+      }
+      // Add bottom edge
+      if (row + 1 < height) {
+        keptEdges.push({
+          u: { row, col },
+          v: { row: row + 1, col },
+        });
+      }
+    }
+  }
+
+  // Assign all cells to color 0
+  const assignedColors: number[][] = Array.from({ length: height }, () =>
+    Array.from({ length: width }, () => 0)
+  );
+
+  return { keptEdges, wallEdges, assignedColors };
+}
+
+/**
  * Encode and solve the grid coloring problem
+ * 
+ * @param grid The grid with colors assigned to cells (null = blank, solver decides)
+ * @param _numColors Number of available colors (parameter kept for API compatibility,
+ *                   but blank cells are now only assigned colors that already have fixed cells)
  */
 export function solveGridColoring(
   grid: ColorGrid,
-  numColors: number = 6
+  _numColors: number = 6
 ): GridSolution | null {
+  // Note: _numColors is no longer used - blank cells only use colors that have fixed cells.
+  // This optimization dramatically reduces memory usage for grids with many blank cells.
+  void _numColors;
+  
   const { width, height, colors } = grid;
+
+  // ============================================
+  // FAST PATH: All-blank grid optimization
+  // ============================================
+  // If the grid is entirely blank, return a trivial solution:
+  // assign all cells to color 0 and keep all edges (fully connected)
+  const isAllBlank = colors.every((row) => row.every((c) => c === null));
+  if (isAllBlank) {
+    return createTrivialSolution(width, height);
+  }
+
   const solver = new MiniSatSolver();
   const builder = new MiniSatFormulaBuilder(solver);
+
+  // ============================================
+  // OPTIMIZATION: Determine which colors are actually used
+  // ============================================
+  // Only consider colors that have at least one fixed cell.
+  // Blank cells will only be assigned these colors, reducing the encoding size.
+  const usedColors = new Set<number>();
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const c = colors[row][col];
+      if (c !== null) {
+        usedColors.add(c);
+      }
+    }
+  }
+  // Convert to sorted array for consistent ordering
+  const activeColors = Array.from(usedColors).sort((a, b) => a - b);
 
   // ============================================
   // 0. COLOR ASSIGNMENT VARIABLES FOR BLANK CELLS
   // ============================================
   // For blank cells (null), create variables cellColor[row][col][c] meaning "cell has color c"
   // For fixed cells, we don't need variables - color is known
+  // OPTIMIZATION: Only create variables for colors that have at least one fixed cell
   const colorVars = new Map<string, number>(); // Maps colorVarKey to variable number
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       if (colors[row][col] === null) {
-        // Blank cell - create variables for each possible color
+        // Blank cell - create variables only for active colors
         const varsForCell: number[] = [];
-        for (let c = 0; c < numColors; c++) {
+        for (const c of activeColors) {
           const varNum = builder.createNamedVariable(colorVarKey(row, col, c));
           colorVars.set(colorVarKey(row, col, c), varNum);
           varsForCell.push(varNum);
@@ -158,9 +233,9 @@ export function solveGridColoring(
     if (fixedColor !== null) {
       return [{ color: fixedColor, var: null }]; // Fixed color, no variable
     }
-    // Blank cell - return all color options with their variables
+    // Blank cell - return only active color options with their variables
     const result: { color: number; var: number | null }[] = [];
-    for (let c = 0; c < numColors; c++) {
+    for (const c of activeColors) {
       const v = colorVars.get(colorVarKey(row, col, c))!;
       result.push({ color: c, var: v });
     }
@@ -255,8 +330,9 @@ export function solveGridColoring(
   // ============================================
   // For each color, encode spanning tree constraints
   // With blank cells, we need conditional constraints based on color assignment
+  // OPTIMIZATION: Only process active colors (those with at least one fixed cell)
 
-  for (let color = 0; color < numColors; color++) {
+  for (const color of activeColors) {
     // Find all vertices that could have this color (fixed to this color OR blank)
     const potentialVertices: GridPoint[] = [];
     const fixedVertices: GridPoint[] = [];
@@ -633,8 +709,8 @@ export function solveGridColoring(
       if (fixedColor !== null) {
         assignedColors[row][col] = fixedColor;
       } else {
-        // Find which color variable is true
-        for (let c = 0; c < numColors; c++) {
+        // Find which color variable is true (only check active colors)
+        for (const c of activeColors) {
           const varNum = colorVars.get(colorVarKey(row, col, c));
           if (varNum !== undefined && result.assignment.get(varNum)) {
             assignedColors[row][col] = c;
