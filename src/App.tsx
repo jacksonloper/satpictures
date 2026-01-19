@@ -174,39 +174,37 @@ function App() {
         color forms a single connected region.
       </p>
 
-      <div className="main-content">
-        <div className="controls-panel">
-          <h3>Grid Size</h3>
-          <Controls
-            gridWidth={gridWidth}
-            gridHeight={gridHeight}
-            onWidthChange={handleWidthChange}
-            onHeightChange={handleHeightChange}
-            onSolve={handleSolve}
-            onClear={handleClear}
-            onFillRandom={handleFillRandom}
-            solving={solving}
-            solutionStatus={solutionStatus}
-          />
+      <div className="controls-panel">
+        <h3>Grid Size</h3>
+        <Controls
+          gridWidth={gridWidth}
+          gridHeight={gridHeight}
+          onWidthChange={handleWidthChange}
+          onHeightChange={handleHeightChange}
+          onSolve={handleSolve}
+          onClear={handleClear}
+          onFillRandom={handleFillRandom}
+          solving={solving}
+          solutionStatus={solutionStatus}
+        />
 
-          <h3>Colors</h3>
-          <ColorPalette
-            selectedColor={selectedColor}
-            onColorSelect={setSelectedColor}
-            numColors={numColors}
-          />
-        </div>
+        <h3>Colors</h3>
+        <ColorPalette
+          selectedColor={selectedColor}
+          onColorSelect={setSelectedColor}
+          numColors={numColors}
+        />
+      </div>
 
-        <div className="grid-panel">
-          <Grid
-            grid={grid}
-            solution={solution}
-            selectedColor={selectedColor}
-            onCellClick={handleCellClick}
-            onCellDrag={handleCellDrag}
-            cellSize={40}
-          />
-        </div>
+      <div className="grid-panel">
+        <Grid
+          grid={grid}
+          solution={solution}
+          selectedColor={selectedColor}
+          onCellClick={handleCellClick}
+          onCellDrag={handleCellDrag}
+          cellSize={40}
+        />
       </div>
     </div>
   );
