@@ -9,7 +9,7 @@ function createEmptyGrid(width: number, height: number): ColorGrid {
     width,
     height,
     colors: Array.from({ length: height }, () =>
-      Array.from({ length: width }, () => 0)
+      Array.from({ length: width }, () => null)
     ),
   };
 }
@@ -34,7 +34,7 @@ function App() {
   const [grid, setGrid] = useState<ColorGrid>(() =>
     createEmptyGrid(gridWidth, gridHeight)
   );
-  const [selectedColor, setSelectedColor] = useState(0);
+  const [selectedColor, setSelectedColor] = useState<number | null>(null);
   const [solution, setSolution] = useState<GridSolution | null>(null);
   const [solving, setSolving] = useState(false);
   const [solutionStatus, setSolutionStatus] = useState<
@@ -74,7 +74,7 @@ function App() {
     setGrid((prev) => {
       const newColors = Array.from({ length: prev.height }, (_, row) =>
         Array.from({ length: clampedWidth }, (_, col) =>
-          col < prev.width ? prev.colors[row][col] : 0
+          col < prev.width ? prev.colors[row][col] : null
         )
       );
       return { width: clampedWidth, height: prev.height, colors: newColors };
@@ -89,7 +89,7 @@ function App() {
     setGrid((prev) => {
       const newColors = Array.from({ length: clampedHeight }, (_, row) =>
         Array.from({ length: prev.width }, (_, col) =>
-          row < prev.height ? prev.colors[row][col] : 0
+          row < prev.height ? prev.colors[row][col] : null
         )
       );
       return { width: prev.width, height: clampedHeight, colors: newColors };
@@ -105,7 +105,7 @@ function App() {
     // Use setTimeout to allow UI to update before heavy computation
     setTimeout(() => {
       try {
-        const result = solveGridColoring(grid);
+        const result = solveGridColoring(grid, numColors);
         if (result) {
           setSolution(result);
           setSolutionStatus("found");
@@ -118,7 +118,7 @@ function App() {
       }
       setSolving(false);
     }, 10);
-  }, [grid]);
+  }, [grid, numColors]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
