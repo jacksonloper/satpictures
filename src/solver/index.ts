@@ -6,6 +6,7 @@
 
 export {
   createTestGrid,
+  HATCH_COLOR,
   solveGridColoring,
   type ColorGrid,
   type Edge,

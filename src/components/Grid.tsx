@@ -1,5 +1,9 @@
 import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridSolution } from "../solver";
+import { HATCH_COLOR } from "../solver";
+
+// Re-export HATCH_COLOR for convenience
+export { HATCH_COLOR };
 
 // Predefined color palette
 const COLORS = [
@@ -24,6 +28,24 @@ const BLANK_PATTERN = `repeating-linear-gradient(
   #f5f5f5 2px,
   #f5f5f5 8px
 )`;
+
+// Hatch cell appearance - crosshatch pattern on yellow background
+const HATCH_BG_COLOR = "#fffde7"; // light yellow
+const HATCH_PATTERN = `repeating-linear-gradient(
+  45deg,
+  #ff9800,
+  #ff9800 2px,
+  transparent 2px,
+  transparent 8px
+),
+repeating-linear-gradient(
+  -45deg,
+  #ff9800,
+  #ff9800 2px,
+  transparent 2px,
+  transparent 8px
+),
+#fffde7`;
 
 interface GridProps {
   grid: ColorGrid;
@@ -123,9 +145,21 @@ export const Grid: React.FC<GridProps> = ({
               ? solution.assignedColors[row][col]
               : inputColor;
           const isBlank = inputColor === null && !solution;
-          const bgColor = isBlank
-            ? BLANK_COLOR
-            : COLORS[(displayColor ?? 0) % COLORS.length];
+          const isHatch = displayColor === HATCH_COLOR;
+          
+          // Determine background
+          let bgColor: string;
+          let bgPattern: string;
+          if (isBlank) {
+            bgColor = BLANK_COLOR;
+            bgPattern = BLANK_PATTERN;
+          } else if (isHatch) {
+            bgColor = HATCH_BG_COLOR;
+            bgPattern = HATCH_PATTERN;
+          } else {
+            bgColor = COLORS[(displayColor ?? 0) % COLORS.length];
+            bgPattern = bgColor;
+          }
 
           // Check walls on each side
           const wallRight = col < grid.width - 1 && hasWall(row, col, row, col + 1);
@@ -143,7 +177,7 @@ export const Grid: React.FC<GridProps> = ({
                 width: cellSize,
                 height: cellSize,
                 backgroundColor: bgColor,
-                background: isBlank ? BLANK_PATTERN : bgColor,
+                background: bgPattern,
                 cursor: "pointer",
                 boxSizing: "border-box",
                 // Right wall
@@ -228,6 +262,27 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
           title={`Color ${i + 1}`}
         />
       ))}
+      {/* Hatch color option - doesn't need to be connected */}
+      <button
+        onClick={() => onColorSelect(HATCH_COLOR)}
+        style={{
+          width: "36px",
+          height: "36px",
+          background: HATCH_PATTERN,
+          border:
+            selectedColor === HATCH_COLOR
+              ? "3px solid #2c3e50"
+              : "2px solid #bdc3c7",
+          borderRadius: "4px",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow:
+            selectedColor === HATCH_COLOR
+              ? "0 0 0 2px #3498db"
+              : "none",
+        }}
+        title="Hatch (doesn't need to be connected)"
+      />
     </div>
   );
 };
@@ -239,7 +294,7 @@ interface ControlsProps {
   onHeightChange: (height: number) => void;
   onSolve: () => void;
   onClear: () => void;
-  onFillRandom: () => void;
+  onMazeSetup: () => void;
   solving: boolean;
   solutionStatus: "none" | "found" | "unsatisfiable" | "error";
   errorMessage?: string | null;
@@ -255,7 +310,7 @@ export const Controls: React.FC<ControlsProps> = ({
   onHeightChange,
   onSolve,
   onClear,
-  onFillRandom,
+  onMazeSetup,
   solving,
   solutionStatus,
   errorMessage,
@@ -347,7 +402,7 @@ export const Controls: React.FC<ControlsProps> = ({
           Clear
         </button>
         <button
-          onClick={onFillRandom}
+          onClick={onMazeSetup}
           style={{
             padding: "8px 16px",
             backgroundColor: "#3498db",
@@ -357,7 +412,7 @@ export const Controls: React.FC<ControlsProps> = ({
             cursor: "pointer",
           }}
         >
-          Random Fill
+          Maze Setup
         </button>
       </div>
       {solutionStatus !== "none" && (

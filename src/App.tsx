@@ -15,16 +15,19 @@ function createEmptyGrid(width: number, height: number): ColorGrid {
   };
 }
 
-function createRandomGrid(
+function createMazeSetupGrid(
   width: number,
-  height: number,
-  numColors: number
+  height: number
 ): ColorGrid {
   return {
     width,
     height,
-    colors: Array.from({ length: height }, () =>
-      Array.from({ length: width }, () => Math.floor(Math.random() * numColors))
+    colors: Array.from({ length: height }, (_, row) =>
+      Array.from({ length: width }, () => {
+        if (row === 0) return 0; // Top edge is color 0
+        if (row === height - 1) return 1; // Bottom edge is color 1
+        return 2; // Everything in between is color 2
+      })
     ),
   };
 }
@@ -185,13 +188,13 @@ function App() {
     setSolveTime(null);
   }, [gridWidth, gridHeight]);
 
-  const handleFillRandom = useCallback(() => {
-    setGrid(createRandomGrid(gridWidth, gridHeight, numColors));
+  const handleMazeSetup = useCallback(() => {
+    setGrid(createMazeSetupGrid(gridWidth, gridHeight));
     setSolution(null);
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
-  }, [gridWidth, gridHeight, numColors]);
+  }, [gridWidth, gridHeight]);
 
   return (
     <div className="app">
@@ -211,7 +214,7 @@ function App() {
           onHeightChange={handleHeightChange}
           onSolve={handleSolve}
           onClear={handleClear}
-          onFillRandom={handleFillRandom}
+          onMazeSetup={handleMazeSetup}
           solving={solving}
           solutionStatus={solutionStatus}
           errorMessage={errorMessage}
