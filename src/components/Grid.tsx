@@ -260,32 +260,34 @@ export const Controls: React.FC<ControlsProps> = ({
       <div
         style={{
           display: "flex",
-          gap: "16px",
-          alignItems: "center",
-          marginBottom: "12px",
+          flexDirection: "column",
+          gap: "12px",
+          marginBottom: "16px",
         }}
       >
-        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          Width:
+        <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ minWidth: "50px" }}>Width:</span>
           <input
-            type="number"
+            type="range"
             min="2"
             max="20"
             value={gridWidth}
-            onChange={(e) => onWidthChange(parseInt(e.target.value) || 2)}
-            style={{ width: "60px", padding: "4px" }}
+            onChange={(e) => onWidthChange(parseInt(e.target.value))}
+            style={{ flex: 1, cursor: "pointer" }}
           />
+          <span style={{ minWidth: "24px", textAlign: "right" }}>{gridWidth}</span>
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          Height:
+        <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ minWidth: "50px" }}>Height:</span>
           <input
-            type="number"
+            type="range"
             min="2"
             max="20"
             value={gridHeight}
-            onChange={(e) => onHeightChange(parseInt(e.target.value) || 2)}
-            style={{ width: "60px", padding: "4px" }}
+            onChange={(e) => onHeightChange(parseInt(e.target.value))}
+            style={{ flex: 1, cursor: "pointer" }}
           />
+          <span style={{ minWidth: "24px", textAlign: "right" }}>{gridHeight}</span>
         </label>
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
