@@ -25,6 +25,20 @@ const BLANK_PATTERN = `repeating-linear-gradient(
   #f5f5f5 8px
 )`;
 
+/**
+ * Format solve time for display
+ * @param timeMs Time in milliseconds (or null/undefined)
+ * @returns Formatted string like "1ms" or "1.50s"
+ */
+function formatSolveTime(timeMs: number | null | undefined): string | null {
+  if (timeMs === null || timeMs === undefined) {
+    return null;
+  }
+  return timeMs < 1000 
+    ? `${Math.round(timeMs)}ms` 
+    : `${(timeMs / 1000).toFixed(2)}s`;
+}
+
 interface GridProps {
   grid: ColorGrid;
   solution: GridSolution | null;
@@ -386,10 +400,10 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? `Solution found in ${solveTimeMs !== null && solveTimeMs !== undefined ? (solveTimeMs < 1000 ? `${Math.round(solveTimeMs)}ms` : `${(solveTimeMs / 1000).toFixed(2)}s`) : "unknown time"}! Each color region is now connected.`
+            ? `Solution found in ${formatSolveTime(solveTimeMs) ?? "unknown time"}! Each color region is now connected.`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
-              : `No solution exists${solveTimeMs !== null && solveTimeMs !== undefined ? ` (checked in ${solveTimeMs < 1000 ? `${Math.round(solveTimeMs)}ms` : `${(solveTimeMs / 1000).toFixed(2)}s`})` : ""} - some color regions cannot be connected.`}
+              : `No solution exists${formatSolveTime(solveTimeMs) ? ` (checked in ${formatSolveTime(solveTimeMs)})` : ""} - some color regions cannot be connected.`}
         </div>
       )}
     </div>

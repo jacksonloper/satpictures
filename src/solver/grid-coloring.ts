@@ -780,6 +780,11 @@ interface EncodingContext {
 
 /**
  * Encode the grid coloring problem into a SAT formula
+ * 
+ * @param grid The grid to encode
+ * @param _solverType The solver type (currently unused as only MiniSat is implemented,
+ *                    but parameter is kept for extensibility - new solvers can be added
+ *                    by extending the switch logic in this function)
  */
 function encodeGridColoring(
   grid: ColorGrid,
@@ -1268,7 +1273,8 @@ function extractSolution(
  * 
  * @param grid The grid with colors assigned to cells
  * @param solverType The solver to use (default: "minisat")
- * @param numColors Number of available colors (kept for API compatibility)
+ * @param _numColors Number of available colors (kept for backward API compatibility
+ *                   with solveGridColoring, not currently used in encoding)
  */
 export function solveGridColoringWithSolver(
   grid: ColorGrid,
