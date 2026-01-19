@@ -241,7 +241,8 @@ interface ControlsProps {
   onClear: () => void;
   onFillRandom: () => void;
   solving: boolean;
-  solutionStatus: "none" | "found" | "unsatisfiable";
+  solutionStatus: "none" | "found" | "unsatisfiable" | "error";
+  errorMessage?: string | null;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -254,6 +255,7 @@ export const Controls: React.FC<ControlsProps> = ({
   onFillRandom,
   solving,
   solutionStatus,
+  errorMessage,
 }) => {
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -340,13 +342,24 @@ export const Controls: React.FC<ControlsProps> = ({
             padding: "8px 12px",
             borderRadius: "4px",
             backgroundColor:
-              solutionStatus === "found" ? "#d5f5e3" : "#fadbd8",
-            color: solutionStatus === "found" ? "#1e8449" : "#922b21",
+              solutionStatus === "found"
+                ? "#d5f5e3"
+                : solutionStatus === "error"
+                  ? "#fdebd0"
+                  : "#fadbd8",
+            color:
+              solutionStatus === "found"
+                ? "#1e8449"
+                : solutionStatus === "error"
+                  ? "#9c640c"
+                  : "#922b21",
           }}
         >
           {solutionStatus === "found"
             ? "Solution found! Each color region is now connected."
-            : "No solution exists - some color regions cannot be connected."}
+            : solutionStatus === "error"
+              ? errorMessage || "Unknown error occurred."
+              : "No solution exists - some color regions cannot be connected."}
         </div>
       )}
     </div>

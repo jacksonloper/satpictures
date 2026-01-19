@@ -38,8 +38,9 @@ function App() {
   const [solution, setSolution] = useState<GridSolution | null>(null);
   const [solving, setSolving] = useState(false);
   const [solutionStatus, setSolutionStatus] = useState<
-    "none" | "found" | "unsatisfiable"
+    "none" | "found" | "unsatisfiable" | "error"
   >("none");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -63,6 +64,7 @@ function App() {
       });
       setSolution(null);
       setSolutionStatus("none");
+      setErrorMessage(null);
     },
     [selectedColor]
   );
@@ -76,6 +78,7 @@ function App() {
       });
       setSolution(null);
       setSolutionStatus("none");
+      setErrorMessage(null);
     },
     [selectedColor]
   );
@@ -93,6 +96,7 @@ function App() {
     });
     setSolution(null);
     setSolutionStatus("none");
+    setErrorMessage(null);
   }, []);
 
   const handleHeightChange = useCallback((height: number) => {
@@ -108,6 +112,7 @@ function App() {
     });
     setSolution(null);
     setSolutionStatus("none");
+    setErrorMessage(null);
   }, []);
 
   const handleSolve = useCallback(() => {
@@ -119,6 +124,7 @@ function App() {
     setSolving(true);
     setSolution(null);
     setSolutionStatus("none");
+    setErrorMessage(null);
 
     // Create a new worker for this solve
     const worker = new SolverWorker();
@@ -129,11 +135,16 @@ function App() {
       if (success && solution) {
         setSolution(solution);
         setSolutionStatus("found");
-      } else {
-        if (error) {
-          console.error("Solver error:", error);
-        }
+        setErrorMessage(null);
+      } else if (success && !solution) {
+        // SAT solver returned null (unsatisfiable)
         setSolutionStatus("unsatisfiable");
+        setErrorMessage(null);
+      } else {
+        // Error occurred (e.g., out of memory)
+        setSolutionStatus("error");
+        setErrorMessage(error || "Unknown error");
+        console.error("Solver error:", error);
       }
       setSolving(false);
       worker.terminate();
@@ -142,7 +153,8 @@ function App() {
 
     worker.onerror = (error) => {
       console.error("Worker error:", error);
-      setSolutionStatus("unsatisfiable");
+      setSolutionStatus("error");
+      setErrorMessage("Worker crashed - the grid may be too large to solve");
       setSolving(false);
       worker.terminate();
       workerRef.current = null;
@@ -157,12 +169,14 @@ function App() {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
     setSolution(null);
     setSolutionStatus("none");
+    setErrorMessage(null);
   }, [gridWidth, gridHeight]);
 
   const handleFillRandom = useCallback(() => {
     setGrid(createRandomGrid(gridWidth, gridHeight, numColors));
     setSolution(null);
     setSolutionStatus("none");
+    setErrorMessage(null);
   }, [gridWidth, gridHeight, numColors]);
 
   return (
@@ -186,6 +200,7 @@ function App() {
           onFillRandom={handleFillRandom}
           solving={solving}
           solutionStatus={solutionStatus}
+          errorMessage={errorMessage}
         />
 
         <h3>Colors</h3>

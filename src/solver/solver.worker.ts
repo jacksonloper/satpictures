@@ -16,6 +16,25 @@ export interface SolverResponse {
   error?: string;
 }
 
+/**
+ * Detect if an error is a memory-related error and provide a user-friendly message
+ */
+function formatErrorMessage(error: unknown): string {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  // Detect MiniSat memory errors
+  if (
+    errorMessage.includes("Cannot enlarge memory arrays") ||
+    errorMessage.includes("TOTAL_MEMORY") ||
+    errorMessage.includes("Out of memory") ||
+    errorMessage.includes("abort()")
+  ) {
+    return "Out of memory - the grid is too complex to solve. Try using fewer colors or a smaller grid.";
+  }
+  
+  return errorMessage;
+}
+
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
   const { grid, numColors } = event.data;
 
@@ -30,7 +49,7 @@ self.onmessage = (event: MessageEvent<SolverRequest>) => {
     const response: SolverResponse = {
       success: false,
       solution: null,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: formatErrorMessage(error),
     };
     self.postMessage(response);
   }
