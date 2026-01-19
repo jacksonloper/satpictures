@@ -25,11 +25,12 @@ export interface GridPoint {
 
 /**
  * Grid with colors assigned to each point
+ * null means the cell is blank and the solver should determine its color
  */
 export interface ColorGrid {
   width: number;
   height: number;
-  colors: number[][]; // colors[row][col]
+  colors: (number | null)[][]; // colors[row][col], null = blank
 }
 
 /**
@@ -41,11 +42,12 @@ export interface Edge {
 }
 
 /**
- * Solution: which edges to keep (no wall)
+ * Solution: which edges to keep (no wall) and assigned colors for blank cells
  */
 export interface GridSolution {
   keptEdges: Edge[];
   wallEdges: Edge[];
+  assignedColors: number[][]; // Full grid with all colors determined
 }
 
 /**
@@ -105,12 +107,65 @@ function bitsNeeded(n: number): number {
 }
 
 /**
+ * Create a key for a cell's color variable
+ */
+function colorVarKey(row: number, col: number, color: number): string {
+  return `cellColor_${row},${col}_${color}`;
+}
+
+/**
  * Encode and solve the grid coloring problem
  */
-export function solveGridColoring(grid: ColorGrid): GridSolution | null {
+export function solveGridColoring(
+  grid: ColorGrid,
+  numColors: number = 6
+): GridSolution | null {
   const { width, height, colors } = grid;
   const solver = new MiniSatSolver();
   const builder = new MiniSatFormulaBuilder(solver);
+
+  // ============================================
+  // 0. COLOR ASSIGNMENT VARIABLES FOR BLANK CELLS
+  // ============================================
+  // For blank cells (null), create variables cellColor[row][col][c] meaning "cell has color c"
+  // For fixed cells, we don't need variables - color is known
+  const colorVars = new Map<string, number>(); // Maps colorVarKey to variable number
+
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      if (colors[row][col] === null) {
+        // Blank cell - create variables for each possible color
+        const varsForCell: number[] = [];
+        for (let c = 0; c < numColors; c++) {
+          const varNum = builder.createNamedVariable(colorVarKey(row, col, c));
+          colorVars.set(colorVarKey(row, col, c), varNum);
+          varsForCell.push(varNum);
+        }
+        // Exactly one color must be assigned
+        builder.addExactlyOne(varsForCell);
+      }
+    }
+  }
+
+  // Helper to get color variables for a cell
+  // Returns array of [color, variable] pairs where variable being true means cell has that color
+  // For fixed cells, returns single element with the fixed color
+  function getCellColorInfo(
+    row: number,
+    col: number
+  ): { color: number; var: number | null }[] {
+    const fixedColor = colors[row][col];
+    if (fixedColor !== null) {
+      return [{ color: fixedColor, var: null }]; // Fixed color, no variable
+    }
+    // Blank cell - return all color options with their variables
+    const result: { color: number; var: number | null }[] = [];
+    for (let c = 0; c < numColors; c++) {
+      const v = colorVars.get(colorVarKey(row, col, c))!;
+      result.push({ color: c, var: v });
+    }
+    return result;
+  }
 
   // Collect all edges and create edge variables
   const edgeVars = new Map<string, number>();
@@ -137,28 +192,61 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
     }
   }
 
-  // Group vertices by color
-  const colorGroups = new Map<number, GridPoint[]>();
-  for (let row = 0; row < height; row++) {
-    for (let col = 0; col < width; col++) {
-      const c = colors[row][col];
-      if (!colorGroups.has(c)) {
-        colorGroups.set(c, []);
+  // ============================================
+  // 1. DISCONNECTION BETWEEN DIFFERENT COLORS
+  // ============================================
+  // For every neighboring pair {u,v}, if they have different colors, forbid the edge
+  // This is conditional on the color assignments for blank cells
+  for (const edge of allEdges) {
+    const uColors = getCellColorInfo(edge.u.row, edge.u.col);
+    const vColors = getCellColorInfo(edge.v.row, edge.v.col);
+    const edgeVar = edgeVars.get(edgeKey(edge.u, edge.v))!;
+
+    // For each combination of colors where u and v have different colors,
+    // add constraint: if u has color cU and v has color cV and cU != cV, then edge is blocked
+    for (const uInfo of uColors) {
+      for (const vInfo of vColors) {
+        if (uInfo.color !== vInfo.color) {
+          // Constraint: NOT(u has cU) OR NOT(v has cV) OR NOT(edge kept)
+          // i.e., if both colors are assigned and they differ, block the edge
+          const clause: number[] = [-edgeVar];
+          if (uInfo.var !== null) clause.push(-uInfo.var);
+          if (vInfo.var !== null) clause.push(-vInfo.var);
+          builder.solver.addClause(clause);
+        }
       }
-      colorGroups.get(c)!.push({ row, col });
     }
   }
 
   // ============================================
-  // 1. DISCONNECTION BETWEEN DIFFERENT COLORS
+  // 1b. DEGREE CONSTRAINTS (1-3 edges per cell)
   // ============================================
-  // For every neighboring pair {u,v} where c(u) != c(v), forbid the edge: ¬x_uv
-  for (const edge of allEdges) {
-    const colorU = colors[edge.u.row][edge.u.col];
-    const colorV = colors[edge.v.row][edge.v.col];
-    if (colorU !== colorV) {
-      const edgeVar = edgeVars.get(edgeKey(edge.u, edge.v))!;
-      builder.addUnit(-edgeVar); // Force edge to be false (wall)
+  // Each cell must have between 1 and 3 edges (passages)
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      // Get all edge variables incident to this cell
+      const incidentEdges: number[] = [];
+      const neighbors = getNeighbors({ row, col }, width, height);
+      for (const n of neighbors) {
+        const key = edgeKey({ row, col }, n);
+        const edgeVar = edgeVars.get(key);
+        if (edgeVar !== undefined) {
+          incidentEdges.push(edgeVar);
+        }
+      }
+
+      if (incidentEdges.length > 0) {
+        // At least 1 edge: OR of all incident edges
+        builder.addOr(incidentEdges);
+
+        // At most 3 edges: for each subset of 4 edges, at least one must be false
+        // This is equivalent to: NOT(all 4 true) for each 4-combination
+        if (incidentEdges.length >= 4) {
+          // Only corner cells can't have 4 edges, but interior cells have exactly 4
+          // If all 4 are present, add constraint that at least one must be false
+          builder.solver.addClause(incidentEdges.map((e) => -e)); // At least one false = at most 3 true
+        }
+      }
     }
   }
 
@@ -166,54 +254,167 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
   // 2. CONNECTIVITY WITHIN EACH COLOR
   // ============================================
   // For each color, encode spanning tree constraints
+  // With blank cells, we need conditional constraints based on color assignment
 
-  for (const [color, vertices] of colorGroups) {
-    if (vertices.length === 1) {
-      // Single vertex: no connectivity constraints needed
+  for (let color = 0; color < numColors; color++) {
+    // Find all vertices that could have this color (fixed to this color OR blank)
+    const potentialVertices: GridPoint[] = [];
+    const fixedVertices: GridPoint[] = [];
+
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const cellColor = colors[row][col];
+        if (cellColor === color) {
+          potentialVertices.push({ row, col });
+          fixedVertices.push({ row, col });
+        } else if (cellColor === null) {
+          potentialVertices.push({ row, col });
+        }
+      }
+    }
+
+    if (potentialVertices.length <= 1) {
+      // At most one vertex can have this color - trivially connected
       continue;
     }
 
-    // 2a) Choose root: lexicographically smallest vertex
-    const root = vertices.reduce((min, v) => {
-      if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
-        return v;
+    // Helper to get membership variable for a vertex and this color
+    // Returns the variable, or null if the vertex is fixed to this color (always true)
+    function getMemberVar(v: GridPoint): number | null {
+      const cellColor = colors[v.row][v.col];
+      if (cellColor === color) {
+        return null; // Fixed to this color - always member
       }
-      return min;
-    }, vertices[0]);
+      // Must be blank - return the color variable
+      return colorVars.get(colorVarKey(v.row, v.col, color))!;
+    }
 
-    // Find all same-color neighbors for each vertex
-    const sameColorNeighbors = new Map<string, GridPoint[]>();
-    for (const v of vertices) {
+    // Sort potential vertices lexicographically
+    potentialVertices.sort((a, b) => {
+      if (a.row !== b.row) return a.row - b.row;
+      return a.col - b.col;
+    });
+
+    // Create a set of potential vertices for quick lookup
+    const potentialSet = new Set(
+      potentialVertices.map((v) => `${v.row},${v.col}`)
+    );
+
+    // Find potential same-color neighbors for each vertex
+    const potentialNeighbors = new Map<string, GridPoint[]>();
+    for (const v of potentialVertices) {
       const key = `${v.row},${v.col}`;
-      const neighbors = getNeighbors(v, width, height).filter(
-        (n) => colors[n.row][n.col] === color
+      const neighbors = getNeighbors(v, width, height).filter((n) =>
+        potentialSet.has(`${n.row},${n.col}`)
       );
-      sameColorNeighbors.set(key, neighbors);
+      potentialNeighbors.set(key, neighbors);
+    }
+
+    // =============================================
+    // DYNAMIC ROOT SELECTION
+    // =============================================
+    // For colors with no fixed vertices, the root is the lex-smallest member.
+    // Create "isRoot" variable for each potential vertex.
+    // isRoot[v] = true iff v is a member AND all lex-smaller vertices are not members
+    const hasFixedRoot = fixedVertices.length > 0;
+    const fixedRoot = hasFixedRoot
+      ? fixedVertices.reduce((min, v) => {
+          if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
+            return v;
+          }
+          return min;
+        }, fixedVertices[0])
+      : null;
+
+    // For dynamic roots, create isRoot variables
+    const isRootVars = new Map<string, number>();
+    if (!hasFixedRoot) {
+      // For each vertex, isRoot[v] means v is the root for this color
+      // isRoot[v] ↔ member[v] ∧ ∀u<v: ¬member[u]
+      for (let i = 0; i < potentialVertices.length; i++) {
+        const v = potentialVertices[i];
+        const vKey = `${v.row},${v.col}`;
+        const isRootVar = builder.createNamedVariable(
+          `isRoot_${color}_${v.row},${v.col}`
+        );
+        isRootVars.set(vKey, isRootVar);
+
+        const vMember = getMemberVar(v)!; // All potential vertices are blank here
+
+        if (i === 0) {
+          // First vertex: isRoot ↔ member
+          // isRoot → member
+          builder.addImplies(isRootVar, vMember);
+          // member → isRoot
+          builder.addImplies(vMember, isRootVar);
+        } else {
+          // isRoot[v] ↔ member[v] ∧ ¬member[u0] ∧ ¬member[u1] ∧ ...
+          // where u0, u1, ... are all vertices before v
+
+          // Collect all previous member variables
+          const prevMembers: number[] = [];
+          for (let j = 0; j < i; j++) {
+            const u = potentialVertices[j];
+            const uMember = getMemberVar(u)!;
+            prevMembers.push(uMember);
+          }
+
+          // isRoot → member[v]
+          builder.addImplies(isRootVar, vMember);
+
+          // isRoot → ¬member[u] for all previous u
+          for (const uMember of prevMembers) {
+            builder.solver.addClause([-isRootVar, -uMember]);
+          }
+
+          // (member[v] ∧ ¬member[u0] ∧ ...) → isRoot
+          // Contrapositive: ¬isRoot → (¬member[v] ∨ member[u0] ∨ ...)
+          builder.solver.addClause([isRootVar, -vMember, ...prevMembers]);
+        }
+      }
+    }
+
+    // Helper to check if a vertex is the root
+    function isRoot(v: GridPoint): boolean | number {
+      if (hasFixedRoot) {
+        return v.row === fixedRoot!.row && v.col === fixedRoot!.col;
+      }
+      // Return the isRoot variable
+      return isRootVars.get(`${v.row},${v.col}`)!;
     }
 
     // 2b) Parent (tree) variables
-    // p^k_{u→v} = true means u is the parent of v in color k's spanning tree
     const parentVars = new Map<string, number>();
 
-    for (const v of vertices) {
-      const neighbors = sameColorNeighbors.get(`${v.row},${v.col}`)!;
+    for (const v of potentialVertices) {
+      const neighbors = potentialNeighbors.get(`${v.row},${v.col}`)!;
       for (const u of neighbors) {
-        // Direction: u is parent of v
         const pKey = parentKey(color, u, v);
         const pVar = builder.createNamedVariable(pKey);
         parentVars.set(pKey, pVar);
 
-        // Parent implies edge exists: ¬p^k_{u→v} ∨ x_uv
+        // Parent implies edge exists: p → edge
         const eKey = edgeKey(u, v);
         const edgeVar = edgeVars.get(eKey)!;
         builder.addImplies(pVar, edgeVar);
+
+        // Parent implies both vertices have this color
+        const uMember = getMemberVar(u);
+        const vMember = getMemberVar(v);
+        if (uMember !== null) {
+          builder.addImplies(pVar, uMember); // p → u has color
+        }
+        if (vMember !== null) {
+          builder.addImplies(pVar, vMember); // p → v has color
+        }
       }
     }
 
-    // 2c) Exactly one parent per non-root vertex
-    for (const v of vertices) {
-      const isRoot = v.row === root.row && v.col === root.col;
-      const neighbors = sameColorNeighbors.get(`${v.row},${v.col}`)!;
+    // 2c) Parent constraints for each vertex
+    for (const v of potentialVertices) {
+      const vIsRoot = isRoot(v);
+      const neighbors = potentialNeighbors.get(`${v.row},${v.col}`)!;
+      const vMember = getMemberVar(v);
 
       // Get all parent variables where some u is parent of v
       const parentVarsForV: number[] = [];
@@ -225,47 +426,99 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
         }
       }
 
-      if (isRoot) {
-        // Root has no parent: for all same-color neighbors u: ¬p^k_{u→r_k}
+      if (typeof vIsRoot === "boolean" && vIsRoot) {
+        // Fixed root - has no parent
         for (const pVar of parentVarsForV) {
           builder.addUnit(-pVar);
         }
-      } else {
-        // Non-root: exactly one parent
+      } else if (typeof vIsRoot === "boolean" && !vIsRoot) {
+        // Fixed non-root with fixed color - must have exactly one parent
+        // At-most-one parent
+        if (parentVarsForV.length > 1) {
+          builder.addAtMostOne(parentVarsForV);
+        }
+
+        // At-least-one parent (since it's fixed to this color)
         if (parentVarsForV.length > 0) {
-          builder.addExactlyOne(parentVarsForV);
+          if (vMember !== null) {
+            builder.solver.addClause([-vMember, ...parentVarsForV]);
+          } else {
+            builder.addOr(parentVarsForV);
+          }
         } else {
-          // No possible parents but not root - this means disconnection is forced
-          // which would make the problem unsatisfiable
-          // This can happen if a vertex of this color is isolated from others
-          return null; // Early exit - infeasible
+          if (vMember === null) {
+            return null; // Fixed vertex isolated
+          }
+          builder.addUnit(-vMember);
+        }
+      } else {
+        // Dynamic root case - vIsRoot is a variable
+        const isRootVar = vIsRoot as number;
+
+        // At-most-one parent (always applies)
+        if (parentVarsForV.length > 1) {
+          builder.addAtMostOne(parentVarsForV);
+        }
+
+        // If root, no parent: isRoot → ¬p for all p
+        for (const pVar of parentVarsForV) {
+          builder.solver.addClause([-isRootVar, -pVar]);
+        }
+
+        // If member and not root, must have parent: (member ∧ ¬isRoot) → OR(parents)
+        // i.e., ¬member ∨ isRoot ∨ OR(parents)
+        if (parentVarsForV.length > 0) {
+          if (vMember !== null) {
+            builder.solver.addClause([-vMember, isRootVar, ...parentVarsForV]);
+          } else {
+            // Fixed member, must be root or have parent
+            builder.solver.addClause([isRootVar, ...parentVarsForV]);
+          }
+        } else {
+          // No potential parents - must be root if member
+          if (vMember !== null) {
+            // member → isRoot
+            builder.addImplies(vMember, isRootVar);
+          } else {
+            // Fixed member with no parents - must be root
+            builder.addUnit(isRootVar);
+          }
         }
       }
     }
 
     // 2d) Level variables for cycle elimination
-    const numBits = bitsNeeded(vertices.length);
+    const numBits = bitsNeeded(potentialVertices.length);
     const levelVars = new Map<string, number[]>();
 
-    for (const v of vertices) {
+    for (const v of potentialVertices) {
       const lKey = levelKey(color, v);
       const bits = createBinaryIntVariables(builder, lKey, numBits);
       levelVars.set(`${v.row},${v.col}`, bits);
     }
 
-    // Fix root level to 0
-    const rootBits = levelVars.get(`${root.row},${root.col}`)!;
-    for (const bit of rootBits) {
-      builder.addUnit(-bit); // All bits = 0
+    // Root has level 0: for fixed root, set directly; for dynamic root, conditional
+    if (hasFixedRoot) {
+      const rootBits = levelVars.get(`${fixedRoot!.row},${fixedRoot!.col}`)!;
+      for (const bit of rootBits) {
+        builder.addUnit(-bit);
+      }
+    } else {
+      // For dynamic roots: isRoot[v] → level[v] = 0
+      for (const v of potentialVertices) {
+        const vKey = `${v.row},${v.col}`;
+        const isRootVar = isRootVars.get(vKey)!;
+        const vBits = levelVars.get(vKey)!;
+        for (const bit of vBits) {
+          builder.solver.addClause([-isRootVar, -bit]); // isRoot → bit = 0
+        }
+      }
     }
 
-    // For every parent relation: p^k_{u→v} → (ℓ^k_u < ℓ^k_v)
-    // This is: ¬p ∨ (level_u < level_v)
-    // We encode this as: if p is true, then level_u < level_v must hold
-
+    // Level ordering constraints
     let auxCounter = 0;
-    for (const v of vertices) {
-      const neighbors = sameColorNeighbors.get(`${v.row},${v.col}`)!;
+    for (const v of potentialVertices) {
+      const neighbors = potentialNeighbors.get(`${v.row},${v.col}`)!;
       const vBits = levelVars.get(`${v.row},${v.col}`)!;
 
       for (const u of neighbors) {
@@ -274,33 +527,7 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
         if (pVar === undefined) continue;
 
         const uBits = levelVars.get(`${u.row},${u.col}`)!;
-
-        // Encode: p → (level_u < level_v)
-        // This is equivalent to: ¬p ∨ (level_u < level_v)
-        //
-        // We create a "guard" variable g such that:
-        // - If p is false, g can be anything
-        // - If p is true, we need level_u < level_v
-        //
-        // Approach: Create auxiliary bits that equal level_u+1 when p is true,
-        // and require these to be ≤ level_v
-        //
-        // Actually simpler: use implication encoding
-        // Create a variable lt that represents (level_u < level_v)
-        // Then add clause: ¬p ∨ lt
-
-        // Create a fresh set of comparison auxiliary variables
         const auxPrefix = `cmp_${color}_${u.row}${u.col}_${v.row}${v.col}_${auxCounter++}`;
-
-        // We'll encode: if p, then level_u < level_v
-        // Using conditional less-than encoding
-
-        // Method: encode p → (level_u < level_v) clause by clause
-        // For strict inequality a < b with binary encoding:
-        //
-        // We'll create fresh variables for this specific constraint
-
-        // Create temp builder context for the comparison
         const n = numBits;
 
         // eq[i] = (uBits[i] ↔ vBits[i])
@@ -311,42 +538,33 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
           const eqVar = builder.createNamedVariable(`${auxPrefix}_eq_${i}`);
           eq.push(eqVar);
 
-          // eqVar ↔ (uBits[i] ↔ vBits[i])
           builder.solver.addClause([-eqVar, -uBits[i], vBits[i]]);
           builder.solver.addClause([-eqVar, uBits[i], -vBits[i]]);
           builder.solver.addClause([eqVar, uBits[i], vBits[i]]);
           builder.solver.addClause([eqVar, -uBits[i], -vBits[i]]);
         }
 
-        // ltSoFar[i] = (u[MSB:i] < v[MSB:i])
         for (let i = 0; i < n; i++) {
           lt.push(builder.createNamedVariable(`${auxPrefix}_lt_${i}`));
         }
 
-        // Build comparison from MSB to LSB
         for (let bitIdx = n - 1; bitIdx >= 0; bitIdx--) {
           const ltVar = lt[bitIdx];
 
           if (bitIdx === n - 1) {
-            // MSB: lt = ¬u ∧ v (u=0 and v=1 means u<v at this bit)
             builder.solver.addClause([-ltVar, -uBits[bitIdx]]);
             builder.solver.addClause([-ltVar, vBits[bitIdx]]);
             builder.solver.addClause([ltVar, uBits[bitIdx], -vBits[bitIdx]]);
           } else {
-            // lt[i] = lt[i+1] ∨ (prefixEq ∧ ¬u[i] ∧ v[i])
             const prevLt = lt[bitIdx + 1];
-
-            // Compute prefix equality from MSB down to bitIdx+1
             const prefixEq = builder.createNamedVariable(
               `${auxPrefix}_prefixEq_${bitIdx}`
             );
 
             if (bitIdx === n - 2) {
-              // Only MSB
               builder.solver.addClause([-prefixEq, eq[n - 1]]);
               builder.solver.addClause([prefixEq, -eq[n - 1]]);
             } else {
-              // Conjunction with previous prefix
               const prevPrefix = builder.getVariable(
                 `${auxPrefix}_prefixEq_${bitIdx + 1}`
               )!;
@@ -355,7 +573,6 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
               builder.solver.addClause([prefixEq, -prevPrefix, -eq[bitIdx + 1]]);
             }
 
-            // strictHere = prefixEq ∧ ¬u[i] ∧ v[i]
             const strictHere = builder.createNamedVariable(
               `${auxPrefix}_strict_${bitIdx}`
             );
@@ -369,15 +586,12 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
               -vBits[bitIdx],
             ]);
 
-            // lt[i] ↔ (prevLt ∨ strictHere)
             builder.solver.addClause([-ltVar, prevLt, strictHere]);
             builder.solver.addClause([ltVar, -prevLt]);
             builder.solver.addClause([ltVar, -strictHere]);
           }
         }
 
-        // The overall less-than result is lt[0]
-        // Now add: p → lt[0], i.e., ¬p ∨ lt[0]
         builder.solver.addClause([-pVar, lt[0]]);
       }
     }
@@ -392,7 +606,7 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
     return null;
   }
 
-  // Extract solution
+  // Extract solution: edges and assigned colors
   const keptEdges: Edge[] = [];
   const wallEdges: Edge[] = [];
 
@@ -408,7 +622,30 @@ export function solveGridColoring(grid: ColorGrid): GridSolution | null {
     }
   }
 
-  return { keptEdges, wallEdges };
+  // Extract assigned colors
+  const assignedColors: number[][] = Array.from({ length: height }, () =>
+    Array.from({ length: width }, () => 0)
+  );
+
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const fixedColor = colors[row][col];
+      if (fixedColor !== null) {
+        assignedColors[row][col] = fixedColor;
+      } else {
+        // Find which color variable is true
+        for (let c = 0; c < numColors; c++) {
+          const varNum = colorVars.get(colorVarKey(row, col, c));
+          if (varNum !== undefined && result.assignment.get(varNum)) {
+            assignedColors[row][col] = c;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return { keptEdges, wallEdges, assignedColors };
 }
 
 /**

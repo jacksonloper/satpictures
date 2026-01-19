@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, Grid } from "./components";
-import { solveGridColoring } from "./solver";
-import type { ColorGrid, GridSolution } from "./solver";
+import type { ColorGrid, GridSolution, SolverRequest, SolverResponse } from "./solver";
+import SolverWorker from "./solver/solver.worker?worker";
 import "./App.css";
 
 function createEmptyGrid(width: number, height: number): ColorGrid {
@@ -9,7 +9,7 @@ function createEmptyGrid(width: number, height: number): ColorGrid {
     width,
     height,
     colors: Array.from({ length: height }, () =>
-      Array.from({ length: width }, () => 0)
+      Array.from({ length: width }, () => null)
     ),
   };
 }
@@ -34,13 +34,25 @@ function App() {
   const [grid, setGrid] = useState<ColorGrid>(() =>
     createEmptyGrid(gridWidth, gridHeight)
   );
-  const [selectedColor, setSelectedColor] = useState(0);
+  const [selectedColor, setSelectedColor] = useState<number | null>(null);
   const [solution, setSolution] = useState<GridSolution | null>(null);
   const [solving, setSolving] = useState(false);
   const [solutionStatus, setSolutionStatus] = useState<
     "none" | "found" | "unsatisfiable"
   >("none");
   const numColors = 6;
+
+  // Web Worker for non-blocking solving
+  const workerRef = useRef<Worker | null>(null);
+
+  // Cleanup worker on unmount
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+      }
+    };
+  }, []);
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
@@ -74,7 +86,7 @@ function App() {
     setGrid((prev) => {
       const newColors = Array.from({ length: prev.height }, (_, row) =>
         Array.from({ length: clampedWidth }, (_, col) =>
-          col < prev.width ? prev.colors[row][col] : 0
+          col < prev.width ? prev.colors[row][col] : null
         )
       );
       return { width: clampedWidth, height: prev.height, colors: newColors };
@@ -89,7 +101,7 @@ function App() {
     setGrid((prev) => {
       const newColors = Array.from({ length: clampedHeight }, (_, row) =>
         Array.from({ length: prev.width }, (_, col) =>
-          row < prev.height ? prev.colors[row][col] : 0
+          row < prev.height ? prev.colors[row][col] : null
         )
       );
       return { width: prev.width, height: clampedHeight, colors: newColors };
@@ -99,26 +111,47 @@ function App() {
   }, []);
 
   const handleSolve = useCallback(() => {
+    // Terminate any existing worker
+    if (workerRef.current) {
+      workerRef.current.terminate();
+    }
+
     setSolving(true);
     setSolution(null);
+    setSolutionStatus("none");
 
-    // Use setTimeout to allow UI to update before heavy computation
-    setTimeout(() => {
-      try {
-        const result = solveGridColoring(grid);
-        if (result) {
-          setSolution(result);
-          setSolutionStatus("found");
-        } else {
-          setSolutionStatus("unsatisfiable");
+    // Create a new worker for this solve
+    const worker = new SolverWorker();
+    workerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<SolverResponse>) => {
+      const { success, solution, error } = event.data;
+      if (success && solution) {
+        setSolution(solution);
+        setSolutionStatus("found");
+      } else {
+        if (error) {
+          console.error("Solver error:", error);
         }
-      } catch (error) {
-        console.error("Solver error:", error);
         setSolutionStatus("unsatisfiable");
       }
       setSolving(false);
-    }, 10);
-  }, [grid]);
+      worker.terminate();
+      workerRef.current = null;
+    };
+
+    worker.onerror = (error) => {
+      console.error("Worker error:", error);
+      setSolutionStatus("unsatisfiable");
+      setSolving(false);
+      worker.terminate();
+      workerRef.current = null;
+    };
+
+    // Send the solve request
+    const request: SolverRequest = { grid, numColors };
+    worker.postMessage(request);
+  }, [grid, numColors]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -136,44 +169,42 @@ function App() {
     <div className="app">
       <h1>Grid Coloring Solver</h1>
       <p className="description">
-        Paint colors on the grid, then click Solve to find a maze where each
-        color forms a single connected region. Walls appear between different
-        colors, and within each color the solver ensures all cells are connected.
+        Set your grid size below, then paint some cells with colors (or leave them blank
+        for the solver to decide). Click Solve to find a valid coloring where each
+        color forms a single connected region.
       </p>
 
-      <div className="main-content">
-        <div className="controls-panel">
-          <h3>Colors</h3>
-          <ColorPalette
-            selectedColor={selectedColor}
-            onColorSelect={setSelectedColor}
-            numColors={numColors}
-          />
+      <div className="controls-panel">
+        <h3>Grid Size</h3>
+        <Controls
+          gridWidth={gridWidth}
+          gridHeight={gridHeight}
+          onWidthChange={handleWidthChange}
+          onHeightChange={handleHeightChange}
+          onSolve={handleSolve}
+          onClear={handleClear}
+          onFillRandom={handleFillRandom}
+          solving={solving}
+          solutionStatus={solutionStatus}
+        />
 
-          <h3>Grid Settings</h3>
-          <Controls
-            gridWidth={gridWidth}
-            gridHeight={gridHeight}
-            onWidthChange={handleWidthChange}
-            onHeightChange={handleHeightChange}
-            onSolve={handleSolve}
-            onClear={handleClear}
-            onFillRandom={handleFillRandom}
-            solving={solving}
-            solutionStatus={solutionStatus}
-          />
-        </div>
+        <h3>Colors</h3>
+        <ColorPalette
+          selectedColor={selectedColor}
+          onColorSelect={setSelectedColor}
+          numColors={numColors}
+        />
+      </div>
 
-        <div className="grid-panel">
-          <Grid
-            grid={grid}
-            solution={solution}
-            selectedColor={selectedColor}
-            onCellClick={handleCellClick}
-            onCellDrag={handleCellDrag}
-            cellSize={40}
-          />
-        </div>
+      <div className="grid-panel">
+        <Grid
+          grid={grid}
+          solution={solution}
+          selectedColor={selectedColor}
+          onCellClick={handleCellClick}
+          onCellDrag={handleCellDrag}
+          cellSize={40}
+        />
       </div>
     </div>
   );

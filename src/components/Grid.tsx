@@ -15,10 +15,20 @@ const COLORS = [
   "#00bcd4", // cyan
 ];
 
+// Blank cell appearance
+const BLANK_COLOR = "#f5f5f5";
+const BLANK_PATTERN = `repeating-linear-gradient(
+  45deg,
+  #e0e0e0,
+  #e0e0e0 2px,
+  #f5f5f5 2px,
+  #f5f5f5 8px
+)`;
+
 interface GridProps {
   grid: ColorGrid;
   solution: GridSolution | null;
-  selectedColor: number;
+  selectedColor: number | null;
   onCellClick: (row: number, col: number) => void;
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
@@ -74,18 +84,11 @@ export const Grid: React.FC<GridProps> = ({
   const hasWall = useCallback(
     (r1: number, c1: number, r2: number, c2: number): boolean => {
       if (!solution) {
-        // No solution yet - show walls between different colors
-        if (
-          r2 >= 0 &&
-          r2 < grid.height &&
-          c2 >= 0 &&
-          c2 < grid.width
-        ) {
-          return grid.colors[r1][c1] !== grid.colors[r2][c2];
-        }
-        return true; // Edge of grid
+        // No solution yet - don't show any internal walls
+        // Only show walls at grid boundary
+        return !(r2 >= 0 && r2 < grid.height && c2 >= 0 && c2 < grid.width);
       }
-      // With solution - check if edge is kept
+      // With solution - check if edge is kept (no wall) or blocked (wall)
       const key = `${r1},${c1}-${r2},${c2}`;
       return !keptEdgeSet.has(key);
     },
@@ -113,8 +116,16 @@ export const Grid: React.FC<GridProps> = ({
       {/* Render cells */}
       {Array.from({ length: grid.height }, (_, row) =>
         Array.from({ length: grid.width }, (_, col) => {
-          const color = grid.colors[row][col];
-          const bgColor = COLORS[color % COLORS.length];
+          const inputColor = grid.colors[row][col];
+          // Use assigned color from solution if available, otherwise use input
+          const displayColor =
+            solution && inputColor === null
+              ? solution.assignedColors[row][col]
+              : inputColor;
+          const isBlank = inputColor === null && !solution;
+          const bgColor = isBlank
+            ? BLANK_COLOR
+            : COLORS[(displayColor ?? 0) % COLORS.length];
 
           // Check walls on each side
           const wallRight = col < grid.width - 1 && hasWall(row, col, row, col + 1);
@@ -132,6 +143,7 @@ export const Grid: React.FC<GridProps> = ({
                 width: cellSize,
                 height: cellSize,
                 backgroundColor: bgColor,
+                background: isBlank ? BLANK_PATTERN : bgColor,
                 cursor: "pointer",
                 boxSizing: "border-box",
                 // Right wall
@@ -152,8 +164,8 @@ export const Grid: React.FC<GridProps> = ({
 };
 
 interface ColorPaletteProps {
-  selectedColor: number;
-  onColorSelect: (color: number) => void;
+  selectedColor: number | null; // null means blank/eraser
+  onColorSelect: (color: number | null) => void;
   numColors?: number;
 }
 
@@ -171,6 +183,28 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
         marginBottom: "16px",
       }}
     >
+      {/* Blank/eraser option */}
+      <button
+        onClick={() => onColorSelect(null)}
+        style={{
+          width: "36px",
+          height: "36px",
+          background: BLANK_PATTERN,
+          border:
+            selectedColor === null
+              ? "3px solid #2c3e50"
+              : "2px solid #bdc3c7",
+          borderRadius: "4px",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow:
+            selectedColor === null
+              ? "0 0 0 2px #3498db"
+              : "none",
+        }}
+        title="Blank (eraser)"
+      />
+      {/* Color options */}
       {Array.from({ length: numColors }, (_, i) => (
         <button
           key={i}
@@ -226,32 +260,34 @@ export const Controls: React.FC<ControlsProps> = ({
       <div
         style={{
           display: "flex",
-          gap: "16px",
-          alignItems: "center",
-          marginBottom: "12px",
+          flexDirection: "column",
+          gap: "12px",
+          marginBottom: "16px",
         }}
       >
-        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          Width:
+        <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ minWidth: "50px" }}>Width:</span>
           <input
-            type="number"
+            type="range"
             min="2"
             max="20"
             value={gridWidth}
-            onChange={(e) => onWidthChange(parseInt(e.target.value) || 2)}
-            style={{ width: "60px", padding: "4px" }}
+            onChange={(e) => onWidthChange(parseInt(e.target.value))}
+            style={{ flex: 1, cursor: "pointer" }}
           />
+          <span style={{ minWidth: "24px", textAlign: "right" }}>{gridWidth}</span>
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          Height:
+        <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ minWidth: "50px" }}>Height:</span>
           <input
-            type="number"
+            type="range"
             min="2"
             max="20"
             value={gridHeight}
-            onChange={(e) => onHeightChange(parseInt(e.target.value) || 2)}
-            style={{ width: "60px", padding: "4px" }}
+            onChange={(e) => onHeightChange(parseInt(e.target.value))}
+            style={{ flex: 1, cursor: "pointer" }}
           />
+          <span style={{ minWidth: "24px", textAlign: "right" }}>{gridHeight}</span>
         </label>
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>

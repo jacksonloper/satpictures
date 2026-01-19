@@ -12,3 +12,5 @@ export {
   type GridPoint,
   type GridSolution,
 } from "./grid-coloring";
+
+export type { SolverRequest, SolverResponse } from "./solver.worker";
