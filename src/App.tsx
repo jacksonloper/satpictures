@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, Grid } from "./components";
-import { solveGridColoring } from "./solver";
-import type { ColorGrid, GridSolution } from "./solver";
+import type { ColorGrid, GridSolution, SolverRequest, SolverResponse } from "./solver";
+import SolverWorker from "./solver/solver.worker?worker";
 import "./App.css";
 
 function createEmptyGrid(width: number, height: number): ColorGrid {
@@ -41,6 +41,18 @@ function App() {
     "none" | "found" | "unsatisfiable"
   >("none");
   const numColors = 6;
+
+  // Web Worker for non-blocking solving
+  const workerRef = useRef<Worker | null>(null);
+
+  // Cleanup worker on unmount
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+      }
+    };
+  }, []);
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
@@ -99,25 +111,46 @@ function App() {
   }, []);
 
   const handleSolve = useCallback(() => {
+    // Terminate any existing worker
+    if (workerRef.current) {
+      workerRef.current.terminate();
+    }
+
     setSolving(true);
     setSolution(null);
+    setSolutionStatus("none");
 
-    // Use setTimeout to allow UI to update before heavy computation
-    setTimeout(() => {
-      try {
-        const result = solveGridColoring(grid, numColors);
-        if (result) {
-          setSolution(result);
-          setSolutionStatus("found");
-        } else {
-          setSolutionStatus("unsatisfiable");
+    // Create a new worker for this solve
+    const worker = new SolverWorker();
+    workerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<SolverResponse>) => {
+      const { success, solution, error } = event.data;
+      if (success && solution) {
+        setSolution(solution);
+        setSolutionStatus("found");
+      } else {
+        if (error) {
+          console.error("Solver error:", error);
         }
-      } catch (error) {
-        console.error("Solver error:", error);
         setSolutionStatus("unsatisfiable");
       }
       setSolving(false);
-    }, 10);
+      worker.terminate();
+      workerRef.current = null;
+    };
+
+    worker.onerror = (error) => {
+      console.error("Worker error:", error);
+      setSolutionStatus("unsatisfiable");
+      setSolving(false);
+      worker.terminate();
+      workerRef.current = null;
+    };
+
+    // Send the solve request
+    const request: SolverRequest = { grid, numColors };
+    worker.postMessage(request);
   }, [grid, numColors]);
 
   const handleClear = useCallback(() => {
@@ -136,21 +169,14 @@ function App() {
     <div className="app">
       <h1>Grid Coloring Solver</h1>
       <p className="description">
-        Paint colors on the grid, then click Solve to find a maze where each
-        color forms a single connected region. Walls appear between different
-        colors, and within each color the solver ensures all cells are connected.
+        Set your grid size below, then paint some cells with colors (or leave them blank
+        for the solver to decide). Click Solve to find a valid coloring where each
+        color forms a single connected region.
       </p>
 
       <div className="main-content">
         <div className="controls-panel">
-          <h3>Colors</h3>
-          <ColorPalette
-            selectedColor={selectedColor}
-            onColorSelect={setSelectedColor}
-            numColors={numColors}
-          />
-
-          <h3>Grid Settings</h3>
+          <h3>Grid Size</h3>
           <Controls
             gridWidth={gridWidth}
             gridHeight={gridHeight}
@@ -161,6 +187,13 @@ function App() {
             onFillRandom={handleFillRandom}
             solving={solving}
             solutionStatus={solutionStatus}
+          />
+
+          <h3>Colors</h3>
+          <ColorPalette
+            selectedColor={selectedColor}
+            onColorSelect={setSelectedColor}
+            numColors={numColors}
           />
         </div>
 
