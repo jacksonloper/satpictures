@@ -1,0 +1,320 @@
+import React, { useCallback, useMemo, useState } from "react";
+import type { ColorGrid, GridSolution } from "../solver";
+
+// Predefined color palette
+const COLORS = [
+  "#e74c3c", // red
+  "#3498db", // blue
+  "#2ecc71", // green
+  "#f39c12", // orange
+  "#9b59b6", // purple
+  "#1abc9c", // teal
+  "#e91e63", // pink
+  "#795548", // brown
+  "#607d8b", // gray-blue
+  "#00bcd4", // cyan
+];
+
+interface GridProps {
+  grid: ColorGrid;
+  solution: GridSolution | null;
+  selectedColor: number;
+  onCellClick: (row: number, col: number) => void;
+  onCellDrag: (row: number, col: number) => void;
+  cellSize?: number;
+}
+
+export const Grid: React.FC<GridProps> = ({
+  grid,
+  solution,
+  selectedColor: _selectedColor,
+  onCellClick,
+  onCellDrag,
+  cellSize = 40,
+}) => {
+  // selectedColor is used by parent for painting, not needed here directly
+  void _selectedColor;
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Create a set of kept edge keys for quick lookup
+  const keptEdgeSet = useMemo(() => {
+    const set = new Set<string>();
+    if (solution) {
+      for (const edge of solution.keptEdges) {
+        // Store both directions for easy lookup
+        set.add(`${edge.u.row},${edge.u.col}-${edge.v.row},${edge.v.col}`);
+        set.add(`${edge.v.row},${edge.v.col}-${edge.u.row},${edge.u.col}`);
+      }
+    }
+    return set;
+  }, [solution]);
+
+  const handleMouseDown = useCallback(
+    (row: number, col: number) => {
+      setIsDragging(true);
+      onCellClick(row, col);
+    },
+    [onCellClick]
+  );
+
+  const handleMouseEnter = useCallback(
+    (row: number, col: number) => {
+      if (isDragging) {
+        onCellDrag(row, col);
+      }
+    },
+    [isDragging, onCellDrag]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Check if there should be a wall between two adjacent cells
+  const hasWall = useCallback(
+    (r1: number, c1: number, r2: number, c2: number): boolean => {
+      if (!solution) {
+        // No solution yet - show walls between different colors
+        if (
+          r2 >= 0 &&
+          r2 < grid.height &&
+          c2 >= 0 &&
+          c2 < grid.width
+        ) {
+          return grid.colors[r1][c1] !== grid.colors[r2][c2];
+        }
+        return true; // Edge of grid
+      }
+      // With solution - check if edge is kept
+      const key = `${r1},${c1}-${r2},${c2}`;
+      return !keptEdgeSet.has(key);
+    },
+    [solution, keptEdgeSet, grid]
+  );
+
+  const wallThickness = 3;
+  const totalWidth = grid.width * cellSize + wallThickness;
+  const totalHeight = grid.height * cellSize + wallThickness;
+
+  return (
+    <div
+      className="grid-container"
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      style={{
+        position: "relative",
+        width: totalWidth,
+        height: totalHeight,
+        border: `${wallThickness}px solid #2c3e50`,
+        boxSizing: "content-box",
+        userSelect: "none",
+      }}
+    >
+      {/* Render cells */}
+      {Array.from({ length: grid.height }, (_, row) =>
+        Array.from({ length: grid.width }, (_, col) => {
+          const color = grid.colors[row][col];
+          const bgColor = COLORS[color % COLORS.length];
+
+          // Check walls on each side
+          const wallRight = col < grid.width - 1 && hasWall(row, col, row, col + 1);
+          const wallBottom = row < grid.height - 1 && hasWall(row, col, row + 1, col);
+
+          return (
+            <div
+              key={`${row}-${col}`}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+              style={{
+                position: "absolute",
+                left: col * cellSize,
+                top: row * cellSize,
+                width: cellSize,
+                height: cellSize,
+                backgroundColor: bgColor,
+                cursor: "pointer",
+                boxSizing: "border-box",
+                // Right wall
+                borderRight: wallRight
+                  ? `${wallThickness}px solid #2c3e50`
+                  : "none",
+                // Bottom wall
+                borderBottom: wallBottom
+                  ? `${wallThickness}px solid #2c3e50`
+                  : "none",
+              }}
+            />
+          );
+        })
+      )}
+    </div>
+  );
+};
+
+interface ColorPaletteProps {
+  selectedColor: number;
+  onColorSelect: (color: number) => void;
+  numColors?: number;
+}
+
+export const ColorPalette: React.FC<ColorPaletteProps> = ({
+  selectedColor,
+  onColorSelect,
+  numColors = 6,
+}) => {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "8px",
+        flexWrap: "wrap",
+        marginBottom: "16px",
+      }}
+    >
+      {Array.from({ length: numColors }, (_, i) => (
+        <button
+          key={i}
+          onClick={() => onColorSelect(i)}
+          style={{
+            width: "36px",
+            height: "36px",
+            backgroundColor: COLORS[i % COLORS.length],
+            border:
+              selectedColor === i
+                ? "3px solid #2c3e50"
+                : "2px solid #bdc3c7",
+            borderRadius: "4px",
+            cursor: "pointer",
+            outline: "none",
+            boxShadow:
+              selectedColor === i
+                ? "0 0 0 2px #3498db"
+                : "none",
+          }}
+          title={`Color ${i + 1}`}
+        />
+      ))}
+    </div>
+  );
+};
+
+interface ControlsProps {
+  gridWidth: number;
+  gridHeight: number;
+  onWidthChange: (width: number) => void;
+  onHeightChange: (height: number) => void;
+  onSolve: () => void;
+  onClear: () => void;
+  onFillRandom: () => void;
+  solving: boolean;
+  solutionStatus: "none" | "found" | "unsatisfiable";
+}
+
+export const Controls: React.FC<ControlsProps> = ({
+  gridWidth,
+  gridHeight,
+  onWidthChange,
+  onHeightChange,
+  onSolve,
+  onClear,
+  onFillRandom,
+  solving,
+  solutionStatus,
+}) => {
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "16px",
+          alignItems: "center",
+          marginBottom: "12px",
+        }}
+      >
+        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          Width:
+          <input
+            type="number"
+            min="2"
+            max="20"
+            value={gridWidth}
+            onChange={(e) => onWidthChange(parseInt(e.target.value) || 2)}
+            style={{ width: "60px", padding: "4px" }}
+          />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          Height:
+          <input
+            type="number"
+            min="2"
+            max="20"
+            value={gridHeight}
+            onChange={(e) => onHeightChange(parseInt(e.target.value) || 2)}
+            style={{ width: "60px", padding: "4px" }}
+          />
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <button
+          onClick={onSolve}
+          disabled={solving}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: "#2ecc71",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: solving ? "not-allowed" : "pointer",
+            fontWeight: "bold",
+          }}
+        >
+          {solving ? "Solving..." : "Solve"}
+        </button>
+        <button
+          onClick={onClear}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: "#e74c3c",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Clear
+        </button>
+        <button
+          onClick={onFillRandom}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: "#3498db",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Random Fill
+        </button>
+      </div>
+      {solutionStatus !== "none" && (
+        <div
+          style={{
+            marginTop: "12px",
+            padding: "8px 12px",
+            borderRadius: "4px",
+            backgroundColor:
+              solutionStatus === "found" ? "#d5f5e3" : "#fadbd8",
+            color: solutionStatus === "found" ? "#1e8449" : "#922b21",
+          }}
+        >
+          {solutionStatus === "found"
+            ? "Solution found! Each color region is now connected."
+            : "No solution exists - some color regions cannot be connected."}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export { COLORS };
