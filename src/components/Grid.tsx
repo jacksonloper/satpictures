@@ -243,6 +243,9 @@ interface ControlsProps {
   solving: boolean;
   solutionStatus: "none" | "found" | "unsatisfiable" | "error";
   errorMessage?: string | null;
+  solverType?: "minisat" | "cadical";
+  onSolverTypeChange?: (solverType: "minisat" | "cadical") => void;
+  solveTime?: number | null;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -256,6 +259,9 @@ export const Controls: React.FC<ControlsProps> = ({
   solving,
   solutionStatus,
   errorMessage,
+  solverType = "minisat",
+  onSolverTypeChange,
+  solveTime,
 }) => {
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -291,6 +297,25 @@ export const Controls: React.FC<ControlsProps> = ({
           />
           <span style={{ minWidth: "24px", textAlign: "right" }}>{gridHeight}</span>
         </label>
+        {onSolverTypeChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>Solver:</span>
+            <select
+              value={solverType}
+              onChange={(e) => onSolverTypeChange(e.target.value as "minisat" | "cadical")}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border: "1px solid #bdc3c7",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              <option value="minisat">MiniSat</option>
+              <option value="cadical">CaDiCaL</option>
+            </select>
+          </label>
+        )}
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         <button
@@ -356,10 +381,10 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? "Solution found! Each color region is now connected."
+            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
-              : "No solution exists - some color regions cannot be connected."}
+              : `No solution exists - some color regions cannot be connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`}
         </div>
       )}
     </div>

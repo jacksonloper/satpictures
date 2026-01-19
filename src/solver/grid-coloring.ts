@@ -13,7 +13,7 @@ import {
   MiniSatFormulaBuilder,
   MiniSatSolver,
 } from "../sat";
-import type { SolveResult } from "../sat";
+import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
 
 /**
  * Represents a point in the grid
@@ -152,16 +152,28 @@ function createTrivialSolution(width: number, height: number): GridSolution {
 }
 
 /**
+ * Options for the grid coloring solver
+ */
+export interface SolveOptions {
+  /** Custom SAT solver instance (defaults to MiniSat) */
+  solver?: SATSolver;
+  /** Custom formula builder (defaults to MiniSatFormulaBuilder) */
+  builder?: FormulaBuilder;
+}
+
+/**
  * Encode and solve the grid coloring problem
  * 
  * @param grid The grid with colors assigned to cells (null = blank, solver decides)
  * @param _numColors Number of available colors (parameter kept for API compatibility,
  *                   but blank cells are now only assigned colors that already have fixed cells)
+ * @param options Optional solver configuration
  */
 export function solveGridColoring(
   grid: ColorGrid,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _numColors: number = 6
+  _numColors: number = 6,
+  options?: SolveOptions
 ): GridSolution | null {
   const { width, height, colors } = grid;
 
@@ -175,8 +187,9 @@ export function solveGridColoring(
     return createTrivialSolution(width, height);
   }
 
-  const solver = new MiniSatSolver();
-  const builder = new MiniSatFormulaBuilder(solver);
+  // Use provided solver/builder or default to MiniSat
+  const solver = options?.solver ?? new MiniSatSolver();
+  const builder = options?.builder ?? new MiniSatFormulaBuilder(solver);
 
   // ============================================
   // OPTIMIZATION: Determine which colors are actually used

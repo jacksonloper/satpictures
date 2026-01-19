@@ -5,6 +5,8 @@
 import { solveGridColoring } from "./grid-coloring";
 import type { ColorGrid, GridSolution } from "./grid-coloring";
 
+export type SolverType = "minisat" | "cadical";
+
 export interface SolverRequest {
   grid: ColorGrid;
   numColors: number;
@@ -14,6 +16,7 @@ export interface SolverResponse {
   success: boolean;
   solution: GridSolution | null;
   error?: string;
+  solverType: SolverType;
 }
 
 /**
@@ -43,6 +46,7 @@ self.onmessage = (event: MessageEvent<SolverRequest>) => {
     const response: SolverResponse = {
       success: true,
       solution,
+      solverType: "minisat",
     };
     self.postMessage(response);
   } catch (error) {
@@ -50,6 +54,7 @@ self.onmessage = (event: MessageEvent<SolverRequest>) => {
       success: false,
       solution: null,
       error: formatErrorMessage(error),
+      solverType: "minisat",
     };
     self.postMessage(response);
   }
