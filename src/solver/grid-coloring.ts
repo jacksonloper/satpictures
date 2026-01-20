@@ -24,6 +24,11 @@ import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
 export const HATCH_COLOR = -2;
 
 /**
+ * Grid type - square or hex
+ */
+export type GridType = "square" | "hex";
+
+/**
  * Represents a point in the grid
  */
 export interface GridPoint {
@@ -59,9 +64,9 @@ export interface GridSolution {
 }
 
 /**
- * Get the 4-neighbors of a point within grid bounds
+ * Get the 4-neighbors of a point for square grid within bounds
  */
-function getNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
+function getSquareNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
   const neighbors: GridPoint[] = [];
   const deltas = [
     [-1, 0],
@@ -79,6 +84,57 @@ function getNeighbors(p: GridPoint, width: number, height: number): GridPoint[] 
   }
 
   return neighbors;
+}
+
+/**
+ * Get the 6-neighbors of a point for hex grid (offset coordinates) within bounds
+ * Uses "odd-r" offset coordinates where odd rows are shifted right
+ */
+function getHexNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
+  const neighbors: GridPoint[] = [];
+  
+  // For hex grids with odd-r offset coordinates:
+  // Even rows: NW, NE, W, E, SW, SE offsets
+  // Odd rows: different offsets due to stagger
+  const isOddRow = p.row % 2 === 1;
+  
+  const deltas = isOddRow
+    ? [
+        [-1, 0],  // NW
+        [-1, 1],  // NE
+        [0, -1],  // W
+        [0, 1],   // E
+        [1, 0],   // SW
+        [1, 1],   // SE
+      ]
+    : [
+        [-1, -1], // NW
+        [-1, 0],  // NE
+        [0, -1],  // W
+        [0, 1],   // E
+        [1, -1],  // SW
+        [1, 0],   // SE
+      ];
+
+  for (const [dr, dc] of deltas) {
+    const nr = p.row + dr;
+    const nc = p.col + dc;
+    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
+      neighbors.push({ row: nr, col: nc });
+    }
+  }
+
+  return neighbors;
+}
+
+/**
+ * Get neighbors based on grid type
+ */
+function getNeighbors(p: GridPoint, width: number, height: number, gridType: GridType = "square"): GridPoint[] {
+  if (gridType === "hex") {
+    return getHexNeighbors(p, width, height);
+  }
+  return getSquareNeighbors(p, width, height);
 }
 
 /**
@@ -127,26 +183,24 @@ function colorVarKey(row: number, col: number, color: number): string {
  * This satisfies the connectivity constraint trivially since all cells
  * are the same color and form one connected component.
  */
-function createTrivialSolution(width: number, height: number): GridSolution {
+function createTrivialSolution(width: number, height: number, gridType: GridType = "square"): GridSolution {
   const keptEdges: Edge[] = [];
   const wallEdges: Edge[] = [];
+  const addedEdges = new Set<string>();
 
   // Keep all internal edges (no walls within the grid)
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
-      // Add right edge
-      if (col + 1 < width) {
-        keptEdges.push({
-          u: { row, col },
-          v: { row, col: col + 1 },
-        });
-      }
-      // Add bottom edge
-      if (row + 1 < height) {
-        keptEdges.push({
-          u: { row, col },
-          v: { row: row + 1, col },
-        });
+      const neighbors = getNeighbors({ row, col }, width, height, gridType);
+      for (const n of neighbors) {
+        const key = edgeKey({ row, col }, n);
+        if (!addedEdges.has(key)) {
+          addedEdges.add(key);
+          keptEdges.push({
+            u: { row, col },
+            v: n,
+          });
+        }
       }
     }
   }
@@ -169,6 +223,8 @@ export interface SolveOptions {
   builder?: FormulaBuilder;
   /** Minimum proportion of edges that must be walls (0 to 1, default 0) */
   minWallsProportion?: number;
+  /** Grid type: square (4-neighbors) or hex (6-neighbors) */
+  gridType?: GridType;
 }
 
 /**
@@ -186,6 +242,7 @@ export function solveGridColoring(
   options?: SolveOptions
 ): GridSolution | null {
   const { width, height, colors } = grid;
+  const gridType = options?.gridType ?? "square";
 
   // ============================================
   // FAST PATH: All-blank grid optimization
@@ -194,7 +251,7 @@ export function solveGridColoring(
   // assign all cells to color 0 and keep all edges (fully connected)
   const isAllBlank = colors.every((row) => row.every((c) => c === null));
   if (isAllBlank) {
-    return createTrivialSolution(width, height);
+    return createTrivialSolution(width, height, gridType);
   }
 
   // Use provided solver/builder or default to MiniSat
@@ -271,24 +328,20 @@ export function solveGridColoring(
   // Collect all edges and create edge variables
   const edgeVars = new Map<string, number>();
   const allEdges: Edge[] = [];
+  const addedEdgeKeys = new Set<string>();
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const u: GridPoint = { row, col };
-      // Only add edges to right and down neighbors to avoid duplicates
-      if (col + 1 < width) {
-        const v: GridPoint = { row, col: col + 1 };
+      const neighbors = getNeighbors(u, width, height, gridType);
+      for (const v of neighbors) {
         const key = edgeKey(u, v);
-        const varNum = builder.createNamedVariable(`edge_${key}`);
-        edgeVars.set(key, varNum);
-        allEdges.push({ u, v });
-      }
-      if (row + 1 < height) {
-        const v: GridPoint = { row: row + 1, col };
-        const key = edgeKey(u, v);
-        const varNum = builder.createNamedVariable(`edge_${key}`);
-        edgeVars.set(key, varNum);
-        allEdges.push({ u, v });
+        if (!addedEdgeKeys.has(key)) {
+          addedEdgeKeys.add(key);
+          const varNum = builder.createNamedVariable(`edge_${key}`);
+          edgeVars.set(key, varNum);
+          allEdges.push({ u, v });
+        }
       }
     }
   }
@@ -343,7 +396,7 @@ export function solveGridColoring(
     for (let col = 0; col < width; col++) {
       // Get all edge variables incident to this cell
       const incidentEdges: number[] = [];
-      const neighbors = getNeighbors({ row, col }, width, height);
+      const neighbors = getNeighbors({ row, col }, width, height, gridType);
       for (const n of neighbors) {
         const key = edgeKey({ row, col }, n);
         const edgeVar = edgeVars.get(key);
@@ -357,11 +410,26 @@ export function solveGridColoring(
         builder.addOr(incidentEdges);
 
         // At most 3 edges: for each subset of 4 edges, at least one must be false
-        // This is equivalent to: NOT(all 4 true) for each 4-combination
+        // This means we forbid any 4 edges from being true simultaneously
         if (incidentEdges.length >= 4) {
-          // Only corner cells can't have 4 edges, but interior cells have exactly 4
-          // If all 4 are present, add constraint that at least one must be false
-          builder.solver.addClause(incidentEdges.map((e) => -e)); // At least one false = at most 3 true
+          // Generate all 4-combinations and add a clause for each
+          // For each combo of 4, at least one must be false (NOT all 4 true)
+          const n = incidentEdges.length;
+          for (let i = 0; i < n - 3; i++) {
+            for (let j = i + 1; j < n - 2; j++) {
+              for (let k = j + 1; k < n - 1; k++) {
+                for (let l = k + 1; l < n; l++) {
+                  // At least one of these 4 edges must be false
+                  builder.solver.addClause([
+                    -incidentEdges[i],
+                    -incidentEdges[j],
+                    -incidentEdges[k],
+                    -incidentEdges[l],
+                  ]);
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -428,7 +496,7 @@ export function solveGridColoring(
     const potentialNeighbors = new Map<string, GridPoint[]>();
     for (const v of potentialVertices) {
       const key = `${v.row},${v.col}`;
-      const neighbors = getNeighbors(v, width, height).filter((n) =>
+      const neighbors = getNeighbors(v, width, height, gridType).filter((n) =>
         potentialSet.has(`${n.row},${n.col}`)
       );
       potentialNeighbors.set(key, neighbors);

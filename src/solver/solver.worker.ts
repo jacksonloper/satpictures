@@ -3,7 +3,7 @@
  */
 
 import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution } from "./grid-coloring";
+import type { ColorGrid, GridSolution, GridType } from "./grid-coloring";
 
 export type SolverType = "minisat" | "cadical";
 
@@ -11,6 +11,7 @@ export interface SolverRequest {
   grid: ColorGrid;
   numColors: number;
   minWallsProportion?: number;
+  gridType?: GridType;
 }
 
 export interface SolverResponse {
@@ -40,10 +41,10 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { grid, numColors, minWallsProportion } = event.data;
+  const { grid, numColors, minWallsProportion, gridType } = event.data;
 
   try {
-    const solution = solveGridColoring(grid, numColors, { minWallsProportion });
+    const solution = solveGridColoring(grid, numColors, { minWallsProportion, gridType });
     const response: SolverResponse = {
       success: true,
       solution,

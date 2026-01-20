@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution } from "../solver";
+import type { ColorGrid, GridSolution, GridType } from "../solver";
 import { HATCH_COLOR } from "../solver";
 
 // Re-export HATCH_COLOR for convenience
@@ -54,6 +54,7 @@ interface GridProps {
   onCellClick: (row: number, col: number) => void;
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
+  gridType?: GridType;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -63,6 +64,7 @@ export const Grid: React.FC<GridProps> = ({
   onCellClick,
   onCellDrag,
   cellSize = 40,
+  gridType = "square",
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -118,8 +120,240 @@ export const Grid: React.FC<GridProps> = ({
   );
 
   const wallThickness = 3;
-  const totalWidth = grid.width * cellSize + wallThickness;
-  const totalHeight = grid.height * cellSize + wallThickness;
+  
+  // Hex grid calculations
+  // Using pointy-topped hexagons with odd-r offset coordinates
+  // For pointy-topped hex: width = sqrt(3) * size, height = 2 * size
+  const hexSize = cellSize * 0.5; // radius from center to vertex
+  const hexWidth = Math.sqrt(3) * hexSize;
+  const hexHeight = 2 * hexSize;
+  const hexHorizSpacing = hexWidth;
+  const hexVertSpacing = hexHeight * 0.75;
+  
+  // Calculate total dimensions based on grid type
+  const totalWidth = gridType === "hex"
+    ? grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2
+    : grid.width * cellSize + wallThickness;
+  const totalHeight = gridType === "hex"
+    ? (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2
+    : grid.height * cellSize + wallThickness;
+
+  // Get hex neighbors (odd-r offset coordinates) - must match solver's getHexNeighbors
+  const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
+    const isOddRow = row % 2 === 1;
+    if (isOddRow) {
+      // Odd rows: match solver's deltas exactly
+      return [
+        [row - 1, col, "NW"],     // NW (top-left) - solver: [-1, 0]
+        [row - 1, col + 1, "NE"], // NE (top-right) - solver: [-1, 1]
+        [row, col - 1, "W"],      // W (left) - solver: [0, -1]
+        [row, col + 1, "E"],      // E (right) - solver: [0, 1]
+        [row + 1, col, "SW"],     // SW (bottom-left) - solver: [1, 0]
+        [row + 1, col + 1, "SE"], // SE (bottom-right) - solver: [1, 1]
+      ];
+    } else {
+      // Even rows: match solver's deltas exactly
+      return [
+        [row - 1, col - 1, "NW"], // NW (top-left) - solver: [-1, -1]
+        [row - 1, col, "NE"],     // NE (top-right) - solver: [-1, 0]
+        [row, col - 1, "W"],      // W (left) - solver: [0, -1]
+        [row, col + 1, "E"],      // E (right) - solver: [0, 1]
+        [row + 1, col - 1, "SW"], // SW (bottom-left) - solver: [1, -1]
+        [row + 1, col, "SE"],     // SE (bottom-right) - solver: [1, 0]
+      ];
+    }
+  };
+
+  // Create SVG hexagon path - pointy-topped
+  const createHexPath = (cx: number, cy: number, size: number): string => {
+    // Pointy-topped hexagon: vertices at 30, 90, 150, 210, 270, 330 degrees
+    const points: [number, number][] = [];
+    for (let i = 0; i < 6; i++) {
+      const angleDeg = 60 * i - 30; // Start at -30 degrees for pointy-top
+      const angleRad = (Math.PI / 180) * angleDeg;
+      points.push([cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)]);
+    }
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+  };
+
+  // Create wall segment between two hex cells - for pointy-topped hexagons
+  const getHexWallSegment = (
+    _row: number, _col: number, 
+    nRow: number, nCol: number,
+    direction: string,
+    cx: number, cy: number,
+    size: number
+  ): { x1: number; y1: number; x2: number; y2: number } | null => {
+    // Check if neighbor is within bounds
+    if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
+      return null; // Boundary - will be handled separately
+    }
+    
+    // For pointy-topped hex, calculate the edge positions
+    // Vertices are at angles: -30, 30, 90, 150, 210, 270 degrees
+    const getVertex = (angleDeg: number): [number, number] => {
+      const angleRad = (Math.PI / 180) * angleDeg;
+      return [cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)];
+    };
+    
+    // Return the edge segment for this direction
+    // Mapping verified by testing that edge coordinates match from both cells
+    switch (direction) {
+      case "NW": { // Between 210° and 270° vertices
+        const v1 = getVertex(210);
+        const v2 = getVertex(270);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "NE": { // Between 270° and -30° vertices
+        const v1 = getVertex(270);
+        const v2 = getVertex(-30);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "W": { // Between 150° and 210° vertices
+        const v1 = getVertex(150);
+        const v2 = getVertex(210);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "E": { // Between -30° and 30° vertices
+        const v1 = getVertex(-30);
+        const v2 = getVertex(30);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "SW": { // Between 90° and 150° vertices
+        const v1 = getVertex(90);
+        const v2 = getVertex(150);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "SE": { // Between 30° and 90° vertices
+        const v1 = getVertex(30);
+        const v2 = getVertex(90);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      default:
+        return null;
+    }
+  };
+
+  // For hex grid, we use SVG
+  if (gridType === "hex") {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+    
+    // Pre-compute all hex data
+    const hexData: {
+      row: number;
+      col: number;
+      cx: number;
+      cy: number;
+      path: string;
+      fill: string;
+      isBlank: boolean;
+      isHatch: boolean;
+      walls: { x1: number; y1: number; x2: number; y2: number }[];
+    }[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const inputColor = grid.colors[row][col];
+        const displayColor =
+          solution && inputColor === null
+            ? solution.assignedColors[row][col]
+            : inputColor;
+        const isBlank = inputColor === null && !solution;
+        const isHatch = displayColor === HATCH_COLOR;
+        
+        let fill: string;
+        if (isBlank) {
+          fill = "url(#blankPattern)";
+        } else if (isHatch) {
+          fill = "url(#hatchPattern)";
+        } else {
+          fill = COLORS[(displayColor ?? 0) % COLORS.length];
+        }
+
+        // Calculate hex center position - for pointy-topped, odd rows are offset right
+        const isOddRow = row % 2 === 1;
+        const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
+        const cy = padding + hexSize + row * hexVertSpacing;
+        
+        const path = createHexPath(cx, cy, hexSize);
+
+        // Check for walls to neighbors
+        const neighbors = getHexNeighbors(row, col);
+        const walls: { x1: number; y1: number; x2: number; y2: number }[] = [];
+        
+        for (const [nRow, nCol, direction] of neighbors) {
+          if (hasWall(row, col, nRow, nCol)) {
+            const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexSize);
+            if (segment) {
+              walls.push(segment);
+            }
+          }
+        }
+        
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls });
+      }
+    }
+    
+    return (
+      <div
+        className="grid-container"
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
+          {/* Define patterns for blank and hatch fills */}
+          <defs>
+            <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect width="10" height="10" fill="#f5f5f5"/>
+              <line x1="0" y1="0" x2="10" y2="10" stroke="#e0e0e0" strokeWidth="2"/>
+            </pattern>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#fffde7"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+          </defs>
+          
+          {/* First pass: render all hex fills */}
+          {hexData.map(({ row, col, path, fill }) => (
+            <path
+              key={`fill-${row}-${col}`}
+              d={path}
+              fill={fill}
+              stroke="none"
+              style={{ cursor: "pointer" }}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+            />
+          ))}
+          
+          {/* Second pass: render all walls on top */}
+          {hexData.flatMap(({ row, col, walls }) =>
+            walls.map((wall, i) => (
+              <line
+                key={`wall-${row}-${col}-${i}`}
+                x1={wall.x1}
+                y1={wall.y1}
+                x2={wall.x2}
+                y2={wall.y2}
+                stroke="#2c3e50"
+                strokeWidth={wallThickness}
+                strokeLinecap="round"
+              />
+            ))
+          )}
+        </svg>
+      </div>
+    );
+  }
+
+  // Square grid rendering (original code)
 
   return (
     <div
@@ -305,6 +539,8 @@ interface ControlsProps {
   minWallsProportion?: number;
   onMinWallsProportionChange?: (proportion: number) => void;
   solution?: GridSolution | null;
+  gridType?: GridType;
+  onGridTypeChange?: (gridType: GridType) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -325,6 +561,8 @@ export const Controls: React.FC<ControlsProps> = ({
   minWallsProportion = 0,
   onMinWallsProportionChange,
   solution,
+  gridType = "square",
+  onGridTypeChange,
 }) => {
   const handleDownloadJSON = useCallback(() => {
     if (!solution) return;
@@ -440,6 +678,25 @@ export const Controls: React.FC<ControlsProps> = ({
             </select>
           </label>
         )}
+        {onGridTypeChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>Grid:</span>
+            <select
+              value={gridType}
+              onChange={(e) => onGridTypeChange(e.target.value as GridType)}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border: "1px solid #bdc3c7",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              <option value="square">Square</option>
+              <option value="hex">Hex</option>
+            </select>
+          </label>
+        )}
         {onMinWallsProportionChange && (
           <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span style={{ minWidth: "50px" }}>Min Walls:</span>
@@ -550,7 +807,7 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`
+            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}${solution ? ` Walls: ${Math.round(solution.wallEdges.length / (solution.wallEdges.length + solution.keptEdges.length) * 100)}%` : ""}`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
               : `No solution exists - some color regions cannot be connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`}
