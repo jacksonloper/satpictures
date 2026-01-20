@@ -295,6 +295,7 @@ interface ControlsProps {
   onSolve: () => void;
   onClear: () => void;
   onMazeSetup: () => void;
+  onCancel?: () => void;
   solving: boolean;
   solutionStatus: "none" | "found" | "unsatisfiable" | "error";
   errorMessage?: string | null;
@@ -314,6 +315,7 @@ export const Controls: React.FC<ControlsProps> = ({
   onSolve,
   onClear,
   onMazeSetup,
+  onCancel,
   solving,
   solutionStatus,
   errorMessage,
@@ -469,6 +471,22 @@ export const Controls: React.FC<ControlsProps> = ({
         >
           {solving ? "Solving..." : "Solve"}
         </button>
+        {solving && onCancel && (
+          <button
+            onClick={onCancel}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#e67e22",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: "bold",
+            }}
+          >
+            Cancel
+          </button>
+        )}
         <button
           onClick={onClear}
           style={{

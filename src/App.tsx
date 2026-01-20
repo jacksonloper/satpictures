@@ -197,6 +197,17 @@ function App() {
     setSolveTime(null);
   }, [gridWidth, gridHeight]);
 
+  const handleCancel = useCallback(() => {
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
+    setSolving(false);
+    setSolutionStatus("none");
+    setErrorMessage(null);
+    setSolveTime(null);
+  }, []);
+
   return (
     <div className="app">
       <h1>Grid Coloring Solver</h1>
@@ -216,6 +227,7 @@ function App() {
           onSolve={handleSolve}
           onClear={handleClear}
           onMazeSetup={handleMazeSetup}
+          onCancel={handleCancel}
           solving={solving}
           solutionStatus={solutionStatus}
           errorMessage={errorMessage}
