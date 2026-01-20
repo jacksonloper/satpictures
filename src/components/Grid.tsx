@@ -807,7 +807,7 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`
+            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}${solution ? ` Walls: ${Math.round(solution.wallEdges.length / (solution.wallEdges.length + solution.keptEdges.length) * 100)}%` : ""}`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
               : `No solution exists - some color regions cannot be connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`}
