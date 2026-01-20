@@ -530,6 +530,7 @@ interface ControlsProps {
   onClear: () => void;
   onMazeSetup: () => void;
   onCancel?: () => void;
+  onSaveMaze?: () => void;
   solving: boolean;
   solutionStatus: "none" | "found" | "unsatisfiable" | "error";
   errorMessage?: string | null;
@@ -552,6 +553,7 @@ export const Controls: React.FC<ControlsProps> = ({
   onClear,
   onMazeSetup,
   onCancel,
+  onSaveMaze,
   solving,
   solutionStatus,
   errorMessage,
@@ -770,6 +772,21 @@ export const Controls: React.FC<ControlsProps> = ({
         >
           Maze Setup
         </button>
+        {onSaveMaze && (
+          <button
+            onClick={onSaveMaze}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#1abc9c",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Save Maze
+          </button>
+        )}
         {solution && (
           <button
             onClick={handleDownloadJSON}

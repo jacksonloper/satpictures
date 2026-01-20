@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, Grid } from "./components";
+import { ColorPalette, Controls, Grid, SavedMazes } from "./components";
 import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
+import { saveMaze, listMazes, deleteMaze, type SavedMaze } from "./storage";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
@@ -49,10 +50,18 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
+  const [savedMazes, setSavedMazes] = useState<SavedMaze[]>([]);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
   const workerRef = useRef<Worker | null>(null);
+
+  // Load saved mazes on mount
+  useEffect(() => {
+    listMazes()
+      .then(setSavedMazes)
+      .catch((err) => console.error("Failed to load saved mazes:", err));
+  }, []);
 
   // Cleanup worker on unmount
   useEffect(() => {
@@ -209,6 +218,38 @@ function App() {
     setSolveTime(null);
   }, []);
 
+  const handleSaveMaze = useCallback(async () => {
+    const name = prompt("Enter a name for this maze:", `Maze ${savedMazes.length + 1}`);
+    if (name) {
+      try {
+        const savedMaze = await saveMaze(name, grid, gridType);
+        setSavedMazes((prev) => [savedMaze, ...prev]);
+      } catch (err) {
+        console.error("Failed to save maze:", err);
+      }
+    }
+  }, [grid, gridType, savedMazes.length]);
+
+  const handleRestoreMaze = useCallback((maze: SavedMaze) => {
+    setGrid(maze.grid);
+    setGridWidth(maze.grid.width);
+    setGridHeight(maze.grid.height);
+    setGridType(maze.gridType);
+    setSolution(null);
+    setSolutionStatus("none");
+    setErrorMessage(null);
+    setSolveTime(null);
+  }, []);
+
+  const handleDeleteMaze = useCallback(async (id: string) => {
+    try {
+      await deleteMaze(id);
+      setSavedMazes((prev) => prev.filter((maze) => maze.id !== id));
+    } catch (err) {
+      console.error("Failed to delete maze:", err);
+    }
+  }, []);
+
   return (
     <div className="app">
       <h1>Grid Coloring Solver</h1>
@@ -229,6 +270,7 @@ function App() {
           onClear={handleClear}
           onMazeSetup={handleMazeSetup}
           onCancel={handleCancel}
+          onSaveMaze={handleSaveMaze}
           solving={solving}
           solutionStatus={solutionStatus}
           errorMessage={errorMessage}
@@ -247,6 +289,13 @@ function App() {
           selectedColor={selectedColor}
           onColorSelect={setSelectedColor}
           numColors={numColors}
+        />
+
+        <h3>Saved Mazes</h3>
+        <SavedMazes
+          mazes={savedMazes}
+          onRestore={handleRestoreMaze}
+          onDelete={handleDeleteMaze}
         />
       </div>
 
