@@ -14,6 +14,7 @@ import type { CadicalClass } from "../sat";
 export interface CadicalSolverRequest {
   grid: ColorGrid;
   numColors: number;
+  minWallsProportion?: number;
 }
 
 export interface CadicalSolverResponse {
@@ -229,7 +230,7 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
-  const { grid, numColors } = event.data;
+  const { grid, numColors, minWallsProportion } = event.data;
 
   try {
     // Load the module (cached after first load)
@@ -243,7 +244,7 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
     const builder = new CadicalFormulaBuilder(solver);
     
     // Solve using CaDiCaL
-    const solution = solveGridColoring(grid, numColors, { solver, builder });
+    const solution = solveGridColoring(grid, numColors, { solver, builder, minWallsProportion });
     
     // Clean up
     cadical.release();

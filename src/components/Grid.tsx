@@ -301,6 +301,8 @@ interface ControlsProps {
   solverType?: "minisat" | "cadical";
   onSolverTypeChange?: (solverType: "minisat" | "cadical") => void;
   solveTime?: number | null;
+  minWallsProportion?: number;
+  onMinWallsProportionChange?: (proportion: number) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -317,6 +319,8 @@ export const Controls: React.FC<ControlsProps> = ({
   solverType = "minisat",
   onSolverTypeChange,
   solveTime,
+  minWallsProportion = 0,
+  onMinWallsProportionChange,
 }) => {
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -369,6 +373,20 @@ export const Controls: React.FC<ControlsProps> = ({
               <option value="minisat">MiniSat</option>
               <option value="cadical">CaDiCaL</option>
             </select>
+          </label>
+        )}
+        {onMinWallsProportionChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>Min Walls:</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={Math.round(minWallsProportion * 100)}
+              onChange={(e) => onMinWallsProportionChange(parseInt(e.target.value) / 100)}
+              style={{ flex: 1, cursor: "pointer" }}
+            />
+            <span style={{ minWidth: "36px", textAlign: "right" }}>{Math.round(minWallsProportion * 100)}%</span>
           </label>
         )}
       </div>

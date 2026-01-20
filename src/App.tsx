@@ -47,6 +47,7 @@ function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [solverType, setSolverType] = useState<SolverType>("minisat");
   const [solveTime, setSolveTime] = useState<number | null>(null);
+  const [minWallsProportion, setMinWallsProportion] = useState(0);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -176,9 +177,9 @@ function App() {
     };
 
     // Send the solve request
-    const request: SolverRequest = { grid, numColors };
+    const request: SolverRequest = { grid, numColors, minWallsProportion };
     worker.postMessage(request);
-  }, [grid, numColors, solverType]);
+  }, [grid, numColors, solverType, minWallsProportion]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -221,6 +222,8 @@ function App() {
           solverType={solverType}
           onSolverTypeChange={setSolverType}
           solveTime={solveTime}
+          minWallsProportion={minWallsProportion}
+          onMinWallsProportionChange={setMinWallsProportion}
         />
 
         <h3>Colors</h3>

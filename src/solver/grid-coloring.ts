@@ -10,6 +10,7 @@
  */
 
 import {
+  addAtLeastKFalse,
   createBinaryIntVariables,
   MiniSatFormulaBuilder,
   MiniSatSolver,
@@ -166,6 +167,8 @@ export interface SolveOptions {
   solver?: SATSolver;
   /** Custom formula builder (defaults to MiniSatFormulaBuilder) */
   builder?: FormulaBuilder;
+  /** Minimum proportion of edges that must be walls (0 to 1, default 0) */
+  minWallsProportion?: number;
 }
 
 /**
@@ -287,6 +290,22 @@ export function solveGridColoring(
         edgeVars.set(key, varNum);
         allEdges.push({ u, v });
       }
+    }
+  }
+
+  // ============================================
+  // 1a. MINIMUM WALLS CONSTRAINT
+  // ============================================
+  // If minWallsProportion is specified, require at least that proportion of edges to be walls.
+  // A wall means the edge variable is false (edge not kept).
+  const minWallsProportion = options?.minWallsProportion ?? 0;
+  if (minWallsProportion > 0 && allEdges.length > 0) {
+    const minWalls = Math.ceil(minWallsProportion * allEdges.length);
+    if (minWalls > 0) {
+      // Collect all edge variables
+      const edgeVarList = allEdges.map(edge => edgeVars.get(edgeKey(edge.u, edge.v))!);
+      // Add constraint: at least minWalls of the edge variables must be false (walls)
+      addAtLeastKFalse(builder, edgeVarList, minWalls, "minWalls");
     }
   }
 
