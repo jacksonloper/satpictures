@@ -197,36 +197,36 @@ export const Grid: React.FC<GridProps> = ({
     };
     
     // Return the edge segment for this direction
-    // Edges connect adjacent vertices - rotated 120° counterclockwise to match solver
+    // Mapping verified by testing that edge coordinates match from both cells
     switch (direction) {
-      case "NE": { // Top-right edge (between 150° and 210° vertices)
-        const v1 = getVertex(150);
-        const v2 = getVertex(210);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "E": { // Right edge (between 210° and 270° vertices)
+      case "NW": { // Between 210° and 270° vertices
         const v1 = getVertex(210);
         const v2 = getVertex(270);
         return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
       }
-      case "SE": { // Bottom-right edge (between 270° and -30° vertices)
+      case "NE": { // Between 270° and -30° vertices
         const v1 = getVertex(270);
         const v2 = getVertex(-30);
         return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
       }
-      case "SW": { // Bottom-left edge (between -30° and 30° vertices)
+      case "W": { // Between 150° and 210° vertices
+        const v1 = getVertex(150);
+        const v2 = getVertex(210);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "E": { // Between -30° and 30° vertices
         const v1 = getVertex(-30);
         const v2 = getVertex(30);
         return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
       }
-      case "W": { // Left edge (between 30° and 90° vertices)
-        const v1 = getVertex(30);
-        const v2 = getVertex(90);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "NW": { // Top-left edge (between 90° and 150° vertices)
+      case "SW": { // Between 90° and 150° vertices
         const v1 = getVertex(90);
         const v2 = getVertex(150);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "SE": { // Between 30° and 90° vertices
+        const v1 = getVertex(30);
+        const v2 = getVertex(90);
         return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
       }
       default:
