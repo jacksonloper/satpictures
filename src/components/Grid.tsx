@@ -122,18 +122,20 @@ export const Grid: React.FC<GridProps> = ({
   const wallThickness = 3;
   
   // Hex grid calculations
-  // Using flat-topped hexagons with odd-r offset coordinates
-  const hexWidth = cellSize;
-  const hexHeight = Math.sqrt(3) * cellSize / 2;
-  const hexHorizSpacing = hexWidth * 0.75;
-  const hexVertSpacing = hexHeight;
+  // Using pointy-topped hexagons with odd-r offset coordinates
+  // For pointy-topped hex: width = sqrt(3) * size, height = 2 * size
+  const hexSize = cellSize * 0.5; // radius from center to vertex
+  const hexWidth = Math.sqrt(3) * hexSize;
+  const hexHeight = 2 * hexSize;
+  const hexHorizSpacing = hexWidth;
+  const hexVertSpacing = hexHeight * 0.75;
   
   // Calculate total dimensions based on grid type
   const totalWidth = gridType === "hex"
-    ? (grid.width - 1) * hexHorizSpacing + hexWidth + wallThickness * 2
+    ? grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2
     : grid.width * cellSize + wallThickness;
   const totalHeight = gridType === "hex"
-    ? grid.height * hexVertSpacing + hexHeight / 2 + wallThickness * 2
+    ? (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2
     : grid.height * cellSize + wallThickness;
 
   // Get hex neighbors (odd-r offset coordinates)
@@ -141,42 +143,38 @@ export const Grid: React.FC<GridProps> = ({
     const isOddRow = row % 2 === 1;
     if (isOddRow) {
       return [
-        [row - 1, col, "NW"],     // NW
-        [row - 1, col + 1, "NE"], // NE
-        [row, col - 1, "W"],      // W
-        [row, col + 1, "E"],      // E
-        [row + 1, col, "SW"],     // SW
-        [row + 1, col + 1, "SE"], // SE
+        [row - 1, col, "NE"],     // NE (top-right)
+        [row - 1, col + 1, "NW"], // NW (top-left) - note: swapped for pointy-top
+        [row, col + 1, "E"],      // E (right)
+        [row + 1, col + 1, "SE"], // SE (bottom-right)
+        [row + 1, col, "SW"],     // SW (bottom-left)
+        [row, col - 1, "W"],      // W (left)
       ];
     } else {
       return [
-        [row - 1, col - 1, "NW"], // NW
-        [row - 1, col, "NE"],     // NE
-        [row, col - 1, "W"],      // W
-        [row, col + 1, "E"],      // E
-        [row + 1, col - 1, "SW"], // SW
-        [row + 1, col, "SE"],     // SE
+        [row - 1, col - 1, "NW"], // NW (top-left)
+        [row - 1, col, "NE"],     // NE (top-right)
+        [row, col + 1, "E"],      // E (right)
+        [row + 1, col, "SE"],     // SE (bottom-right)
+        [row + 1, col - 1, "SW"], // SW (bottom-left)
+        [row, col - 1, "W"],      // W (left)
       ];
     }
   };
 
-  // Create SVG hexagon path
+  // Create SVG hexagon path - pointy-topped
   const createHexPath = (cx: number, cy: number, size: number): string => {
-    const w = size;
-    const h = Math.sqrt(3) * size / 2;
-    // Flat-topped hexagon
-    const points = [
-      [cx - w / 2, cy],           // Left
-      [cx - w / 4, cy - h / 2],   // Top-left
-      [cx + w / 4, cy - h / 2],   // Top-right
-      [cx + w / 2, cy],           // Right
-      [cx + w / 4, cy + h / 2],   // Bottom-right
-      [cx - w / 4, cy + h / 2],   // Bottom-left
-    ];
+    // Pointy-topped hexagon: vertices at 30, 90, 150, 210, 270, 330 degrees
+    const points: [number, number][] = [];
+    for (let i = 0; i < 6; i++) {
+      const angleDeg = 60 * i - 30; // Start at -30 degrees for pointy-top
+      const angleRad = (Math.PI / 180) * angleDeg;
+      points.push([cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)]);
+    }
     return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
   };
 
-  // Create wall segment between two hex cells
+  // Create wall segment between two hex cells - for pointy-topped hexagons
   const getHexWallSegment = (
     _row: number, _col: number, 
     nRow: number, nCol: number,
@@ -186,26 +184,49 @@ export const Grid: React.FC<GridProps> = ({
   ): { x1: number; y1: number; x2: number; y2: number } | null => {
     // Check if neighbor is within bounds
     if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
-      return null; // Boundary - will be handled by the border
+      return null; // Boundary - will be handled separately
     }
     
-    const w = size;
-    const h = Math.sqrt(3) * size / 2;
+    // For pointy-topped hex, calculate the edge positions
+    // Vertices are at angles: -30, 30, 90, 150, 210, 270 degrees
+    const getVertex = (angleDeg: number): [number, number] => {
+      const angleRad = (Math.PI / 180) * angleDeg;
+      return [cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)];
+    };
     
     // Return the edge segment for this direction
+    // Edges connect adjacent vertices
     switch (direction) {
-      case "NW":
-        return { x1: cx - w / 2, y1: cy, x2: cx - w / 4, y2: cy - h / 2 };
-      case "NE":
-        return { x1: cx - w / 4, y1: cy - h / 2, x2: cx + w / 4, y2: cy - h / 2 };
-      case "E":
-        return { x1: cx + w / 4, y1: cy - h / 2, x2: cx + w / 2, y2: cy };
-      case "SE":
-        return { x1: cx + w / 2, y1: cy, x2: cx + w / 4, y2: cy + h / 2 };
-      case "SW":
-        return { x1: cx + w / 4, y1: cy + h / 2, x2: cx - w / 4, y2: cy + h / 2 };
-      case "W":
-        return { x1: cx - w / 4, y1: cy + h / 2, x2: cx - w / 2, y2: cy };
+      case "NE": { // Top-right edge (between -30° and 30° vertices)
+        const v1 = getVertex(-30);
+        const v2 = getVertex(30);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "E": { // Right edge (between 30° and 90° vertices)
+        const v1 = getVertex(30);
+        const v2 = getVertex(90);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "SE": { // Bottom-right edge (between 90° and 150° vertices)
+        const v1 = getVertex(90);
+        const v2 = getVertex(150);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "SW": { // Bottom-left edge (between 150° and 210° vertices)
+        const v1 = getVertex(150);
+        const v2 = getVertex(210);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "W": { // Left edge (between 210° and 270° vertices)
+        const v1 = getVertex(210);
+        const v2 = getVertex(270);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
+      case "NW": { // Top-left edge (between 270° and 330°/-30° vertices)
+        const v1 = getVertex(270);
+        const v2 = getVertex(-30);
+        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
+      }
       default:
         return null;
     }
@@ -248,12 +269,12 @@ export const Grid: React.FC<GridProps> = ({
                 fill = COLORS[(displayColor ?? 0) % COLORS.length];
               }
 
-              // Calculate hex center position
+              // Calculate hex center position - for pointy-topped, odd rows are offset right
               const isOddRow = row % 2 === 1;
-              const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexHorizSpacing / 2 : 0);
-              const cy = padding + hexHeight / 2 + row * hexVertSpacing;
+              const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
+              const cy = padding + hexSize + row * hexVertSpacing;
               
-              const path = createHexPath(cx, cy, hexWidth);
+              const path = createHexPath(cx, cy, hexSize);
 
               // Check for walls to neighbors
               const neighbors = getHexNeighbors(row, col);
@@ -261,7 +282,7 @@ export const Grid: React.FC<GridProps> = ({
               
               for (const [nRow, nCol, direction] of neighbors) {
                 if (hasWall(row, col, nRow, nCol)) {
-                  const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexWidth);
+                  const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexSize);
                   if (segment) {
                     cellWalls.push(segment);
                   }
@@ -273,8 +294,7 @@ export const Grid: React.FC<GridProps> = ({
                   <path
                     d={path}
                     fill={fill}
-                    stroke="#2c3e50"
-                    strokeWidth={wallThickness}
+                    stroke="none"
                     style={{ cursor: "pointer" }}
                     onMouseDown={() => handleMouseDown(row, col)}
                     onMouseEnter={() => handleMouseEnter(row, col)}
