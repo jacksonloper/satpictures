@@ -6,6 +6,7 @@
  * - Edges between neighbors can be kept (passage) or blocked (wall)
  * - Different colors must be disconnected
  * - Same colors must form a single connected component (via spanning tree encoding)
+ *   Exception: Hatch color does not need to form a connected component
  */
 
 import {
@@ -14,6 +15,12 @@ import {
   MiniSatSolver,
 } from "../sat";
 import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
+
+/**
+ * Special hatch color index - cells with this color don't need to form 
+ * a connected component, but must still be disconnected from other colors
+ */
+export const HATCH_COLOR = -2;
 
 /**
  * Represents a point in the grid
@@ -347,8 +354,14 @@ export function solveGridColoring(
   // For each color, encode spanning tree constraints
   // With blank cells, we need conditional constraints based on color assignment
   // OPTIMIZATION: Only process active colors (those with at least one fixed cell)
+  // EXCEPTION: Skip hatch color - it doesn't need to form a connected component
 
   for (const color of activeColors) {
+    // Skip hatch color - it doesn't need to form a connected component
+    if (color === HATCH_COLOR) {
+      continue;
+    }
+
     // Find all vertices that could have this color (fixed to this color OR blank)
     const potentialVertices: GridPoint[] = [];
     const fixedVertices: GridPoint[] = [];

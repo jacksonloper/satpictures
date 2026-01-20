@@ -1,1 +1,1 @@
-export { ColorPalette, Controls, Grid, COLORS } from "./Grid";
+export { ColorPalette, Controls, Grid, COLORS, HATCH_COLOR } from "./Grid";
