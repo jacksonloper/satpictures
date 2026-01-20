@@ -138,26 +138,28 @@ export const Grid: React.FC<GridProps> = ({
     ? (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2
     : grid.height * cellSize + wallThickness;
 
-  // Get hex neighbors (odd-r offset coordinates)
+  // Get hex neighbors (odd-r offset coordinates) - must match solver's getHexNeighbors
   const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
     const isOddRow = row % 2 === 1;
     if (isOddRow) {
+      // Odd rows: match solver's deltas exactly
       return [
-        [row - 1, col, "NE"],     // NE (top-right)
-        [row - 1, col + 1, "NW"], // NW (top-left) - note: swapped for pointy-top
-        [row, col + 1, "E"],      // E (right)
-        [row + 1, col + 1, "SE"], // SE (bottom-right)
-        [row + 1, col, "SW"],     // SW (bottom-left)
-        [row, col - 1, "W"],      // W (left)
+        [row - 1, col, "NW"],     // NW (top-left) - solver: [-1, 0]
+        [row - 1, col + 1, "NE"], // NE (top-right) - solver: [-1, 1]
+        [row, col - 1, "W"],      // W (left) - solver: [0, -1]
+        [row, col + 1, "E"],      // E (right) - solver: [0, 1]
+        [row + 1, col, "SW"],     // SW (bottom-left) - solver: [1, 0]
+        [row + 1, col + 1, "SE"], // SE (bottom-right) - solver: [1, 1]
       ];
     } else {
+      // Even rows: match solver's deltas exactly
       return [
-        [row - 1, col - 1, "NW"], // NW (top-left)
-        [row - 1, col, "NE"],     // NE (top-right)
-        [row, col + 1, "E"],      // E (right)
-        [row + 1, col, "SE"],     // SE (bottom-right)
-        [row + 1, col - 1, "SW"], // SW (bottom-left)
-        [row, col - 1, "W"],      // W (left)
+        [row - 1, col - 1, "NW"], // NW (top-left) - solver: [-1, -1]
+        [row - 1, col, "NE"],     // NE (top-right) - solver: [-1, 0]
+        [row, col - 1, "W"],      // W (left) - solver: [0, -1]
+        [row, col + 1, "E"],      // E (right) - solver: [0, 1]
+        [row + 1, col - 1, "SW"], // SW (bottom-left) - solver: [1, -1]
+        [row + 1, col, "SE"],     // SE (bottom-right) - solver: [1, 0]
       ];
     }
   };
@@ -238,6 +240,62 @@ export const Grid: React.FC<GridProps> = ({
     const svgHeight = totalHeight;
     const padding = wallThickness;
     
+    // Pre-compute all hex data
+    const hexData: {
+      row: number;
+      col: number;
+      cx: number;
+      cy: number;
+      path: string;
+      fill: string;
+      isBlank: boolean;
+      isHatch: boolean;
+      walls: { x1: number; y1: number; x2: number; y2: number }[];
+    }[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const inputColor = grid.colors[row][col];
+        const displayColor =
+          solution && inputColor === null
+            ? solution.assignedColors[row][col]
+            : inputColor;
+        const isBlank = inputColor === null && !solution;
+        const isHatch = displayColor === HATCH_COLOR;
+        
+        let fill: string;
+        if (isBlank) {
+          fill = "url(#blankPattern)";
+        } else if (isHatch) {
+          fill = "url(#hatchPattern)";
+        } else {
+          fill = COLORS[(displayColor ?? 0) % COLORS.length];
+        }
+
+        // Calculate hex center position - for pointy-topped, odd rows are offset right
+        const isOddRow = row % 2 === 1;
+        const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
+        const cy = padding + hexSize + row * hexVertSpacing;
+        
+        const path = createHexPath(cx, cy, hexSize);
+
+        // Check for walls to neighbors
+        const neighbors = getHexNeighbors(row, col);
+        const walls: { x1: number; y1: number; x2: number; y2: number }[] = [];
+        
+        for (const [nRow, nCol, direction] of neighbors) {
+          if (hasWall(row, col, nRow, nCol)) {
+            const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexSize);
+            if (segment) {
+              walls.push(segment);
+            }
+          }
+        }
+        
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls });
+      }
+    }
+    
     return (
       <div
         className="grid-container"
@@ -249,72 +307,46 @@ export const Grid: React.FC<GridProps> = ({
         }}
       >
         <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
-          {/* Render hex cells */}
-          {Array.from({ length: grid.height }, (_, row) =>
-            Array.from({ length: grid.width }, (_, col) => {
-              const inputColor = grid.colors[row][col];
-              const displayColor =
-                solution && inputColor === null
-                  ? solution.assignedColors[row][col]
-                  : inputColor;
-              const isBlank = inputColor === null && !solution;
-              const isHatch = displayColor === HATCH_COLOR;
-              
-              let fill: string;
-              if (isBlank) {
-                fill = BLANK_COLOR;
-              } else if (isHatch) {
-                fill = HATCH_BG_COLOR;
-              } else {
-                fill = COLORS[(displayColor ?? 0) % COLORS.length];
-              }
-
-              // Calculate hex center position - for pointy-topped, odd rows are offset right
-              const isOddRow = row % 2 === 1;
-              const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
-              const cy = padding + hexSize + row * hexVertSpacing;
-              
-              const path = createHexPath(cx, cy, hexSize);
-
-              // Check for walls to neighbors
-              const neighbors = getHexNeighbors(row, col);
-              const cellWalls: { x1: number; y1: number; x2: number; y2: number }[] = [];
-              
-              for (const [nRow, nCol, direction] of neighbors) {
-                if (hasWall(row, col, nRow, nCol)) {
-                  const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexSize);
-                  if (segment) {
-                    cellWalls.push(segment);
-                  }
-                }
-              }
-
-              return (
-                <g key={`${row}-${col}`}>
-                  <path
-                    d={path}
-                    fill={fill}
-                    stroke="none"
-                    style={{ cursor: "pointer" }}
-                    onMouseDown={() => handleMouseDown(row, col)}
-                    onMouseEnter={() => handleMouseEnter(row, col)}
-                  />
-                  {/* Draw walls for this cell */}
-                  {cellWalls.map((wall, i) => (
-                    <line
-                      key={`wall-${i}`}
-                      x1={wall.x1}
-                      y1={wall.y1}
-                      x2={wall.x2}
-                      y2={wall.y2}
-                      stroke="#2c3e50"
-                      strokeWidth={wallThickness}
-                      strokeLinecap="round"
-                    />
-                  ))}
-                </g>
-              );
-            })
+          {/* Define patterns for blank and hatch fills */}
+          <defs>
+            <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect width="10" height="10" fill="#f5f5f5"/>
+              <line x1="0" y1="0" x2="10" y2="10" stroke="#e0e0e0" strokeWidth="2"/>
+            </pattern>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#fffde7"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+          </defs>
+          
+          {/* First pass: render all hex fills */}
+          {hexData.map(({ row, col, path, fill }) => (
+            <path
+              key={`fill-${row}-${col}`}
+              d={path}
+              fill={fill}
+              stroke="none"
+              style={{ cursor: "pointer" }}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+            />
+          ))}
+          
+          {/* Second pass: render all walls on top */}
+          {hexData.flatMap(({ row, col, walls }) =>
+            walls.map((wall, i) => (
+              <line
+                key={`wall-${row}-${col}-${i}`}
+                x1={wall.x1}
+                y1={wall.y1}
+                x2={wall.x2}
+                y2={wall.y2}
+                stroke="#2c3e50"
+                strokeWidth={wallThickness}
+                strokeLinecap="round"
+              />
+            ))
           )}
         </svg>
       </div>
