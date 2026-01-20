@@ -6,6 +6,7 @@
 
 export type { Clause, FormulaBuilder, Literal, SATSolver, SolveResult } from "./types";
 export {
+  addAtLeastKFalse,
   constrainBinaryEqual,
   constrainLessThan,
   createBinaryIntVariables,

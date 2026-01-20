@@ -323,3 +323,121 @@ export function constrainLessThan(
   // Final constraint: the overall result (at LSB level) must be true
   builder.addUnit(ltSoFar[0]);
 }
+
+/**
+ * Utility: Add constraint that at least K of the literals must be false (i.e., at least K variables are false)
+ * This is equivalent to: the negations of the literals sum to at least K
+ * We use a simple sequential counter encoding for small to medium K values.
+ */
+export function addAtLeastKFalse(
+  builder: FormulaBuilder,
+  literals: number[],
+  k: number,
+  auxPrefix: string
+): void {
+  const n = literals.length;
+  
+  // Trivial cases
+  if (k <= 0) return; // No constraint needed
+  if (k > n) {
+    // Impossible: we can't have more than n literals be false
+    builder.solver.addClause([]); // Add empty clause to make UNSAT
+    return;
+  }
+  if (k === n) {
+    // All literals must be false
+    for (const lit of literals) {
+      builder.addUnit(-lit);
+    }
+    return;
+  }
+  
+  // Sequential counter encoding: 
+  // count[i][j] = true if at least j of the first i literals are false
+  // count[i][0] is always true
+  // count[i][j] for j > i is always false
+  // count[i][j] = count[i-1][j] ∨ (count[i-1][j-1] ∧ ¬x[i])
+  //
+  // We only need to track up to k values
+  
+  // Create auxiliary variables: count[i][j] for i in 1..n, j in 1..min(i, k)
+  // We'll use a 2D map keyed by "i_j"
+  const countVars = new Map<string, number>();
+  
+  function getCountVar(i: number, j: number): number | undefined {
+    if (j === 0) return undefined; // Always true, don't need a variable
+    if (j > i || j > k) return undefined; // Always false conceptually
+    const key = `${auxPrefix}_count_${i}_${j}`;
+    let v = countVars.get(key);
+    if (v === undefined) {
+      v = builder.createNamedVariable(key);
+      countVars.set(key, v);
+    }
+    return v;
+  }
+  
+  // Base case: i = 1 (first literal)
+  // count[1][1] = ¬x[0] (true iff first literal is false)
+  const count11 = getCountVar(1, 1)!;
+  // count11 ↔ ¬x[0]
+  builder.solver.addClause([-count11, -literals[0]]); // count11 → ¬x[0]
+  builder.solver.addClause([count11, literals[0]]);   // ¬x[0] → count11
+  
+  // Inductive case: for i from 2 to n
+  for (let i = 2; i <= n; i++) {
+    const xi = literals[i - 1]; // 0-indexed literal
+    
+    for (let j = 1; j <= Math.min(i, k); j++) {
+      const countIJ = getCountVar(i, j)!;
+      const countPrev = getCountVar(i - 1, j);      // count[i-1][j]
+      const countPrevM1 = getCountVar(i - 1, j - 1); // count[i-1][j-1]
+      
+      // count[i][j] ↔ count[i-1][j] ∨ (count[i-1][j-1] ∧ ¬xi)
+      // Note: if j > i-1, then count[i-1][j] is conceptually false
+      // If j-1 === 0, then count[i-1][j-1] is conceptually true
+      
+      if (j > i - 1) {
+        // count[i-1][j] is false, so count[i][j] = (count[i-1][j-1] ∧ ¬xi)
+        if (j - 1 === 0) {
+          // count[i-1][0] is true, so count[i][j] = ¬xi
+          builder.solver.addClause([-countIJ, -xi]);
+          builder.solver.addClause([countIJ, xi]);
+        } else {
+          // count[i][j] = (countPrevM1 ∧ ¬xi)
+          builder.solver.addClause([-countIJ, countPrevM1!]);
+          builder.solver.addClause([-countIJ, -xi]);
+          builder.solver.addClause([countIJ, -countPrevM1!, xi]);
+        }
+      } else if (j - 1 === 0) {
+        // count[i-1][j-1] = true, so count[i][j] = count[i-1][j] ∨ ¬xi
+        // countIJ ↔ (countPrev ∨ ¬xi)
+        // countIJ → (countPrev ∨ ¬xi): -countIJ ∨ countPrev ∨ ¬xi
+        builder.solver.addClause([-countIJ, countPrev!, -xi]);
+        // (countPrev ∨ ¬xi) → countIJ: 
+        //   countPrev → countIJ: -countPrev ∨ countIJ
+        //   ¬xi → countIJ: xi ∨ countIJ
+        builder.solver.addClause([countIJ, -countPrev!]);
+        builder.solver.addClause([countIJ, xi]);
+      } else {
+        // General case: count[i][j] = countPrev ∨ (countPrevM1 ∧ ¬xi)
+        // Introduce auxiliary for (countPrevM1 ∧ ¬xi)
+        const andAux = builder.createNamedVariable(`${auxPrefix}_and_${i}_${j}`);
+        // andAux ↔ (countPrevM1 ∧ ¬xi)
+        builder.solver.addClause([-andAux, countPrevM1!]);
+        builder.solver.addClause([-andAux, -xi]);
+        builder.solver.addClause([andAux, -countPrevM1!, xi]);
+        
+        // countIJ ↔ (countPrev ∨ andAux)
+        builder.solver.addClause([-countIJ, countPrev!, andAux]);
+        builder.solver.addClause([countIJ, -countPrev!]);
+        builder.solver.addClause([countIJ, -andAux]);
+      }
+    }
+  }
+  
+  // Final constraint: count[n][k] must be true
+  const finalCount = getCountVar(n, k);
+  if (finalCount !== undefined) {
+    builder.addUnit(finalCount);
+  }
+}

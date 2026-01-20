@@ -10,6 +10,7 @@ export type SolverType = "minisat" | "cadical";
 export interface SolverRequest {
   grid: ColorGrid;
   numColors: number;
+  minWallsProportion?: number;
 }
 
 export interface SolverResponse {
@@ -39,10 +40,10 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { grid, numColors } = event.data;
+  const { grid, numColors, minWallsProportion } = event.data;
 
   try {
-    const solution = solveGridColoring(grid, numColors);
+    const solution = solveGridColoring(grid, numColors, { minWallsProportion });
     const response: SolverResponse = {
       success: true,
       solution,
