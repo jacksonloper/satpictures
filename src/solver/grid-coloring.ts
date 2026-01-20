@@ -410,11 +410,26 @@ export function solveGridColoring(
         builder.addOr(incidentEdges);
 
         // At most 3 edges: for each subset of 4 edges, at least one must be false
-        // This is equivalent to: NOT(all 4 true) for each 4-combination
+        // This means we forbid any 4 edges from being true simultaneously
         if (incidentEdges.length >= 4) {
-          // Interior cells can have more than 3 neighbors (4 for square, 6 for hex)
-          // If 4 or more are present, add constraint that at least one must be false
-          builder.solver.addClause(incidentEdges.map((e) => -e)); // At least one false = at most 3 true
+          // Generate all 4-combinations and add a clause for each
+          // For each combo of 4, at least one must be false (NOT all 4 true)
+          const n = incidentEdges.length;
+          for (let i = 0; i < n - 3; i++) {
+            for (let j = i + 1; j < n - 2; j++) {
+              for (let k = j + 1; k < n - 1; k++) {
+                for (let l = k + 1; l < n; l++) {
+                  // At least one of these 4 edges must be false
+                  builder.solver.addClause([
+                    -incidentEdges[i],
+                    -incidentEdges[j],
+                    -incidentEdges[k],
+                    -incidentEdges[l],
+                  ]);
+                }
+              }
+            }
+          }
         }
       }
     }
