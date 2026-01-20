@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution } from "../solver";
+import type { ColorGrid, GridSolution, GridType } from "../solver";
 import { HATCH_COLOR } from "../solver";
 
 // Re-export HATCH_COLOR for convenience
@@ -54,6 +54,7 @@ interface GridProps {
   onCellClick: (row: number, col: number) => void;
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
+  gridType?: GridType;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -63,6 +64,7 @@ export const Grid: React.FC<GridProps> = ({
   onCellClick,
   onCellDrag,
   cellSize = 40,
+  gridType = "square",
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -118,8 +120,188 @@ export const Grid: React.FC<GridProps> = ({
   );
 
   const wallThickness = 3;
-  const totalWidth = grid.width * cellSize + wallThickness;
-  const totalHeight = grid.height * cellSize + wallThickness;
+  
+  // Hex grid calculations
+  // Using flat-topped hexagons with odd-r offset coordinates
+  const hexWidth = cellSize;
+  const hexHeight = Math.sqrt(3) * cellSize / 2;
+  const hexHorizSpacing = hexWidth * 0.75;
+  const hexVertSpacing = hexHeight;
+  
+  // Calculate total dimensions based on grid type
+  const totalWidth = gridType === "hex"
+    ? (grid.width - 1) * hexHorizSpacing + hexWidth + wallThickness * 2
+    : grid.width * cellSize + wallThickness;
+  const totalHeight = gridType === "hex"
+    ? grid.height * hexVertSpacing + hexHeight / 2 + wallThickness * 2
+    : grid.height * cellSize + wallThickness;
+
+  // Get hex neighbors (odd-r offset coordinates)
+  const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
+    const isOddRow = row % 2 === 1;
+    if (isOddRow) {
+      return [
+        [row - 1, col, "NW"],     // NW
+        [row - 1, col + 1, "NE"], // NE
+        [row, col - 1, "W"],      // W
+        [row, col + 1, "E"],      // E
+        [row + 1, col, "SW"],     // SW
+        [row + 1, col + 1, "SE"], // SE
+      ];
+    } else {
+      return [
+        [row - 1, col - 1, "NW"], // NW
+        [row - 1, col, "NE"],     // NE
+        [row, col - 1, "W"],      // W
+        [row, col + 1, "E"],      // E
+        [row + 1, col - 1, "SW"], // SW
+        [row + 1, col, "SE"],     // SE
+      ];
+    }
+  };
+
+  // Create SVG hexagon path
+  const createHexPath = (cx: number, cy: number, size: number): string => {
+    const w = size;
+    const h = Math.sqrt(3) * size / 2;
+    // Flat-topped hexagon
+    const points = [
+      [cx - w / 2, cy],           // Left
+      [cx - w / 4, cy - h / 2],   // Top-left
+      [cx + w / 4, cy - h / 2],   // Top-right
+      [cx + w / 2, cy],           // Right
+      [cx + w / 4, cy + h / 2],   // Bottom-right
+      [cx - w / 4, cy + h / 2],   // Bottom-left
+    ];
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+  };
+
+  // Create wall segment between two hex cells
+  const getHexWallSegment = (
+    _row: number, _col: number, 
+    nRow: number, nCol: number,
+    direction: string,
+    cx: number, cy: number,
+    size: number
+  ): { x1: number; y1: number; x2: number; y2: number } | null => {
+    // Check if neighbor is within bounds
+    if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
+      return null; // Boundary - will be handled by the border
+    }
+    
+    const w = size;
+    const h = Math.sqrt(3) * size / 2;
+    
+    // Return the edge segment for this direction
+    switch (direction) {
+      case "NW":
+        return { x1: cx - w / 2, y1: cy, x2: cx - w / 4, y2: cy - h / 2 };
+      case "NE":
+        return { x1: cx - w / 4, y1: cy - h / 2, x2: cx + w / 4, y2: cy - h / 2 };
+      case "E":
+        return { x1: cx + w / 4, y1: cy - h / 2, x2: cx + w / 2, y2: cy };
+      case "SE":
+        return { x1: cx + w / 2, y1: cy, x2: cx + w / 4, y2: cy + h / 2 };
+      case "SW":
+        return { x1: cx + w / 4, y1: cy + h / 2, x2: cx - w / 4, y2: cy + h / 2 };
+      case "W":
+        return { x1: cx - w / 4, y1: cy + h / 2, x2: cx - w / 2, y2: cy };
+      default:
+        return null;
+    }
+  };
+
+  // For hex grid, we use SVG
+  if (gridType === "hex") {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+    
+    return (
+      <div
+        className="grid-container"
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
+          {/* Render hex cells */}
+          {Array.from({ length: grid.height }, (_, row) =>
+            Array.from({ length: grid.width }, (_, col) => {
+              const inputColor = grid.colors[row][col];
+              const displayColor =
+                solution && inputColor === null
+                  ? solution.assignedColors[row][col]
+                  : inputColor;
+              const isBlank = inputColor === null && !solution;
+              const isHatch = displayColor === HATCH_COLOR;
+              
+              let fill: string;
+              if (isBlank) {
+                fill = BLANK_COLOR;
+              } else if (isHatch) {
+                fill = HATCH_BG_COLOR;
+              } else {
+                fill = COLORS[(displayColor ?? 0) % COLORS.length];
+              }
+
+              // Calculate hex center position
+              const isOddRow = row % 2 === 1;
+              const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexHorizSpacing / 2 : 0);
+              const cy = padding + hexHeight / 2 + row * hexVertSpacing;
+              
+              const path = createHexPath(cx, cy, hexWidth);
+
+              // Check for walls to neighbors
+              const neighbors = getHexNeighbors(row, col);
+              const cellWalls: { x1: number; y1: number; x2: number; y2: number }[] = [];
+              
+              for (const [nRow, nCol, direction] of neighbors) {
+                if (hasWall(row, col, nRow, nCol)) {
+                  const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexWidth);
+                  if (segment) {
+                    cellWalls.push(segment);
+                  }
+                }
+              }
+
+              return (
+                <g key={`${row}-${col}`}>
+                  <path
+                    d={path}
+                    fill={fill}
+                    stroke="#2c3e50"
+                    strokeWidth={wallThickness}
+                    style={{ cursor: "pointer" }}
+                    onMouseDown={() => handleMouseDown(row, col)}
+                    onMouseEnter={() => handleMouseEnter(row, col)}
+                  />
+                  {/* Draw walls for this cell */}
+                  {cellWalls.map((wall, i) => (
+                    <line
+                      key={`wall-${i}`}
+                      x1={wall.x1}
+                      y1={wall.y1}
+                      x2={wall.x2}
+                      y2={wall.y2}
+                      stroke="#2c3e50"
+                      strokeWidth={wallThickness}
+                      strokeLinecap="round"
+                    />
+                  ))}
+                </g>
+              );
+            })
+          )}
+        </svg>
+      </div>
+    );
+  }
+
+  // Square grid rendering (original code)
 
   return (
     <div
@@ -305,6 +487,8 @@ interface ControlsProps {
   minWallsProportion?: number;
   onMinWallsProportionChange?: (proportion: number) => void;
   solution?: GridSolution | null;
+  gridType?: GridType;
+  onGridTypeChange?: (gridType: GridType) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -325,6 +509,8 @@ export const Controls: React.FC<ControlsProps> = ({
   minWallsProportion = 0,
   onMinWallsProportionChange,
   solution,
+  gridType = "square",
+  onGridTypeChange,
 }) => {
   const handleDownloadJSON = useCallback(() => {
     if (!solution) return;
@@ -437,6 +623,25 @@ export const Controls: React.FC<ControlsProps> = ({
             >
               <option value="minisat">MiniSat</option>
               <option value="cadical">CaDiCaL</option>
+            </select>
+          </label>
+        )}
+        {onGridTypeChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>Grid:</span>
+            <select
+              value={gridType}
+              onChange={(e) => onGridTypeChange(e.target.value as GridType)}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border: "1px solid #bdc3c7",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              <option value="square">Square</option>
+              <option value="hex">Hex</option>
             </select>
           </label>
         )}

@@ -12,6 +12,7 @@ export {
   type Edge,
   type GridPoint,
   type GridSolution,
+  type GridType,
   type SolveOptions,
 } from "./grid-coloring";
 

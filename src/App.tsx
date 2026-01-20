@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, Grid } from "./components";
-import type { ColorGrid, GridSolution, SolverRequest, SolverResponse, SolverType } from "./solver";
+import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
@@ -48,6 +48,7 @@ function App() {
   const [solverType, setSolverType] = useState<SolverType>("minisat");
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [minWallsProportion, setMinWallsProportion] = useState(0);
+  const [gridType, setGridType] = useState<GridType>("square");
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -177,9 +178,9 @@ function App() {
     };
 
     // Send the solve request
-    const request: SolverRequest = { grid, numColors, minWallsProportion };
+    const request: SolverRequest = { grid, numColors, minWallsProportion, gridType };
     worker.postMessage(request);
-  }, [grid, numColors, solverType, minWallsProportion]);
+  }, [grid, numColors, solverType, minWallsProportion, gridType]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -237,6 +238,8 @@ function App() {
           minWallsProportion={minWallsProportion}
           onMinWallsProportionChange={setMinWallsProportion}
           solution={solution}
+          gridType={gridType}
+          onGridTypeChange={setGridType}
         />
 
         <h3>Colors</h3>
@@ -255,6 +258,7 @@ function App() {
           onCellClick={handleCellClick}
           onCellDrag={handleCellDrag}
           cellSize={40}
+          gridType={gridType}
         />
       </div>
     </div>
