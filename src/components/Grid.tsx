@@ -303,6 +303,7 @@ interface ControlsProps {
   solveTime?: number | null;
   minWallsProportion?: number;
   onMinWallsProportionChange?: (proportion: number) => void;
+  solution?: GridSolution | null;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -321,7 +322,69 @@ export const Controls: React.FC<ControlsProps> = ({
   solveTime,
   minWallsProportion = 0,
   onMinWallsProportionChange,
+  solution,
 }) => {
+  const handleDownloadJSON = useCallback(() => {
+    if (!solution) return;
+
+    // Convert wall edges to line segments
+    // Each wall is between two adjacent cells
+    // For a wall between (r1, c1) and (r2, c2):
+    // - Vertical edge (same col, adjacent rows): horizontal wall line from (c1, r2) to (c1+1, r2)
+    // - Horizontal edge (same row, adjacent cols): vertical wall line from (c2, r1) to (c2, r1+1)
+    const walls = solution.wallEdges.map(edge => {
+      const { u, v } = edge;
+      // Ensure u is the "smaller" point for consistent ordering
+      const [p1, p2] = u.row < v.row || (u.row === v.row && u.col < v.col) 
+        ? [u, v] : [v, u];
+      
+      if (p1.row === p2.row) {
+        // Horizontal edge (same row) -> vertical wall between cells
+        // Wall goes from (p2.col, p1.row) to (p2.col, p1.row + 1)
+        return {
+          start: { x: p2.col, y: p1.row },
+          end: { x: p2.col, y: p1.row + 1 }
+        };
+      } else {
+        // Vertical edge (same col) -> horizontal wall between cells
+        // Wall goes from (p1.col, p2.row) to (p1.col + 1, p2.row)
+        return {
+          start: { x: p1.col, y: p2.row },
+          end: { x: p1.col + 1, y: p2.row }
+        };
+      }
+    });
+
+    // Add boundary walls (outer edges of the grid)
+    type WallSegment = { start: { x: number; y: number }; end: { x: number; y: number } };
+    const boundaryWalls: WallSegment[] = [
+      // Top edge
+      { start: { x: 0, y: 0 }, end: { x: gridWidth, y: 0 } },
+      // Bottom edge
+      { start: { x: 0, y: gridHeight }, end: { x: gridWidth, y: gridHeight } },
+      // Left edge
+      { start: { x: 0, y: 0 }, end: { x: 0, y: gridHeight } },
+      // Right edge
+      { start: { x: gridWidth, y: 0 }, end: { x: gridWidth, y: gridHeight } },
+    ];
+
+    const jsonData = {
+      walls: [...boundaryWalls, ...walls],
+      colors: solution.assignedColors
+    };
+
+    // Create and download the JSON file
+    const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'grid-solution.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [solution, gridWidth, gridHeight]);
+
   return (
     <div style={{ marginBottom: "16px" }}>
       <div
@@ -432,6 +495,21 @@ export const Controls: React.FC<ControlsProps> = ({
         >
           Maze Setup
         </button>
+        {solution && (
+          <button
+            onClick={handleDownloadJSON}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#9b59b6",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Download JSON
+          </button>
+        )}
       </div>
       {solutionStatus !== "none" && (
         <div

@@ -224,6 +224,7 @@ function App() {
           solveTime={solveTime}
           minWallsProportion={minWallsProportion}
           onMinWallsProportionChange={setMinWallsProportion}
+          solution={solution}
         />
 
         <h3>Colors</h3>
