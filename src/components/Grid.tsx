@@ -135,7 +135,7 @@ export const Grid: React.FC<GridProps> = ({
   // In truncated square tiling, there are small squares between octagons at the corners
   // We render diagonal bands through those squares (not the squares themselves)
   // The bands are half-width (narrower than the gap)
-  const octInset = cellSize * 0.2; // How much the octagon corners are cut
+  const octInset = cellSize * 0.3; // How much the octagon corners are cut
   const octBandWidth = octInset; // Band width is half of the gap (the gap is 2*octInset diagonally)
   
   // Calculate total dimensions based on grid type
@@ -466,37 +466,46 @@ export const Grid: React.FC<GridProps> = ({
         
         // Down-slant band: connects top-left to bottom-right
         // This band runs from NW to SE through the gap
+        // Only draw the band if there's a passage (not a wall)
         const downSlantWall = hasWall(tlRow, tlCol, brRow, brCol);
-        const downSlantFill = downSlantWall ? "#2c3e50" : getCellColor(tlRow, tlCol);
         
-        // Band spans from top-left corner to bottom-right corner of the gap
-        // Band width is octBandWidth, centered on the diagonal
-        const halfBand = octBandWidth / 2;
-        // Down-slant diagonal goes from (-gapHalf, -gapHalf) to (gapHalf, gapHalf)
-        // Perpendicular direction is (1, -1) normalized
-        const downPerpX = halfBand * Math.SQRT1_2;
-        const downPerpY = halfBand * Math.SQRT1_2;
-        const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} ` +
-                        `L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} ` +
-                        `L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} ` +
-                        `L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
-        downSlantBands.push({ path: downPath, fill: downSlantFill });
+        if (!downSlantWall) {
+          const downSlantFill = getCellColor(tlRow, tlCol);
+          
+          // Band spans from top-left corner to bottom-right corner of the gap
+          // Band width is octBandWidth, centered on the diagonal
+          const halfBand = octBandWidth / 2;
+          // Down-slant diagonal goes from (-gapHalf, -gapHalf) to (gapHalf, gapHalf)
+          // Perpendicular direction is (1, -1) normalized
+          const downPerpX = halfBand * Math.SQRT1_2;
+          const downPerpY = halfBand * Math.SQRT1_2;
+          const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} ` +
+                          `L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} ` +
+                          `L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} ` +
+                          `L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
+          downSlantBands.push({ path: downPath, fill: downSlantFill });
+        }
         
         // Up-slant band: connects top-right to bottom-left
         // This band runs from NE to SW through the gap
+        // Only draw the band if there's a passage (not a wall)
         const upSlantWall = hasWall(trRow, trCol, blRow, blCol);
-        const upSlantFill = upSlantWall ? "#2c3e50" : getCellColor(trRow, trCol);
         
-        // Band spans from top-right corner to bottom-left corner of the gap
-        // Up-slant diagonal goes from (gapHalf, -gapHalf) to (-gapHalf, gapHalf)
-        // Perpendicular direction is (1, 1) normalized
-        const upPerpX = halfBand * Math.SQRT1_2;
-        const upPerpY = halfBand * Math.SQRT1_2;
-        const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} ` +
-                      `L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} ` +
-                      `L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} ` +
-                      `L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
-        upSlantBands.push({ path: upPath, fill: upSlantFill });
+        if (!upSlantWall) {
+          const upSlantFill = getCellColor(trRow, trCol);
+          
+          // Band spans from top-right corner to bottom-left corner of the gap
+          // Up-slant diagonal goes from (gapHalf, -gapHalf) to (-gapHalf, gapHalf)
+          // Perpendicular direction is (1, 1) normalized
+          const halfBand = octBandWidth / 2;
+          const upPerpX = halfBand * Math.SQRT1_2;
+          const upPerpY = halfBand * Math.SQRT1_2;
+          const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} ` +
+                        `L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} ` +
+                        `L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} ` +
+                        `L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
+          upSlantBands.push({ path: upPath, fill: upSlantFill });
+        }
       }
     }
 
