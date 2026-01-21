@@ -55,6 +55,7 @@ interface GridProps {
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
   gridType?: GridType;
+  viewMode?: "sketchpad" | "solution";
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -65,10 +66,14 @@ export const Grid: React.FC<GridProps> = ({
   onCellDrag,
   cellSize = 40,
   gridType = "square",
+  viewMode = "sketchpad",
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
   const [isDragging, setIsDragging] = useState(false);
+
+  // Determine if we should show solution colors (when viewing solution mode and solution exists)
+  const showSolutionColors = viewMode === "solution" && solution !== null;
 
   // Create a set of kept edge keys for quick lookup
   const keptEdgeSet = useMemo(() => {
@@ -270,11 +275,14 @@ export const Grid: React.FC<GridProps> = ({
     for (let row = 0; row < grid.height; row++) {
       for (let col = 0; col < grid.width; col++) {
         const inputColor = grid.colors[row][col];
-        const displayColor =
-          solution && inputColor === null
-            ? solution.assignedColors[row][col]
-            : inputColor;
-        const isBlank = inputColor === null && !solution;
+        // In solution view mode, always show solution colors
+        // In sketchpad mode, show user colors (filling nulls with solution if available)
+        const displayColor = showSolutionColors
+          ? solution!.assignedColors[row][col]
+          : (solution && inputColor === null
+              ? solution.assignedColors[row][col]
+              : inputColor);
+        const isBlank = inputColor === null && !showSolutionColors && !solution;
         const isHatch = displayColor === HATCH_COLOR;
         
         let fill: string;
@@ -341,7 +349,7 @@ export const Grid: React.FC<GridProps> = ({
               d={path}
               fill={fill}
               stroke="none"
-              style={{ cursor: "pointer" }}
+              style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
               onMouseDown={() => handleMouseDown(row, col)}
               onMouseEnter={() => handleMouseEnter(row, col)}
             />
@@ -393,10 +401,14 @@ export const Grid: React.FC<GridProps> = ({
     // Helper to get color for a cell
     const getCellColor = (row: number, col: number): string => {
       const inputColor = grid.colors[row][col];
-      const displayColor = solution && inputColor === null
-        ? solution.assignedColors[row][col]
-        : inputColor;
-      const isBlank = inputColor === null && !solution;
+      // In solution view mode, always show solution colors
+      // In sketchpad mode, show user colors (filling nulls with solution if available)
+      const displayColor = showSolutionColors
+        ? solution!.assignedColors[row][col]
+        : (solution && inputColor === null
+            ? solution.assignedColors[row][col]
+            : inputColor);
+      const isBlank = inputColor === null && !showSolutionColors && !solution;
       const isHatch = displayColor === HATCH_COLOR;
       
       if (isBlank) {
@@ -606,7 +618,7 @@ export const Grid: React.FC<GridProps> = ({
               d={path}
               fill={fill}
               stroke="none"
-              style={{ cursor: "pointer" }}
+              style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
               onMouseDown={() => handleMouseDown(row, col)}
               onMouseEnter={() => handleMouseEnter(row, col)}
             />
@@ -671,12 +683,14 @@ export const Grid: React.FC<GridProps> = ({
       {Array.from({ length: grid.height }, (_, row) =>
         Array.from({ length: grid.width }, (_, col) => {
           const inputColor = grid.colors[row][col];
-          // Use assigned color from solution if available, otherwise use input
-          const displayColor =
-            solution && inputColor === null
-              ? solution.assignedColors[row][col]
-              : inputColor;
-          const isBlank = inputColor === null && !solution;
+          // In solution view mode, always show solution colors
+          // In sketchpad mode, show user colors (filling nulls with solution if available)
+          const displayColor = showSolutionColors
+            ? solution!.assignedColors[row][col]
+            : (solution && inputColor === null
+                ? solution.assignedColors[row][col]
+                : inputColor);
+          const isBlank = inputColor === null && !showSolutionColors && !solution;
           const isHatch = displayColor === HATCH_COLOR;
           
           // Determine background
@@ -710,7 +724,7 @@ export const Grid: React.FC<GridProps> = ({
                 height: cellSize,
                 backgroundColor: bgColor,
                 background: bgPattern,
-                cursor: "pointer",
+                cursor: viewMode === "solution" ? "default" : "pointer",
                 boxSizing: "border-box",
                 // Right wall
                 borderRight: wallRight
@@ -839,6 +853,12 @@ interface ControlsProps {
   solution?: GridSolution | null;
   gridType?: GridType;
   onGridTypeChange?: (gridType: GridType) => void;
+  viewMode?: "sketchpad" | "solution";
+  onViewModeChange?: (mode: "sketchpad" | "solution") => void;
+  onCopyToSketchpad?: () => void;
+  onDownloadColors?: () => void;
+  onUploadColors?: (file: File) => void;
+  grid?: { colors: (number | null)[][] };
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -861,7 +881,27 @@ export const Controls: React.FC<ControlsProps> = ({
   solution,
   gridType = "square",
   onGridTypeChange,
+  viewMode = "sketchpad",
+  onViewModeChange,
+  onCopyToSketchpad,
+  onDownloadColors,
+  onUploadColors,
+  grid,
 }) => {
+  // File input ref for upload
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUploadColors) {
+      onUploadColors(file);
+    }
+    // Reset input so same file can be uploaded again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [onUploadColors]);
+
   const handleDownloadSVG = useCallback(() => {
     if (!solution) return;
 
@@ -1317,6 +1357,122 @@ export const Controls: React.FC<ControlsProps> = ({
           </button>
         )}
       </div>
+      
+      {/* View Mode Toggle - only show when solution exists */}
+      {solution && onViewModeChange && (
+        <div style={{ marginTop: "12px" }}>
+          <div style={{ 
+            display: "flex", 
+            alignItems: "center", 
+            gap: "8px",
+            marginBottom: "8px",
+          }}>
+            <span style={{ fontWeight: "bold", fontSize: "14px" }}>Viewing:</span>
+            <div style={{ display: "flex", gap: "4px" }}>
+              <button
+                onClick={() => onViewModeChange("sketchpad")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: viewMode === "sketchpad" ? "#3498db" : "#ecf0f1",
+                  color: viewMode === "sketchpad" ? "white" : "#2c3e50",
+                  border: "1px solid #bdc3c7",
+                  borderRadius: "4px 0 0 4px",
+                  cursor: "pointer",
+                  fontWeight: viewMode === "sketchpad" ? "bold" : "normal",
+                }}
+              >
+                Sketchpad
+              </button>
+              <button
+                onClick={() => onViewModeChange("solution")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: viewMode === "solution" ? "#27ae60" : "#ecf0f1",
+                  color: viewMode === "solution" ? "white" : "#2c3e50",
+                  border: "1px solid #bdc3c7",
+                  borderRadius: "0 4px 4px 0",
+                  cursor: "pointer",
+                  fontWeight: viewMode === "solution" ? "bold" : "normal",
+                }}
+              >
+                SAT Solution
+              </button>
+            </div>
+          </div>
+          <p style={{ 
+            fontSize: "12px", 
+            color: "#7f8c8d", 
+            margin: "0 0 8px 0",
+            fontStyle: "italic",
+          }}>
+            {viewMode === "sketchpad" 
+              ? "Editing sketchpad (user colors). Click cells to paint." 
+              : "Viewing SAT-generated solution (read-only)."}
+          </p>
+          {viewMode === "solution" && onCopyToSketchpad && (
+            <button
+              onClick={onCopyToSketchpad}
+              style={{
+                padding: "6px 12px",
+                backgroundColor: "#16a085",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "13px",
+              }}
+            >
+              Copy to Sketchpad
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Color CSV Download/Upload */}
+      <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {onDownloadColors && (grid || solution) && (
+          <button
+            onClick={onDownloadColors}
+            style={{
+              padding: "6px 12px",
+              backgroundColor: "#8e44ad",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "13px",
+            }}
+          >
+            Download Colors (CSV)
+          </button>
+        )}
+        {onUploadColors && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              style={{ display: "none" }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: "6px 12px",
+                backgroundColor: "#2980b9",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "13px",
+              }}
+            >
+              Upload Colors (CSV)
+            </button>
+          </>
+        )}
+      </div>
+
       {solutionStatus !== "none" && (
         <div
           style={{

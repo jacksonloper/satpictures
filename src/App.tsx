@@ -5,6 +5,9 @@ import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
 
+// View mode: "sketchpad" is user-editable, "solution" is SAT-generated (read-only)
+type ViewMode = "sketchpad" | "solution";
+
 function createEmptyGrid(width: number, height: number): ColorGrid {
   return {
     width,
@@ -49,6 +52,7 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
+  const [viewMode, setViewMode] = useState<ViewMode>("sketchpad");
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -65,6 +69,9 @@ function App() {
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
+      // Don't allow editing when viewing SAT solution
+      if (viewMode === "solution") return;
+      
       setGrid((prev) => {
         const newColors = prev.colors.map((r) => [...r]);
         newColors[row][col] = selectedColor;
@@ -74,11 +81,14 @@ function App() {
       setSolutionStatus("none");
       setErrorMessage(null);
     },
-    [selectedColor]
+    [selectedColor, viewMode]
   );
 
   const handleCellDrag = useCallback(
     (row: number, col: number) => {
+      // Don't allow editing when viewing SAT solution
+      if (viewMode === "solution") return;
+      
       setGrid((prev) => {
         const newColors = prev.colors.map((r) => [...r]);
         newColors[row][col] = selectedColor;
@@ -88,7 +98,7 @@ function App() {
       setSolutionStatus("none");
       setErrorMessage(null);
     },
-    [selectedColor]
+    [selectedColor, viewMode]
   );
 
   const handleWidthChange = useCallback((width: number) => {
@@ -215,6 +225,104 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
+    setViewMode("sketchpad");
+  }, []);
+
+  // Copy SAT-generated colors to sketchpad
+  const handleCopyToSketchpad = useCallback(() => {
+    if (!solution) return;
+    
+    setGrid({
+      width: gridWidth,
+      height: gridHeight,
+      colors: solution.assignedColors.map(row => [...row]),
+    });
+    setSolution(null);
+    setSolutionStatus("none");
+    setErrorMessage(null);
+    setSolveTime(null);
+    setViewMode("sketchpad");
+  }, [solution, gridWidth, gridHeight]);
+
+  // Download current colorset as CSV
+  const handleDownloadColors = useCallback(() => {
+    // Get the colors based on current view mode
+    const colors = viewMode === "solution" && solution
+      ? solution.assignedColors
+      : grid.colors;
+    
+    // Convert to CSV (no headers, integer values, -1 for null/clear)
+    const csvContent = colors
+      .map(row => row.map(c => c === null ? -1 : c).join(","))
+      .join("\n");
+    
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = viewMode === "solution" ? "sat-colors.csv" : "sketchpad-colors.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [viewMode, solution, grid]);
+
+  // Upload colorset from CSV
+  const handleUploadColors = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      if (!content || !content.trim()) return;
+      
+      const lines = content.trim().split("\n");
+      if (lines.length === 0) return;
+      
+      const parsedColors: (number | null)[][] = lines.map(line => 
+        line.split(",").map(val => {
+          const num = parseInt(val.trim(), 10);
+          // Treat -1 as null (clear), invalid numbers as null, and clamp valid colors to valid range
+          if (isNaN(num) || num === -1) return null;
+          // Clamp to valid color range (0-5 for 6 colors, or allow higher values for flexibility)
+          return num >= 0 ? num : null;
+        })
+      );
+      
+      // Determine grid size from CSV
+      const newHeight = parsedColors.length;
+      const newWidth = parsedColors[0]?.length || gridWidth;
+      
+      // Clamp to valid range
+      const clampedWidth = Math.min(Math.max(newWidth, 2), 20);
+      const clampedHeight = Math.min(Math.max(newHeight, 2), 20);
+      
+      // Adjust colors array to fit clamped size
+      const adjustedColors = Array.from({ length: clampedHeight }, (_, row) =>
+        Array.from({ length: clampedWidth }, (_, col) =>
+          row < parsedColors.length && col < (parsedColors[row]?.length || 0)
+            ? parsedColors[row][col]
+            : null
+        )
+      );
+      
+      setGridWidth(clampedWidth);
+      setGridHeight(clampedHeight);
+      setGrid({
+        width: clampedWidth,
+        height: clampedHeight,
+        colors: adjustedColors,
+      });
+      setSolution(null);
+      setSolutionStatus("none");
+      setErrorMessage(null);
+      setSolveTime(null);
+      setViewMode("sketchpad");
+    };
+    reader.readAsText(file);
+  }, [gridWidth]);
+
+  // Handle view mode change
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
   }, []);
 
   return (
@@ -248,6 +356,12 @@ function App() {
           solution={solution}
           gridType={gridType}
           onGridTypeChange={handleGridTypeChange}
+          viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
+          onCopyToSketchpad={handleCopyToSketchpad}
+          onDownloadColors={handleDownloadColors}
+          onUploadColors={handleUploadColors}
+          grid={grid}
         />
 
         <h3>Colors</h3>
@@ -267,6 +381,7 @@ function App() {
           onCellDrag={handleCellDrag}
           cellSize={40}
           gridType={gridType}
+          viewMode={viewMode}
         />
       </div>
     </div>
