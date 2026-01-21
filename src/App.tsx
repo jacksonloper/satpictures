@@ -222,6 +222,7 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
+    setViewMode("sketchpad"); // Switch back to editable mode when compute is cancelled
   }, []);
 
   const handleGridTypeChange = useCallback((newGridType: GridType) => {

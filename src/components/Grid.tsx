@@ -1408,8 +1408,8 @@ export const Controls: React.FC<ControlsProps> = ({
         )}
       </div>
       
-      {/* View Mode Toggle - only show when solution exists */}
-      {solution && onViewModeChange && (
+      {/* View Mode Toggle - always visible */}
+      {onViewModeChange && (
         <div style={{ marginTop: "12px" }}>
           <div style={{ 
             display: "flex", 
@@ -1457,9 +1457,11 @@ export const Controls: React.FC<ControlsProps> = ({
           }}>
             {viewMode === "sketchpad" 
               ? "Editing sketchpad (user colors). Click cells to paint." 
-              : "Viewing SAT-generated solution (read-only)."}
+              : solution 
+                ? "Viewing SAT-generated solution (read-only)."
+                : "No SAT solution available yet. Click Solve to generate one."}
           </p>
-          {viewMode === "solution" && onCopyToSketchpad && (
+          {viewMode === "solution" && solution && onCopyToSketchpad && (
             <button
               onClick={onCopyToSketchpad}
               style={{
