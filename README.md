@@ -1,6 +1,6 @@
 # SatPictures - Grid Coloring Solver
 
-A web application that uses SAT solving to find valid maze configurations where each color region forms a single connected component.
+A web application that uses SAT solving to find valid maze configurations where each color region forms a single connected component.  Live at https://main--taupe-souffle-a1f8fd.netlify.app/
 
 ## Problem Description
 
