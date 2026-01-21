@@ -129,14 +129,28 @@ export const Grid: React.FC<GridProps> = ({
   const hexHeight = 2 * hexSize;
   const hexHorizSpacing = hexWidth;
   const hexVertSpacing = hexHeight * 0.75;
+
+  // Octagon grid calculations
+  // Octagons are laid out on a square grid but with 8 neighbors
+  // In truncated square tiling, there are small squares between octagons at the corners
+  // We render diagonal bands through those squares (not the squares themselves)
+  // The bands are narrower than the gap for a thinner look
+  const octInset = cellSize * 0.3; // How much the octagon corners are cut
+  const octBandWidth = octInset * 0.6; // Band width is thinner than the gap
   
   // Calculate total dimensions based on grid type
-  const totalWidth = gridType === "hex"
-    ? grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2
-    : grid.width * cellSize + wallThickness;
-  const totalHeight = gridType === "hex"
-    ? (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2
-    : grid.height * cellSize + wallThickness;
+  let totalWidth: number;
+  let totalHeight: number;
+  if (gridType === "hex") {
+    totalWidth = grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2;
+    totalHeight = (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2;
+  } else if (gridType === "octagon") {
+    totalWidth = grid.width * cellSize + wallThickness * 2;
+    totalHeight = grid.height * cellSize + wallThickness * 2;
+  } else {
+    totalWidth = grid.width * cellSize + wallThickness;
+    totalHeight = grid.height * cellSize + wallThickness;
+  }
 
   // Get hex neighbors (odd-r offset coordinates) - must match solver's getHexNeighbors
   const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
@@ -348,6 +362,290 @@ export const Grid: React.FC<GridProps> = ({
               />
             ))
           )}
+        </svg>
+      </div>
+    );
+  }
+
+  // Octagon grid rendering
+  if (gridType === "octagon") {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+
+    // Create SVG octagon path
+    const createOctagonPath = (cx: number, cy: number, size: number, inset: number): string => {
+      // Octagon with flat sides at top/bottom/left/right
+      const halfSize = size / 2;
+      const points: [number, number][] = [
+        [cx - halfSize + inset, cy - halfSize],           // top-left edge
+        [cx + halfSize - inset, cy - halfSize],           // top-right edge  
+        [cx + halfSize, cy - halfSize + inset],           // right-top edge
+        [cx + halfSize, cy + halfSize - inset],           // right-bottom edge
+        [cx + halfSize - inset, cy + halfSize],           // bottom-right edge
+        [cx - halfSize + inset, cy + halfSize],           // bottom-left edge
+        [cx - halfSize, cy + halfSize - inset],           // left-bottom edge
+        [cx - halfSize, cy - halfSize + inset],           // left-top edge
+      ];
+      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+    };
+
+    // Helper to get color for a cell
+    const getCellColor = (row: number, col: number): string => {
+      const inputColor = grid.colors[row][col];
+      const displayColor = solution && inputColor === null
+        ? solution.assignedColors[row][col]
+        : inputColor;
+      const isBlank = inputColor === null && !solution;
+      const isHatch = displayColor === HATCH_COLOR;
+      
+      if (isBlank) {
+        return "url(#blankPattern)";
+      } else if (isHatch) {
+        return "url(#hatchPattern)";
+      } else {
+        return COLORS[(displayColor ?? 0) % COLORS.length];
+      }
+    };
+
+    // Pre-compute all octagon data
+    interface OctData {
+      row: number;
+      col: number;
+      cx: number;
+      cy: number;
+      path: string;
+      fill: string;
+    }
+    
+    const octData: OctData[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        const path = createOctagonPath(cx, cy, cellSize, octInset);
+        const fill = getCellColor(row, col);
+
+        octData.push({ row, col, cx, cy, path, fill });
+      }
+    }
+
+    // Pre-compute diagonal bands at intersection points
+    // Each intersection (where 4 octagons meet) has two crossing bands:
+    // - Down-slant band connects top-left cell to bottom-right cell (NW-SE direction)
+    // - Up-slant band connects top-right cell to bottom-left cell (NE-SW direction)
+    // Down-slanting bands render beneath, up-slanting bands render on top
+    interface DiagonalBand {
+      path: string;
+      fill: string;
+    }
+    
+    const downSlantBands: DiagonalBand[] = [];
+    const upSlantBands: DiagonalBand[] = [];
+    
+    // Iterate over intersection points (corners where 4 cells meet)
+    // Intersection at (iRow, iCol) is between cells:
+    //   top-left: (iRow-1, iCol-1), top-right: (iRow-1, iCol)
+    //   bottom-left: (iRow, iCol-1), bottom-right: (iRow, iCol)
+    for (let iRow = 1; iRow < grid.height; iRow++) {
+      for (let iCol = 1; iCol < grid.width; iCol++) {
+        // Center of the small square gap at this intersection
+        const ix = padding + iCol * cellSize;
+        const iy = padding + iRow * cellSize;
+        
+        // The gap forms a small square. Its corners are at the octagon vertices.
+        // For truncated square tiling, the gap has size 2*octInset on each side.
+        const gapHalf = octInset; // Half the gap size
+        
+        // Cell coordinates for the 4 adjacent cells
+        const tlRow = iRow - 1, tlCol = iCol - 1; // top-left
+        const trRow = iRow - 1, trCol = iCol;     // top-right  
+        const blRow = iRow, blCol = iCol - 1;     // bottom-left
+        const brRow = iRow, brCol = iCol;         // bottom-right
+        
+        // Down-slant band: connects top-left to bottom-right
+        // This band runs from NW to SE through the gap
+        // Only draw the band if there's a passage (not a wall)
+        const downSlantWall = hasWall(tlRow, tlCol, brRow, brCol);
+        
+        if (!downSlantWall) {
+          const downSlantFill = getCellColor(tlRow, tlCol);
+          
+          // Band spans from top-left corner to bottom-right corner of the gap
+          // Band width is octBandWidth, centered on the diagonal
+          const halfBand = octBandWidth / 2;
+          // Down-slant diagonal goes from (-gapHalf, -gapHalf) to (gapHalf, gapHalf)
+          // Perpendicular direction is (1, -1) normalized
+          const downPerpX = halfBand * Math.SQRT1_2;
+          const downPerpY = halfBand * Math.SQRT1_2;
+          const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} ` +
+                          `L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} ` +
+                          `L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} ` +
+                          `L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
+          downSlantBands.push({ path: downPath, fill: downSlantFill });
+        }
+        
+        // Up-slant band: connects top-right to bottom-left
+        // This band runs from NE to SW through the gap
+        // Only draw the band if there's a passage (not a wall)
+        const upSlantWall = hasWall(trRow, trCol, blRow, blCol);
+        
+        if (!upSlantWall) {
+          const upSlantFill = getCellColor(trRow, trCol);
+          
+          // Band spans from top-right corner to bottom-left corner of the gap
+          // Up-slant diagonal goes from (gapHalf, -gapHalf) to (-gapHalf, gapHalf)
+          // Perpendicular direction is (1, 1) normalized
+          const halfBand = octBandWidth / 2;
+          const upPerpX = halfBand * Math.SQRT1_2;
+          const upPerpY = halfBand * Math.SQRT1_2;
+          const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} ` +
+                        `L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} ` +
+                        `L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} ` +
+                        `L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
+          upSlantBands.push({ path: upPath, fill: upSlantFill });
+        }
+      }
+    }
+
+    // Pre-compute cardinal walls (N, S, E, W edges)
+    interface CardinalWall {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    }
+    
+    const cardinalWalls: CardinalWall[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        const halfSize = cellSize / 2;
+        
+        // Check each cardinal direction
+        // North wall
+        if (row > 0 && hasWall(row, col, row - 1, col)) {
+          cardinalWalls.push({
+            x1: cx - halfSize + octInset,
+            y1: cy - halfSize,
+            x2: cx + halfSize - octInset,
+            y2: cy - halfSize,
+          });
+        }
+        // East wall
+        if (col < grid.width - 1 && hasWall(row, col, row, col + 1)) {
+          cardinalWalls.push({
+            x1: cx + halfSize,
+            y1: cy - halfSize + octInset,
+            x2: cx + halfSize,
+            y2: cy + halfSize - octInset,
+          });
+        }
+        // South wall
+        if (row < grid.height - 1 && hasWall(row, col, row + 1, col)) {
+          cardinalWalls.push({
+            x1: cx - halfSize + octInset,
+            y1: cy + halfSize,
+            x2: cx + halfSize - octInset,
+            y2: cy + halfSize,
+          });
+        }
+        // West wall
+        if (col > 0 && hasWall(row, col, row, col - 1)) {
+          cardinalWalls.push({
+            x1: cx - halfSize,
+            y1: cy - halfSize + octInset,
+            x2: cx - halfSize,
+            y2: cy + halfSize - octInset,
+          });
+        }
+      }
+    }
+
+    return (
+      <div
+        className="grid-container"
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#000000" }}>
+          {/* Define patterns for blank and hatch fills */}
+          <defs>
+            <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect width="10" height="10" fill="#f5f5f5"/>
+              <line x1="0" y1="0" x2="10" y2="10" stroke="#e0e0e0" strokeWidth="2"/>
+            </pattern>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#fffde7"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+          </defs>
+          
+          {/* Layer 1: Down-slanting diagonal bands (beneath) */}
+          {downSlantBands.map((band, i) => (
+            <path
+              key={`down-band-${i}`}
+              d={band.path}
+              fill={band.fill}
+              stroke="none"
+            />
+          ))}
+          
+          {/* Layer 2: Octagon fills */}
+          {octData.map(({ row, col, path, fill }) => (
+            <path
+              key={`oct-${row}-${col}`}
+              d={path}
+              fill={fill}
+              stroke="none"
+              style={{ cursor: "pointer" }}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+            />
+          ))}
+          
+          {/* Layer 3: Up-slanting diagonal bands (on top) */}
+          {upSlantBands.map((band, i) => (
+            <path
+              key={`up-band-${i}`}
+              d={band.path}
+              fill={band.fill}
+              stroke="none"
+            />
+          ))}
+          
+          {/* Layer 4: Cardinal walls (on top of everything) */}
+          {cardinalWalls.map((wall, i) => (
+            <line
+              key={`cardinal-wall-${i}`}
+              x1={wall.x1}
+              y1={wall.y1}
+              x2={wall.x2}
+              y2={wall.y2}
+              stroke="#2c3e50"
+              strokeWidth={wallThickness}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Outer boundary */}
+          <rect
+            x={wallThickness / 2}
+            y={wallThickness / 2}
+            width={svgWidth - wallThickness}
+            height={svgHeight - wallThickness}
+            fill="none"
+            stroke="#2c3e50"
+            strokeWidth={wallThickness}
+          />
         </svg>
       </div>
     );
@@ -694,6 +992,7 @@ export const Controls: React.FC<ControlsProps> = ({
             >
               <option value="square">Square</option>
               <option value="hex">Hex</option>
+              <option value="octagon">Octagon</option>
             </select>
           </label>
         )}
