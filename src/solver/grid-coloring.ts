@@ -36,6 +36,24 @@ export const RED_DOT_COLOR = -3;
 export const RED_HATCH_COLOR = -4;
 
 /**
+ * The base red color that RED_DOT_COLOR and RED_HATCH_COLOR are treated as for connectivity purposes.
+ * These special colors are just markers/constraints - in the solution output they become RED_BASE_COLOR.
+ */
+export const RED_BASE_COLOR = 0;
+
+/**
+ * Get the effective color for connectivity and disconnection purposes.
+ * RED_DOT_COLOR and RED_HATCH_COLOR are treated as RED_BASE_COLOR (0) for coloring,
+ * they just add extra constraints.
+ */
+function getEffectiveColor(color: number): number {
+  if (color === RED_DOT_COLOR || color === RED_HATCH_COLOR) {
+    return RED_BASE_COLOR;
+  }
+  return color;
+}
+
+/**
  * Grid type - square, hex, or octagon
  */
 export type GridType = "square" | "hex" | "octagon";
@@ -308,16 +326,19 @@ export function solveGridColoring(
   // ============================================
   // Only consider colors that have at least one fixed cell.
   // Blank cells will only be assigned these colors, reducing the encoding size.
+  // RED_DOT_COLOR and RED_HATCH_COLOR are treated as RED_BASE_COLOR for this purpose.
   const usedColors = new Set<number>();
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const c = colors[row][col];
       if (c !== null) {
-        usedColors.add(c);
+        // Use effective color - RED_DOT_COLOR and RED_HATCH_COLOR → RED_BASE_COLOR
+        usedColors.add(getEffectiveColor(c));
       }
     }
   }
   // Convert to sorted array for consistent ordering
+  // This will NOT include RED_DOT_COLOR or RED_HATCH_COLOR as separate colors
   const activeColors = Array.from(usedColors).sort((a, b) => a - b);
   
   // Safety check: if somehow no colors are fixed (shouldn't happen given isAllBlank check),
@@ -332,12 +353,13 @@ export function solveGridColoring(
   // For blank cells (null), create variables cellColor[row][col][c] meaning "cell has color c"
   // For fixed cells, we don't need variables - color is known
   // OPTIMIZATION: Only create variables for colors that have at least one fixed cell
+  // Note: Blank cells can only be assigned regular colors (not RED_DOT_COLOR or RED_HATCH_COLOR)
   const colorVars = new Map<string, number>(); // Maps colorVarKey to variable number
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       if (colors[row][col] === null) {
-        // Blank cell - create variables only for active colors
+        // Blank cell - create variables only for active colors (which are all regular colors)
         const varsForCell: number[] = [];
         for (const c of activeColors) {
           const varNum = builder.createNamedVariable(colorVarKey(row, col, c));
@@ -353,19 +375,22 @@ export function solveGridColoring(
   // Helper to get color variables for a cell
   // Returns array of [color, variable] pairs where variable being true means cell has that color
   // For fixed cells, returns single element with the fixed color
+  // Note: Returns EFFECTIVE colors (RED_DOT_COLOR and RED_HATCH_COLOR → RED_BASE_COLOR)
   function getCellColorInfo(
     row: number,
     col: number
   ): { color: number; var: number | null }[] {
     const fixedColor = colors[row][col];
     if (fixedColor !== null) {
-      return [{ color: fixedColor, var: null }]; // Fixed color, no variable
+      // Return the effective color for connectivity purposes
+      return [{ color: getEffectiveColor(fixedColor), var: null }];
     }
     // Blank cell - return only active color options with their variables
     const result: { color: number; var: number | null }[] = [];
     for (const c of activeColors) {
       const v = colorVars.get(colorVarKey(row, col, c))!;
-      result.push({ color: c, var: v });
+      // Use effective color for comparison
+      result.push({ color: getEffectiveColor(c), var: v });
     }
     return result;
   }
@@ -487,22 +512,25 @@ export function solveGridColoring(
   // With blank cells, we need conditional constraints based on color assignment
   // OPTIMIZATION: Only process active colors (those with at least one fixed cell)
   // EXCEPTION: Skip hatch color - it doesn't need to form a connected component
+  // NOTE: RED_DOT_COLOR and RED_HATCH_COLOR cells participate in RED_BASE_COLOR's connectivity
 
   for (const color of activeColors) {
     // Skip hatch color - it doesn't need to form a connected component
-    // Skip red_dot and red_hatch colors - they have special handling
-    if (color === HATCH_COLOR || color === RED_DOT_COLOR || color === RED_HATCH_COLOR) {
+    if (color === HATCH_COLOR) {
       continue;
     }
 
     // Find all vertices that could have this color (fixed to this color OR blank)
+    // For RED_BASE_COLOR, also include RED_DOT_COLOR and RED_HATCH_COLOR cells
     const potentialVertices: GridPoint[] = [];
     const fixedVertices: GridPoint[] = [];
 
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const cellColor = colors[row][col];
-        if (cellColor === color) {
+        const effectiveColor = cellColor !== null ? getEffectiveColor(cellColor) : null;
+        
+        if (effectiveColor === color) {
           potentialVertices.push({ row, col });
           fixedVertices.push({ row, col });
         } else if (cellColor === null) {
@@ -520,8 +548,9 @@ export function solveGridColoring(
     // Returns the variable, or null if the vertex is fixed to this color (always true)
     function getMemberVar(v: GridPoint): number | null {
       const cellColor = colors[v.row][v.col];
-      if (cellColor === color) {
-        return null; // Fixed to this color - always member
+      const effectiveColor = cellColor !== null ? getEffectiveColor(cellColor) : null;
+      if (effectiveColor === color) {
+        return null; // Fixed to this color (or effective color) - always member
       }
       // Must be blank - return the color variable
       return colorVars.get(colorVarKey(v.row, v.col, color))!;
@@ -838,41 +867,20 @@ export function solveGridColoring(
   // ============================================
   // 3. RED_DOT_COLOR CONSTRAINT: At most one cell
   // ============================================
-  // Find all cells that have RED_DOT_COLOR (either fixed or variable)
-  const redDotCells: { row: number; col: number; var: number | null }[] = [];
+  // Find all cells that have RED_DOT_COLOR as input (these are fixed, not assignable to blank cells)
+  // Since RED_DOT_COLOR is not in activeColors, blank cells cannot be assigned this marker
+  const redDotCells: GridPoint[] = [];
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
-      const cellColor = colors[row][col];
-      if (cellColor === RED_DOT_COLOR) {
-        redDotCells.push({ row, col, var: null }); // Fixed to RED_DOT_COLOR
-      } else if (cellColor === null && activeColors.includes(RED_DOT_COLOR)) {
-        const v = colorVars.get(colorVarKey(row, col, RED_DOT_COLOR));
-        if (v !== undefined) {
-          redDotCells.push({ row, col, var: v });
-        }
+      if (colors[row][col] === RED_DOT_COLOR) {
+        redDotCells.push({ row, col });
       }
     }
   }
 
-  // If there are multiple possible RED_DOT_COLOR cells, add at-most-one constraint
+  // If there are multiple RED_DOT_COLOR cells, it's unsatisfiable (at most one allowed)
   if (redDotCells.length > 1) {
-    // Collect all the variables for cells that could have RED_DOT_COLOR
-    // For fixed cells, we count them separately
-    const fixedRedDotCount = redDotCells.filter(c => c.var === null).length;
-    const redDotVars = redDotCells.filter(c => c.var !== null).map(c => c.var!);
-    
-    if (fixedRedDotCount > 1) {
-      // More than one cell is already fixed to RED_DOT_COLOR - unsatisfiable
-      return null;
-    } else if (fixedRedDotCount === 1) {
-      // Exactly one fixed RED_DOT_COLOR - all other potential cells must NOT have RED_DOT_COLOR
-      for (const v of redDotVars) {
-        builder.addUnit(-v);
-      }
-    } else {
-      // No fixed RED_DOT_COLOR cells - at most one can be selected
-      builder.addAtMostOne(redDotVars);
-    }
+    return null;
   }
 
   // ============================================
@@ -882,7 +890,7 @@ export function solveGridColoring(
   // This is computed over all edges (any color can participate in the reachability path)
   const reachabilityK = options?.reachabilityK ?? 0;
   
-  // Find all RED_HATCH_COLOR cells
+  // Find all RED_HATCH_COLOR cells (these are fixed, not assignable to blank cells)
   const redHatchCells: GridPoint[] = [];
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
@@ -892,7 +900,7 @@ export function solveGridColoring(
     }
   }
 
-  // Only add reachability constraints if we have both RED_DOT_COLOR and RED_HATCH_COLOR cells
+  // Only add reachability constraints if we have both RED_DOT_COLOR and RED_HATCH_COLOR cells and K > 0
   if (redDotCells.length > 0 && redHatchCells.length > 0 && reachabilityK > 0) {
     // For each cell, create a reachability level variable (distance from any RED_DOT_COLOR origin)
     // Level is unbounded, but we only need to track up to K+1 for the constraint
@@ -914,17 +922,9 @@ export function solveGridColoring(
       const key = `${cell.row},${cell.col}`;
       const bits = reachLevelVars.get(key)!;
       
-      if (cell.var === null) {
-        // Fixed to RED_DOT_COLOR - level must be 0
-        for (const bit of bits) {
-          builder.addUnit(-bit);
-        }
-      } else {
-        // Variable - if this cell is RED_DOT_COLOR, then level = 0
-        // cell.var → (all bits = 0)
-        for (const bit of bits) {
-          builder.solver.addClause([-cell.var, -bit]);
-        }
+      // RED_DOT_COLOR cells are always fixed (not assignable to blanks) - level must be 0
+      for (const bit of bits) {
+        builder.addUnit(-bit);
       }
     }
     
@@ -1155,6 +1155,8 @@ export function solveGridColoring(
   }
 
   // Extract assigned colors
+  // NOTE: RED_DOT_COLOR and RED_HATCH_COLOR are converted to RED_BASE_COLOR in the output
+  // These special colors are just input markers for constraints, not actual output colors
   const assignedColors: number[][] = Array.from({ length: height }, () =>
     Array.from({ length: width }, () => 0)
   );
@@ -1163,7 +1165,8 @@ export function solveGridColoring(
     for (let col = 0; col < width; col++) {
       const fixedColor = colors[row][col];
       if (fixedColor !== null) {
-        assignedColors[row][col] = fixedColor;
+        // Convert special marker colors to their effective (base) color
+        assignedColors[row][col] = getEffectiveColor(fixedColor);
       } else {
         // Find which color variable is true (only check active colors)
         let foundColor = false;
