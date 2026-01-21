@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, Grid } from "./components";
+import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, ViewModeToggle } from "./components";
 import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
@@ -362,9 +362,6 @@ function App() {
           solution={solution}
           gridType={gridType}
           onGridTypeChange={handleGridTypeChange}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          onCopyToSketchpad={handleCopyToSketchpad}
           onDownloadColors={handleDownloadColors}
           onUploadColors={handleUploadColors}
           grid={grid}
@@ -379,16 +376,34 @@ function App() {
       </div>
 
       <div className="grid-panel">
-        <Grid
-          grid={grid}
-          solution={solution}
-          selectedColor={selectedColor}
-          onCellClick={handleCellClick}
-          onCellDrag={handleCellDrag}
-          cellSize={40}
-          gridType={gridType}
+        {/* View Mode Toggle - positioned above the canvas */}
+        <ViewModeToggle
           viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
+          solution={solution}
+          onCopyToSketchpad={handleCopyToSketchpad}
         />
+        
+        {/* Both grids are always rendered, one is hidden based on viewMode */}
+        <div style={{ display: viewMode === "sketchpad" ? "block" : "none" }}>
+          <SketchpadGrid
+            grid={grid}
+            solution={solution}
+            selectedColor={selectedColor}
+            onCellClick={handleCellClick}
+            onCellDrag={handleCellDrag}
+            cellSize={40}
+            gridType={gridType}
+          />
+        </div>
+        <div style={{ display: viewMode === "solution" ? "block" : "none" }}>
+          <SolutionGrid
+            grid={grid}
+            solution={solution}
+            cellSize={40}
+            gridType={gridType}
+          />
+        </div>
       </div>
     </div>
   );
