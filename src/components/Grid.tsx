@@ -134,9 +134,9 @@ export const Grid: React.FC<GridProps> = ({
   // Octagons are laid out on a square grid but with 8 neighbors
   // In truncated square tiling, there are small squares between octagons at the corners
   // We render diagonal bands through those squares (not the squares themselves)
-  // The bands are half-width (narrower than the gap)
+  // The bands are narrower than the gap for a thinner look
   const octInset = cellSize * 0.3; // How much the octagon corners are cut
-  const octBandWidth = octInset; // Band width is half of the gap (the gap is 2*octInset diagonally)
+  const octBandWidth = octInset * 0.6; // Band width is thinner than the gap
   
   // Calculate total dimensions based on grid type
   let totalWidth: number;
@@ -575,7 +575,7 @@ export const Grid: React.FC<GridProps> = ({
           userSelect: "none",
         }}
       >
-        <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#000000" }}>
           {/* Define patterns for blank and hatch fills */}
           <defs>
             <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
