@@ -115,6 +115,7 @@ function App() {
     setSolution(null);
     setSolutionStatus("none");
     setErrorMessage(null);
+    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, []);
 
   const handleHeightChange = useCallback((height: number) => {
@@ -132,6 +133,7 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
+    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, []);
 
   const handleSolve = useCallback(() => {
@@ -199,6 +201,7 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
+    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, [gridWidth, gridHeight]);
 
   const handleMazeSetup = useCallback(() => {
@@ -207,6 +210,7 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
+    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, [gridWidth, gridHeight]);
 
   const handleCancel = useCallback(() => {
