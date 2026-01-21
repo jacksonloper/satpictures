@@ -449,8 +449,16 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
     }
     
+    interface UpSlantBand {
+      path: string;
+      fill: string;
+      // Long edges for outline (only for up-slant bands)
+      edge1: { x1: number; y1: number; x2: number; y2: number };
+      edge2: { x1: number; y1: number; x2: number; y2: number };
+    }
+    
     const downSlantBands: DiagonalBand[] = [];
-    const upSlantBands: DiagonalBand[] = [];
+    const upSlantBands: UpSlantBand[] = [];
     
     // Iterate over intersection points (corners where 4 cells meet)
     // Intersection at (iRow, iCol) is between cells:
@@ -508,11 +516,26 @@ export const Grid: React.FC<GridProps> = ({
           const halfBand = octBandWidth / 2;
           const upPerpX = halfBand * Math.SQRT1_2;
           const upPerpY = halfBand * Math.SQRT1_2;
-          const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} ` +
-                        `L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} ` +
-                        `L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} ` +
-                        `L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
-          upSlantBands.push({ path: upPath, fill: upSlantFill });
+          
+          // The four corners of the band (clockwise from top-right outer edge)
+          // Corner 1: top-right, outer (toward NE)
+          const c1x = ix + gapHalf + upPerpX, c1y = iy - gapHalf + upPerpY;
+          // Corner 2: top-right, inner (toward center)
+          const c2x = ix + gapHalf - upPerpX, c2y = iy - gapHalf - upPerpY;
+          // Corner 3: bottom-left, inner (toward center)
+          const c3x = ix - gapHalf - upPerpX, c3y = iy + gapHalf - upPerpY;
+          // Corner 4: bottom-left, outer (toward SW)
+          const c4x = ix - gapHalf + upPerpX, c4y = iy + gapHalf + upPerpY;
+          
+          const upPath = `M ${c1x} ${c1y} L ${c2x} ${c2y} L ${c3x} ${c3y} L ${c4x} ${c4y} Z`;
+          
+          // Long edges are: c1-c4 (outer edge) and c2-c3 (inner edge)
+          upSlantBands.push({ 
+            path: upPath, 
+            fill: upSlantFill,
+            edge1: { x1: c1x, y1: c1y, x2: c4x, y2: c4y }, // outer long edge
+            edge2: { x1: c2x, y1: c2y, x2: c3x, y2: c3y }, // inner long edge
+          });
         }
       }
     }
@@ -597,14 +620,13 @@ export const Grid: React.FC<GridProps> = ({
             </pattern>
           </defs>
           
-          {/* Layer 1: Down-slanting diagonal bands (beneath) */}
+          {/* Layer 1: Down-slanting diagonal bands (beneath) - no outline */}
           {downSlantBands.map((band, i) => (
             <path
               key={`down-band-${i}`}
               d={band.path}
               fill={band.fill}
-              stroke="#2c3e50"
-              strokeWidth={0.5}
+              stroke="none"
             />
           ))}
           
@@ -621,15 +643,36 @@ export const Grid: React.FC<GridProps> = ({
             />
           ))}
           
-          {/* Layer 3: Up-slanting diagonal bands (on top) */}
+          {/* Layer 3: Up-slanting diagonal bands (on top) - fill only, no stroke on path */}
           {upSlantBands.map((band, i) => (
             <path
               key={`up-band-${i}`}
               d={band.path}
               fill={band.fill}
-              stroke="#2c3e50"
-              strokeWidth={0.5}
+              stroke="none"
             />
+          ))}
+          
+          {/* Layer 3b: Up-slanting band long edge outlines */}
+          {upSlantBands.map((band, i) => (
+            <React.Fragment key={`up-band-edges-${i}`}>
+              <line
+                x1={band.edge1.x1}
+                y1={band.edge1.y1}
+                x2={band.edge1.x2}
+                y2={band.edge1.y2}
+                stroke="#2c3e50"
+                strokeWidth={0.5}
+              />
+              <line
+                x1={band.edge2.x1}
+                y1={band.edge2.y1}
+                x2={band.edge2.x2}
+                y2={band.edge2.y2}
+                stroke="#2c3e50"
+                strokeWidth={0.5}
+              />
+            </React.Fragment>
           ))}
           
           {/* Layer 4: Cardinal walls (on top of everything) */}
@@ -1055,7 +1098,7 @@ export const Controls: React.FC<ControlsProps> = ({
         return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
       };
 
-      // Render down-slant diagonal bands (beneath octagons)
+      // Render down-slant diagonal bands (beneath octagons) - no outline
       for (let iRow = 1; iRow < gridHeight; iRow++) {
         for (let iCol = 1; iCol < gridWidth; iCol++) {
           const ix = padding + iCol * cellSize;
@@ -1069,7 +1112,7 @@ export const Controls: React.FC<ControlsProps> = ({
             const downPerpX = halfBand * Math.SQRT1_2;
             const downPerpY = halfBand * Math.SQRT1_2;
             const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
-            svgContent += `  <path d="${downPath}" fill="${fill}" stroke="#2c3e50" stroke-width="0.5" />\n`;
+            svgContent += `  <path d="${downPath}" fill="${fill}" />\n`;
           }
         }
       }
@@ -1087,7 +1130,7 @@ export const Controls: React.FC<ControlsProps> = ({
         }
       }
 
-      // Render up-slant diagonal bands (on top)
+      // Render up-slant diagonal bands (on top) - fill only, then long edge outlines
       for (let iRow = 1; iRow < gridHeight; iRow++) {
         for (let iCol = 1; iCol < gridWidth; iCol++) {
           const ix = padding + iCol * cellSize;
@@ -1100,8 +1143,19 @@ export const Controls: React.FC<ControlsProps> = ({
             const halfBand = octBandWidth / 2;
             const upPerpX = halfBand * Math.SQRT1_2;
             const upPerpY = halfBand * Math.SQRT1_2;
-            const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
-            svgContent += `  <path d="${upPath}" fill="${fill}" stroke="#2c3e50" stroke-width="0.5" />\n`;
+            
+            // The four corners of the band
+            const c1x = ix + gapHalf + upPerpX, c1y = iy - gapHalf + upPerpY;
+            const c2x = ix + gapHalf - upPerpX, c2y = iy - gapHalf - upPerpY;
+            const c3x = ix - gapHalf - upPerpX, c3y = iy + gapHalf - upPerpY;
+            const c4x = ix - gapHalf + upPerpX, c4y = iy + gapHalf + upPerpY;
+            
+            const upPath = `M ${c1x} ${c1y} L ${c2x} ${c2y} L ${c3x} ${c3y} L ${c4x} ${c4y} Z`;
+            svgContent += `  <path d="${upPath}" fill="${fill}" />\n`;
+            
+            // Long edge outlines only (c1-c4 outer, c2-c3 inner)
+            svgContent += `  <line x1="${c1x}" y1="${c1y}" x2="${c4x}" y2="${c4y}" stroke="#2c3e50" stroke-width="0.5" />\n`;
+            svgContent += `  <line x1="${c2x}" y1="${c2y}" x2="${c3x}" y2="${c3y}" stroke="#2c3e50" stroke-width="0.5" />\n`;
           }
         }
       }
