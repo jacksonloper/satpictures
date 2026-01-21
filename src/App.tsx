@@ -209,6 +209,14 @@ function App() {
     setSolveTime(null);
   }, []);
 
+  const handleGridTypeChange = useCallback((newGridType: GridType) => {
+    setGridType(newGridType);
+    setSolution(null);
+    setSolutionStatus("none");
+    setErrorMessage(null);
+    setSolveTime(null);
+  }, []);
+
   return (
     <div className="app">
       <h1>Grid Coloring Solver</h1>
@@ -239,7 +247,7 @@ function App() {
           onMinWallsProportionChange={setMinWallsProportion}
           solution={solution}
           gridType={gridType}
-          onGridTypeChange={setGridType}
+          onGridTypeChange={handleGridTypeChange}
         />
 
         <h3>Colors</h3>

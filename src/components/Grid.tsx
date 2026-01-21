@@ -867,8 +867,6 @@ export const Controls: React.FC<ControlsProps> = ({
 
     const cellSize = 40;
     const wallThickness = 2;
-    const svgWidth = gridWidth * cellSize + wallThickness;
-    const svgHeight = gridHeight * cellSize + wallThickness;
 
     // Build wall edge set for quick lookup
     const wallEdgeSet = new Set<string>();
@@ -881,52 +879,269 @@ export const Controls: React.FC<ControlsProps> = ({
       return wallEdgeSet.has(`${r1},${c1}-${r2},${c2}`);
     };
 
-    // Build SVG content
-    let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
-    
-    // Add cells with colors
-    for (let row = 0; row < gridHeight; row++) {
-      for (let col = 0; col < gridWidth; col++) {
-        const color = solution.assignedColors[row][col];
-        const isHatch = color === HATCH_COLOR;
-        const fillColor = isHatch ? HATCH_BG_COLOR : COLORS[color % COLORS.length];
-        const x = col * cellSize + wallThickness / 2;
-        const y = row * cellSize + wallThickness / 2;
-        
-        svgContent += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${fillColor}" />\n`;
-        
-        // Add hatch pattern for hatch cells
-        if (isHatch) {
-          svgContent += `  <line x1="${x}" y1="${y}" x2="${x + cellSize}" y2="${y + cellSize}" stroke="#ff9800" stroke-width="2" />\n`;
-          svgContent += `  <line x1="${x + cellSize}" y1="${y}" x2="${x}" y2="${y + cellSize}" stroke="#ff9800" stroke-width="2" />\n`;
+    const getColor = (row: number, col: number): string => {
+      const color = solution.assignedColors[row][col];
+      const isHatch = color === HATCH_COLOR;
+      return isHatch ? HATCH_BG_COLOR : COLORS[color % COLORS.length];
+    };
+
+    let svgContent: string;
+
+    if (gridType === "hex") {
+      // Hex grid SVG rendering
+      const hexSize = cellSize * 0.5;
+      const hexWidth = Math.sqrt(3) * hexSize;
+      const hexHeight = 2 * hexSize;
+      const hexHorizSpacing = hexWidth;
+      const hexVertSpacing = hexHeight * 0.75;
+      const padding = wallThickness;
+
+      const svgWidth = gridWidth * hexHorizSpacing + hexWidth / 2 + padding * 2;
+      const svgHeight = (gridHeight - 1) * hexVertSpacing + hexHeight + padding * 2;
+
+      svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
+      svgContent += `  <defs>\n`;
+      svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
+      svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
+      svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+      svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+      svgContent += `    </pattern>\n`;
+      svgContent += `  </defs>\n`;
+
+      // Helper functions
+      const createHexPath = (cx: number, cy: number, size: number): string => {
+        const points: [number, number][] = [];
+        for (let i = 0; i < 6; i++) {
+          const angleDeg = 60 * i - 30;
+          const angleRad = (Math.PI / 180) * angleDeg;
+          points.push([cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)]);
+        }
+        return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+      };
+
+      const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
+        const isOddRow = row % 2 === 1;
+        if (isOddRow) {
+          return [
+            [row - 1, col, "NW"], [row - 1, col + 1, "NE"],
+            [row, col - 1, "W"], [row, col + 1, "E"],
+            [row + 1, col, "SW"], [row + 1, col + 1, "SE"],
+          ];
+        } else {
+          return [
+            [row - 1, col - 1, "NW"], [row - 1, col, "NE"],
+            [row, col - 1, "W"], [row, col + 1, "E"],
+            [row + 1, col - 1, "SW"], [row + 1, col, "SE"],
+          ];
+        }
+      };
+
+      const getHexWallSegment = (direction: string, cx: number, cy: number, size: number) => {
+        const getVertex = (angleDeg: number): [number, number] => {
+          const angleRad = (Math.PI / 180) * angleDeg;
+          return [cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)];
+        };
+        switch (direction) {
+          case "NW": { const v1 = getVertex(210), v2 = getVertex(270); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
+          case "NE": { const v1 = getVertex(270), v2 = getVertex(-30); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
+          case "W": { const v1 = getVertex(150), v2 = getVertex(210); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
+          case "E": { const v1 = getVertex(-30), v2 = getVertex(30); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
+          case "SW": { const v1 = getVertex(90), v2 = getVertex(150); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
+          case "SE": { const v1 = getVertex(30), v2 = getVertex(90); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
+          default: return null;
+        }
+      };
+
+      // Render hex cells
+      for (let row = 0; row < gridHeight; row++) {
+        for (let col = 0; col < gridWidth; col++) {
+          const isOddRow = row % 2 === 1;
+          const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
+          const cy = padding + hexSize + row * hexVertSpacing;
+          const path = createHexPath(cx, cy, hexSize);
+          const color = solution.assignedColors[row][col];
+          const isHatch = color === HATCH_COLOR;
+          const fill = isHatch ? "url(#hatchPattern)" : getColor(row, col);
+          svgContent += `  <path d="${path}" fill="${fill}" />\n`;
         }
       }
-    }
 
-    // Add internal walls
-    for (let row = 0; row < gridHeight; row++) {
-      for (let col = 0; col < gridWidth; col++) {
-        // Check right wall
-        if (col < gridWidth - 1 && hasWall(row, col, row, col + 1)) {
-          const x = (col + 1) * cellSize + wallThickness / 2;
-          const y1 = row * cellSize + wallThickness / 2;
-          const y2 = (row + 1) * cellSize + wallThickness / 2;
-          svgContent += `  <line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
-        }
-        // Check bottom wall
-        if (row < gridHeight - 1 && hasWall(row, col, row + 1, col)) {
-          const x1 = col * cellSize + wallThickness / 2;
-          const x2 = (col + 1) * cellSize + wallThickness / 2;
-          const y = (row + 1) * cellSize + wallThickness / 2;
-          svgContent += `  <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+      // Render hex walls
+      for (let row = 0; row < gridHeight; row++) {
+        for (let col = 0; col < gridWidth; col++) {
+          const isOddRow = row % 2 === 1;
+          const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
+          const cy = padding + hexSize + row * hexVertSpacing;
+          const neighbors = getHexNeighbors(row, col);
+          for (const [nRow, nCol, direction] of neighbors) {
+            if (nRow >= 0 && nRow < gridHeight && nCol >= 0 && nCol < gridWidth && hasWall(row, col, nRow, nCol)) {
+              const segment = getHexWallSegment(direction, cx, cy, hexSize);
+              if (segment) {
+                svgContent += `  <line x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}" stroke="#2c3e50" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
+              }
+            }
+          }
         }
       }
-    }
 
-    // Add outer border
-    svgContent += `  <rect x="${wallThickness / 2}" y="${wallThickness / 2}" width="${gridWidth * cellSize}" height="${gridHeight * cellSize}" fill="none" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
-    
-    svgContent += `</svg>`;
+      svgContent += `</svg>`;
+
+    } else if (gridType === "octagon") {
+      // Octagon grid SVG rendering
+      const padding = wallThickness;
+      const octInset = cellSize * 0.3;
+      const octBandWidth = octInset * 0.6;
+      const svgWidth = gridWidth * cellSize + padding * 2;
+      const svgHeight = gridHeight * cellSize + padding * 2;
+
+      svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
+      svgContent += `  <rect width="${svgWidth}" height="${svgHeight}" fill="#000000" />\n`;
+      svgContent += `  <defs>\n`;
+      svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
+      svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
+      svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+      svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+      svgContent += `    </pattern>\n`;
+      svgContent += `  </defs>\n`;
+
+      const createOctagonPath = (cx: number, cy: number, size: number, inset: number): string => {
+        const halfSize = size / 2;
+        const points: [number, number][] = [
+          [cx - halfSize + inset, cy - halfSize],
+          [cx + halfSize - inset, cy - halfSize],
+          [cx + halfSize, cy - halfSize + inset],
+          [cx + halfSize, cy + halfSize - inset],
+          [cx + halfSize - inset, cy + halfSize],
+          [cx - halfSize + inset, cy + halfSize],
+          [cx - halfSize, cy + halfSize - inset],
+          [cx - halfSize, cy - halfSize + inset],
+        ];
+        return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+      };
+
+      // Render down-slant diagonal bands (beneath octagons)
+      for (let iRow = 1; iRow < gridHeight; iRow++) {
+        for (let iCol = 1; iCol < gridWidth; iCol++) {
+          const ix = padding + iCol * cellSize;
+          const iy = padding + iRow * cellSize;
+          const gapHalf = octInset;
+          const tlRow = iRow - 1, tlCol = iCol - 1;
+          const brRow = iRow, brCol = iCol;
+          if (!hasWall(tlRow, tlCol, brRow, brCol)) {
+            const fill = getColor(tlRow, tlCol);
+            const halfBand = octBandWidth / 2;
+            const downPerpX = halfBand * Math.SQRT1_2;
+            const downPerpY = halfBand * Math.SQRT1_2;
+            const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
+            svgContent += `  <path d="${downPath}" fill="${fill}" />\n`;
+          }
+        }
+      }
+
+      // Render octagon cells
+      for (let row = 0; row < gridHeight; row++) {
+        for (let col = 0; col < gridWidth; col++) {
+          const cx = padding + cellSize / 2 + col * cellSize;
+          const cy = padding + cellSize / 2 + row * cellSize;
+          const path = createOctagonPath(cx, cy, cellSize, octInset);
+          const color = solution.assignedColors[row][col];
+          const isHatch = color === HATCH_COLOR;
+          const fill = isHatch ? "url(#hatchPattern)" : getColor(row, col);
+          svgContent += `  <path d="${path}" fill="${fill}" />\n`;
+        }
+      }
+
+      // Render up-slant diagonal bands (on top)
+      for (let iRow = 1; iRow < gridHeight; iRow++) {
+        for (let iCol = 1; iCol < gridWidth; iCol++) {
+          const ix = padding + iCol * cellSize;
+          const iy = padding + iRow * cellSize;
+          const gapHalf = octInset;
+          const trRow = iRow - 1, trCol = iCol;
+          const blRow = iRow, blCol = iCol - 1;
+          if (!hasWall(trRow, trCol, blRow, blCol)) {
+            const fill = getColor(trRow, trCol);
+            const halfBand = octBandWidth / 2;
+            const upPerpX = halfBand * Math.SQRT1_2;
+            const upPerpY = halfBand * Math.SQRT1_2;
+            const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
+            svgContent += `  <path d="${upPath}" fill="${fill}" />\n`;
+          }
+        }
+      }
+
+      // Render cardinal walls
+      for (let row = 0; row < gridHeight; row++) {
+        for (let col = 0; col < gridWidth; col++) {
+          const cx = padding + cellSize / 2 + col * cellSize;
+          const cy = padding + cellSize / 2 + row * cellSize;
+          const halfSize = cellSize / 2;
+          if (row > 0 && hasWall(row, col, row - 1, col)) {
+            svgContent += `  <line x1="${cx - halfSize + octInset}" y1="${cy - halfSize}" x2="${cx + halfSize - octInset}" y2="${cy - halfSize}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          }
+          if (col < gridWidth - 1 && hasWall(row, col, row, col + 1)) {
+            svgContent += `  <line x1="${cx + halfSize}" y1="${cy - halfSize + octInset}" x2="${cx + halfSize}" y2="${cy + halfSize - octInset}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          }
+          if (row < gridHeight - 1 && hasWall(row, col, row + 1, col)) {
+            svgContent += `  <line x1="${cx - halfSize + octInset}" y1="${cy + halfSize}" x2="${cx + halfSize - octInset}" y2="${cy + halfSize}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          }
+          if (col > 0 && hasWall(row, col, row, col - 1)) {
+            svgContent += `  <line x1="${cx - halfSize}" y1="${cy - halfSize + octInset}" x2="${cx - halfSize}" y2="${cy + halfSize - octInset}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          }
+        }
+      }
+
+      // Add outer border
+      svgContent += `  <rect x="${padding / 2}" y="${padding / 2}" width="${gridWidth * cellSize + padding}" height="${gridHeight * cellSize + padding}" fill="none" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+      svgContent += `</svg>`;
+
+    } else {
+      // Square grid SVG rendering (default)
+      const svgWidth = gridWidth * cellSize + wallThickness;
+      const svgHeight = gridHeight * cellSize + wallThickness;
+
+      svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
+
+      // Add cells with colors
+      for (let row = 0; row < gridHeight; row++) {
+        for (let col = 0; col < gridWidth; col++) {
+          const color = solution.assignedColors[row][col];
+          const isHatch = color === HATCH_COLOR;
+          const fillColor = isHatch ? HATCH_BG_COLOR : COLORS[color % COLORS.length];
+          const x = col * cellSize + wallThickness / 2;
+          const y = row * cellSize + wallThickness / 2;
+
+          svgContent += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${fillColor}" />\n`;
+
+          if (isHatch) {
+            svgContent += `  <line x1="${x}" y1="${y}" x2="${x + cellSize}" y2="${y + cellSize}" stroke="#ff9800" stroke-width="2" />\n`;
+            svgContent += `  <line x1="${x + cellSize}" y1="${y}" x2="${x}" y2="${y + cellSize}" stroke="#ff9800" stroke-width="2" />\n`;
+          }
+        }
+      }
+
+      // Add internal walls
+      for (let row = 0; row < gridHeight; row++) {
+        for (let col = 0; col < gridWidth; col++) {
+          if (col < gridWidth - 1 && hasWall(row, col, row, col + 1)) {
+            const x = (col + 1) * cellSize + wallThickness / 2;
+            const y1 = row * cellSize + wallThickness / 2;
+            const y2 = (row + 1) * cellSize + wallThickness / 2;
+            svgContent += `  <line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          }
+          if (row < gridHeight - 1 && hasWall(row, col, row + 1, col)) {
+            const x1 = col * cellSize + wallThickness / 2;
+            const x2 = (col + 1) * cellSize + wallThickness / 2;
+            const y = (row + 1) * cellSize + wallThickness / 2;
+            svgContent += `  <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          }
+        }
+      }
+
+      // Add outer border
+      svgContent += `  <rect x="${wallThickness / 2}" y="${wallThickness / 2}" width="${gridWidth * cellSize}" height="${gridHeight * cellSize}" fill="none" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+      svgContent += `</svg>`;
+    }
 
     // Create and download the SVG file
     const blob = new Blob([svgContent], { type: 'image/svg+xml' });
@@ -938,7 +1153,7 @@ export const Controls: React.FC<ControlsProps> = ({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [solution, gridWidth, gridHeight]);
+  }, [solution, gridWidth, gridHeight, gridType]);
 
   return (
     <div style={{ marginBottom: "16px" }}>
