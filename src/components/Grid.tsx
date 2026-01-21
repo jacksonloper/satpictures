@@ -1,9 +1,9 @@
 import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridSolution, GridType } from "../solver";
-import { HATCH_COLOR } from "../solver";
+import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "../solver";
 
-// Re-export HATCH_COLOR for convenience
-export { HATCH_COLOR };
+// Re-export color constants for convenience
+export { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR };
 
 // Predefined color palette
 const COLORS = [
@@ -46,6 +46,28 @@ repeating-linear-gradient(
   transparent 8px
 ),
 #fffde7`;
+
+// Red with dot appearance - red background with a white dot (origin for bounded reachability)
+const RED_DOT_BG_COLOR = "#e74c3c"; // red
+const RED_DOT_PATTERN = `radial-gradient(circle at center, white 4px, transparent 4px), #e74c3c`;
+
+// Red with hatch appearance - red background with crosshatch pattern
+const RED_HATCH_BG_COLOR = "#e74c3c"; // red
+const RED_HATCH_PATTERN = `repeating-linear-gradient(
+  45deg,
+  rgba(255, 255, 255, 0.5),
+  rgba(255, 255, 255, 0.5) 2px,
+  transparent 2px,
+  transparent 8px
+),
+repeating-linear-gradient(
+  -45deg,
+  rgba(255, 255, 255, 0.5),
+  rgba(255, 255, 255, 0.5) 2px,
+  transparent 2px,
+  transparent 8px
+),
+#e74c3c`;
 
 interface GridProps {
   grid: ColorGrid;
@@ -282,12 +304,18 @@ export const Grid: React.FC<GridProps> = ({
           : inputColor;
         const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
+        const isRedDot = displayColor === RED_DOT_COLOR;
+        const isRedHatch = displayColor === RED_HATCH_COLOR;
         
         let fill: string;
         if (isBlank) {
           fill = "url(#blankPattern)";
         } else if (isHatch) {
           fill = "url(#hatchPattern)";
+        } else if (isRedDot) {
+          fill = "url(#redDotPattern)";
+        } else if (isRedHatch) {
+          fill = "url(#redHatchPattern)";
         } else {
           fill = COLORS[(displayColor ?? 0) % COLORS.length];
         }
@@ -337,6 +365,15 @@ export const Grid: React.FC<GridProps> = ({
               <rect width="8" height="8" fill="#fffde7"/>
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
+              <rect width="20" height="20" fill="#e74c3c"/>
+              <circle cx="10" cy="10" r="4" fill="white"/>
+            </pattern>
+            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#e74c3c"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
             </pattern>
           </defs>
           
@@ -406,11 +443,17 @@ export const Grid: React.FC<GridProps> = ({
         : inputColor;
       const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
+      const isRedDot = displayColor === RED_DOT_COLOR;
+      const isRedHatch = displayColor === RED_HATCH_COLOR;
       
       if (isBlank) {
         return "url(#blankPattern)";
       } else if (isHatch) {
         return "url(#hatchPattern)";
+      } else if (isRedDot) {
+        return "url(#redDotPattern)";
+      } else if (isRedHatch) {
+        return "url(#redHatchPattern)";
       } else {
         return COLORS[(displayColor ?? 0) % COLORS.length];
       }
@@ -618,6 +661,15 @@ export const Grid: React.FC<GridProps> = ({
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
             </pattern>
+            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
+              <rect width="20" height="20" fill="#e74c3c"/>
+              <circle cx="10" cy="10" r="4" fill="white"/>
+            </pattern>
+            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#e74c3c"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+            </pattern>
           </defs>
           
           {/* Layer 1: Down-slanting diagonal bands (beneath) - no outline */}
@@ -731,6 +783,8 @@ export const Grid: React.FC<GridProps> = ({
             : inputColor;
           const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
+          const isRedDot = displayColor === RED_DOT_COLOR;
+          const isRedHatch = displayColor === RED_HATCH_COLOR;
           
           // Determine background
           let bgColor: string;
@@ -741,6 +795,12 @@ export const Grid: React.FC<GridProps> = ({
           } else if (isHatch) {
             bgColor = HATCH_BG_COLOR;
             bgPattern = HATCH_PATTERN;
+          } else if (isRedDot) {
+            bgColor = RED_DOT_BG_COLOR;
+            bgPattern = RED_DOT_PATTERN;
+          } else if (isRedHatch) {
+            bgColor = RED_HATCH_BG_COLOR;
+            bgPattern = RED_HATCH_PATTERN;
           } else {
             bgColor = COLORS[(displayColor ?? 0) % COLORS.length];
             bgPattern = bgColor;
@@ -868,6 +928,48 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
         }}
         title="Hatch (doesn't need to be connected)"
       />
+      {/* Red with Dot - origin for bounded reachability (at most one) */}
+      <button
+        onClick={() => onColorSelect(RED_DOT_COLOR)}
+        style={{
+          width: "36px",
+          height: "36px",
+          background: RED_DOT_PATTERN,
+          border:
+            selectedColor === RED_DOT_COLOR
+              ? "3px solid #2c3e50"
+              : "2px solid #bdc3c7",
+          borderRadius: "4px",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow:
+            selectedColor === RED_DOT_COLOR
+              ? "0 0 0 2px #3498db"
+              : "none",
+        }}
+        title="Red with Dot (origin - at most one allowed)"
+      />
+      {/* Red with Hatch - must be at reachability > K from origin */}
+      <button
+        onClick={() => onColorSelect(RED_HATCH_COLOR)}
+        style={{
+          width: "36px",
+          height: "36px",
+          background: RED_HATCH_PATTERN,
+          border:
+            selectedColor === RED_HATCH_COLOR
+              ? "3px solid #2c3e50"
+              : "2px solid #bdc3c7",
+          borderRadius: "4px",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow:
+            selectedColor === RED_HATCH_COLOR
+              ? "0 0 0 2px #3498db"
+              : "none",
+        }}
+        title="Red with Hatch (reachability > K from origin)"
+      />
     </div>
   );
 };
@@ -895,6 +997,8 @@ interface ControlsProps {
   onDownloadColors?: () => void;
   onUploadColors?: (file: File) => void;
   grid?: { colors: (number | null)[][] };
+  reachabilityK?: number;
+  onReachabilityKChange?: (k: number) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -920,6 +1024,8 @@ export const Controls: React.FC<ControlsProps> = ({
   onDownloadColors,
   onUploadColors,
   grid,
+  reachabilityK = 0,
+  onReachabilityKChange,
 }) => {
   // solution is received but not used in Controls (SVG download moved to solution panel)
   void _solution;
@@ -1023,6 +1129,25 @@ export const Controls: React.FC<ControlsProps> = ({
               style={{ flex: 1, cursor: "pointer" }}
             />
             <span style={{ minWidth: "36px", textAlign: "right" }}>{Math.round(minWallsProportion * 100)}%</span>
+          </label>
+        )}
+        {onReachabilityKChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>K Value:</span>
+            <input
+              type="number"
+              min="0"
+              value={reachabilityK}
+              onChange={(e) => onReachabilityKChange(Math.max(0, parseInt(e.target.value) || 0))}
+              style={{
+                width: "60px",
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border: "1px solid #bdc3c7",
+                fontSize: "14px",
+              }}
+            />
+            <span style={{ fontSize: "12px", color: "#7f8c8d" }}>(Red+Hatch must have reachability &gt; K)</span>
           </label>
         )}
       </div>

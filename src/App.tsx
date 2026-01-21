@@ -57,6 +57,7 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
+  const [reachabilityK, setReachabilityK] = useState(0);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -184,9 +185,9 @@ function App() {
     };
 
     // Send the solve request
-    const request: SolverRequest = { grid, numColors, minWallsProportion, gridType };
+    const request: SolverRequest = { grid, numColors, minWallsProportion, gridType, reachabilityK };
     worker.postMessage(request);
-  }, [grid, numColors, solverType, minWallsProportion, gridType]);
+  }, [grid, numColors, solverType, minWallsProportion, gridType, reachabilityK]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -376,6 +377,8 @@ function App() {
               onDownloadColors={handleDownloadSketchpadColors}
               onUploadColors={handleUploadColors}
               grid={grid}
+              reachabilityK={reachabilityK}
+              onReachabilityKChange={setReachabilityK}
             />
 
             <h3 style={{ marginTop: "16px" }}>Colors</h3>
