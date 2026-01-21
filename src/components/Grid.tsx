@@ -862,61 +862,78 @@ export const Controls: React.FC<ControlsProps> = ({
   gridType = "square",
   onGridTypeChange,
 }) => {
-  const handleDownloadJSON = useCallback(() => {
+  const handleDownloadSVG = useCallback(() => {
     if (!solution) return;
 
-    // Convert wall edges to line segments
-    // Each wall is between two adjacent cells
-    // For a wall between (r1, c1) and (r2, c2):
-    // - Vertical edge (same col, adjacent rows): horizontal wall line from (c1, r2) to (c1+1, r2)
-    // - Horizontal edge (same row, adjacent cols): vertical wall line from (c2, r1) to (c2, r1+1)
-    const walls = solution.wallEdges.map(edge => {
-      const { u, v } = edge;
-      // Ensure u is the "smaller" point for consistent ordering
-      const [p1, p2] = u.row < v.row || (u.row === v.row && u.col < v.col) 
-        ? [u, v] : [v, u];
-      
-      if (p1.row === p2.row) {
-        // Horizontal edge (same row) -> vertical wall between cells
-        // Wall goes from (p2.col, p1.row) to (p2.col, p1.row + 1)
-        return {
-          start: { x: p2.col, y: p1.row },
-          end: { x: p2.col, y: p1.row + 1 }
-        };
-      } else {
-        // Vertical edge (same col) -> horizontal wall between cells
-        // Wall goes from (p1.col, p2.row) to (p1.col + 1, p2.row)
-        return {
-          start: { x: p1.col, y: p2.row },
-          end: { x: p1.col + 1, y: p2.row }
-        };
-      }
-    });
+    const cellSize = 40;
+    const wallThickness = 2;
+    const svgWidth = gridWidth * cellSize + wallThickness;
+    const svgHeight = gridHeight * cellSize + wallThickness;
 
-    // Add boundary walls (outer edges of the grid)
-    type WallSegment = { start: { x: number; y: number }; end: { x: number; y: number } };
-    const boundaryWalls: WallSegment[] = [
-      // Top edge
-      { start: { x: 0, y: 0 }, end: { x: gridWidth, y: 0 } },
-      // Bottom edge
-      { start: { x: 0, y: gridHeight }, end: { x: gridWidth, y: gridHeight } },
-      // Left edge
-      { start: { x: 0, y: 0 }, end: { x: 0, y: gridHeight } },
-      // Right edge
-      { start: { x: gridWidth, y: 0 }, end: { x: gridWidth, y: gridHeight } },
-    ];
+    // Build wall edge set for quick lookup
+    const wallEdgeSet = new Set<string>();
+    for (const edge of solution.wallEdges) {
+      wallEdgeSet.add(`${edge.u.row},${edge.u.col}-${edge.v.row},${edge.v.col}`);
+      wallEdgeSet.add(`${edge.v.row},${edge.v.col}-${edge.u.row},${edge.u.col}`);
+    }
 
-    const jsonData = {
-      walls: [...boundaryWalls, ...walls],
-      colors: solution.assignedColors
+    const hasWall = (r1: number, c1: number, r2: number, c2: number): boolean => {
+      return wallEdgeSet.has(`${r1},${c1}-${r2},${c2}`);
     };
 
-    // Create and download the JSON file
-    const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+    // Build SVG content
+    let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
+    
+    // Add cells with colors
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        const color = solution.assignedColors[row][col];
+        const isHatch = color === HATCH_COLOR;
+        const fillColor = isHatch ? HATCH_BG_COLOR : COLORS[color % COLORS.length];
+        const x = col * cellSize + wallThickness / 2;
+        const y = row * cellSize + wallThickness / 2;
+        
+        svgContent += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${fillColor}" />\n`;
+        
+        // Add hatch pattern for hatch cells
+        if (isHatch) {
+          svgContent += `  <line x1="${x}" y1="${y}" x2="${x + cellSize}" y2="${y + cellSize}" stroke="#ff9800" stroke-width="2" />\n`;
+          svgContent += `  <line x1="${x + cellSize}" y1="${y}" x2="${x}" y2="${y + cellSize}" stroke="#ff9800" stroke-width="2" />\n`;
+        }
+      }
+    }
+
+    // Add internal walls
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        // Check right wall
+        if (col < gridWidth - 1 && hasWall(row, col, row, col + 1)) {
+          const x = (col + 1) * cellSize + wallThickness / 2;
+          const y1 = row * cellSize + wallThickness / 2;
+          const y2 = (row + 1) * cellSize + wallThickness / 2;
+          svgContent += `  <line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+        }
+        // Check bottom wall
+        if (row < gridHeight - 1 && hasWall(row, col, row + 1, col)) {
+          const x1 = col * cellSize + wallThickness / 2;
+          const x2 = (col + 1) * cellSize + wallThickness / 2;
+          const y = (row + 1) * cellSize + wallThickness / 2;
+          svgContent += `  <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+        }
+      }
+    }
+
+    // Add outer border
+    svgContent += `  <rect x="${wallThickness / 2}" y="${wallThickness / 2}" width="${gridWidth * cellSize}" height="${gridHeight * cellSize}" fill="none" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+    
+    svgContent += `</svg>`;
+
+    // Create and download the SVG file
+    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'grid-solution.json';
+    a.download = 'grid-solution.svg';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1071,7 +1088,7 @@ export const Controls: React.FC<ControlsProps> = ({
         </button>
         {solution && (
           <button
-            onClick={handleDownloadJSON}
+            onClick={handleDownloadSVG}
             style={{
               padding: "8px 16px",
               backgroundColor: "#9b59b6",
@@ -1081,7 +1098,7 @@ export const Controls: React.FC<ControlsProps> = ({
               cursor: "pointer",
             }}
           >
-            Download JSON
+            Download SVG
           </button>
         )}
       </div>
