@@ -161,6 +161,7 @@ function App() {
         setSolution(solution);
         setSolutionStatus("found");
         setErrorMessage(null);
+        setViewMode("solution"); // Automatically switch to solution view
       } else if (success && !solution) {
         // SAT solver returned null (unsatisfiable)
         setSolutionStatus("unsatisfiable");

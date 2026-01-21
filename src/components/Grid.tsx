@@ -276,13 +276,11 @@ export const Grid: React.FC<GridProps> = ({
       for (let col = 0; col < grid.width; col++) {
         const inputColor = grid.colors[row][col];
         // In solution view mode, always show solution colors
-        // In sketchpad mode, show user colors (filling nulls with solution if available)
+        // In sketchpad mode, always show user colors (inputColor), even if null
         const displayColor = showSolutionColors
           ? solution!.assignedColors[row][col]
-          : (solution && inputColor === null
-              ? solution.assignedColors[row][col]
-              : inputColor);
-        const isBlank = inputColor === null && !showSolutionColors && !solution;
+          : inputColor;
+        const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
         
         let fill: string;
@@ -402,13 +400,11 @@ export const Grid: React.FC<GridProps> = ({
     const getCellColor = (row: number, col: number): string => {
       const inputColor = grid.colors[row][col];
       // In solution view mode, always show solution colors
-      // In sketchpad mode, show user colors (filling nulls with solution if available)
+      // In sketchpad mode, always show user colors (inputColor), even if null
       const displayColor = showSolutionColors
         ? solution!.assignedColors[row][col]
-        : (solution && inputColor === null
-            ? solution.assignedColors[row][col]
-            : inputColor);
-      const isBlank = inputColor === null && !showSolutionColors && !solution;
+        : inputColor;
+      const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
       
       if (isBlank) {
@@ -607,7 +603,8 @@ export const Grid: React.FC<GridProps> = ({
               key={`down-band-${i}`}
               d={band.path}
               fill={band.fill}
-              stroke="none"
+              stroke="#2c3e50"
+              strokeWidth={0.5}
             />
           ))}
           
@@ -630,7 +627,8 @@ export const Grid: React.FC<GridProps> = ({
               key={`up-band-${i}`}
               d={band.path}
               fill={band.fill}
-              stroke="none"
+              stroke="#2c3e50"
+              strokeWidth={0.5}
             />
           ))}
           
@@ -684,13 +682,11 @@ export const Grid: React.FC<GridProps> = ({
         Array.from({ length: grid.width }, (_, col) => {
           const inputColor = grid.colors[row][col];
           // In solution view mode, always show solution colors
-          // In sketchpad mode, show user colors (filling nulls with solution if available)
+          // In sketchpad mode, always show user colors (inputColor), even if null
           const displayColor = showSolutionColors
             ? solution!.assignedColors[row][col]
-            : (solution && inputColor === null
-                ? solution.assignedColors[row][col]
-                : inputColor);
-          const isBlank = inputColor === null && !showSolutionColors && !solution;
+            : inputColor;
+          const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
           
           // Determine background
@@ -1073,7 +1069,7 @@ export const Controls: React.FC<ControlsProps> = ({
             const downPerpX = halfBand * Math.SQRT1_2;
             const downPerpY = halfBand * Math.SQRT1_2;
             const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
-            svgContent += `  <path d="${downPath}" fill="${fill}" />\n`;
+            svgContent += `  <path d="${downPath}" fill="${fill}" stroke="#2c3e50" stroke-width="0.5" />\n`;
           }
         }
       }
@@ -1105,7 +1101,7 @@ export const Controls: React.FC<ControlsProps> = ({
             const upPerpX = halfBand * Math.SQRT1_2;
             const upPerpY = halfBand * Math.SQRT1_2;
             const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
-            svgContent += `  <path d="${upPath}" fill="${fill}" />\n`;
+            svgContent += `  <path d="${upPath}" fill="${fill}" stroke="#2c3e50" stroke-width="0.5" />\n`;
           }
         }
       }
