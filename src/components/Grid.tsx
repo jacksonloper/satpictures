@@ -55,6 +55,7 @@ interface GridProps {
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
   gridType?: GridType;
+  viewMode?: "sketchpad" | "solution";
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -65,10 +66,14 @@ export const Grid: React.FC<GridProps> = ({
   onCellDrag,
   cellSize = 40,
   gridType = "square",
+  viewMode = "sketchpad",
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
   const [isDragging, setIsDragging] = useState(false);
+
+  // Determine if we should show solution colors (when viewing solution mode and solution exists)
+  const showSolutionColors = viewMode === "solution" && solution !== null;
 
   // Create a set of kept edge keys for quick lookup
   const keptEdgeSet = useMemo(() => {
@@ -270,11 +275,12 @@ export const Grid: React.FC<GridProps> = ({
     for (let row = 0; row < grid.height; row++) {
       for (let col = 0; col < grid.width; col++) {
         const inputColor = grid.colors[row][col];
-        const displayColor =
-          solution && inputColor === null
-            ? solution.assignedColors[row][col]
-            : inputColor;
-        const isBlank = inputColor === null && !solution;
+        // In solution view mode, always show solution colors
+        // In sketchpad mode, always show user colors (inputColor), even if null
+        const displayColor = showSolutionColors
+          ? solution!.assignedColors[row][col]
+          : inputColor;
+        const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
         
         let fill: string;
@@ -341,7 +347,7 @@ export const Grid: React.FC<GridProps> = ({
               d={path}
               fill={fill}
               stroke="none"
-              style={{ cursor: "pointer" }}
+              style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
               onMouseDown={() => handleMouseDown(row, col)}
               onMouseEnter={() => handleMouseEnter(row, col)}
             />
@@ -393,10 +399,12 @@ export const Grid: React.FC<GridProps> = ({
     // Helper to get color for a cell
     const getCellColor = (row: number, col: number): string => {
       const inputColor = grid.colors[row][col];
-      const displayColor = solution && inputColor === null
-        ? solution.assignedColors[row][col]
+      // In solution view mode, always show solution colors
+      // In sketchpad mode, always show user colors (inputColor), even if null
+      const displayColor = showSolutionColors
+        ? solution!.assignedColors[row][col]
         : inputColor;
-      const isBlank = inputColor === null && !solution;
+      const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
       
       if (isBlank) {
@@ -441,8 +449,16 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
     }
     
+    interface UpSlantBand {
+      path: string;
+      fill: string;
+      // Long edges for outline (only for up-slant bands)
+      edge1: { x1: number; y1: number; x2: number; y2: number };
+      edge2: { x1: number; y1: number; x2: number; y2: number };
+    }
+    
     const downSlantBands: DiagonalBand[] = [];
-    const upSlantBands: DiagonalBand[] = [];
+    const upSlantBands: UpSlantBand[] = [];
     
     // Iterate over intersection points (corners where 4 cells meet)
     // Intersection at (iRow, iCol) is between cells:
@@ -500,11 +516,26 @@ export const Grid: React.FC<GridProps> = ({
           const halfBand = octBandWidth / 2;
           const upPerpX = halfBand * Math.SQRT1_2;
           const upPerpY = halfBand * Math.SQRT1_2;
-          const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} ` +
-                        `L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} ` +
-                        `L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} ` +
-                        `L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
-          upSlantBands.push({ path: upPath, fill: upSlantFill });
+          
+          // The four corners of the band (clockwise from top-right outer edge)
+          // Corner 1: top-right, outer (toward NE)
+          const c1x = ix + gapHalf + upPerpX, c1y = iy - gapHalf + upPerpY;
+          // Corner 2: top-right, inner (toward center)
+          const c2x = ix + gapHalf - upPerpX, c2y = iy - gapHalf - upPerpY;
+          // Corner 3: bottom-left, inner (toward center)
+          const c3x = ix - gapHalf - upPerpX, c3y = iy + gapHalf - upPerpY;
+          // Corner 4: bottom-left, outer (toward SW)
+          const c4x = ix - gapHalf + upPerpX, c4y = iy + gapHalf + upPerpY;
+          
+          const upPath = `M ${c1x} ${c1y} L ${c2x} ${c2y} L ${c3x} ${c3y} L ${c4x} ${c4y} Z`;
+          
+          // Long edges are: c1-c4 (outer edge) and c2-c3 (inner edge)
+          upSlantBands.push({ 
+            path: upPath, 
+            fill: upSlantFill,
+            edge1: { x1: c1x, y1: c1y, x2: c4x, y2: c4y }, // outer long edge
+            edge2: { x1: c2x, y1: c2y, x2: c3x, y2: c3y }, // inner long edge
+          });
         }
       }
     }
@@ -589,7 +620,7 @@ export const Grid: React.FC<GridProps> = ({
             </pattern>
           </defs>
           
-          {/* Layer 1: Down-slanting diagonal bands (beneath) */}
+          {/* Layer 1: Down-slanting diagonal bands (beneath) - no outline */}
           {downSlantBands.map((band, i) => (
             <path
               key={`down-band-${i}`}
@@ -606,13 +637,13 @@ export const Grid: React.FC<GridProps> = ({
               d={path}
               fill={fill}
               stroke="none"
-              style={{ cursor: "pointer" }}
+              style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
               onMouseDown={() => handleMouseDown(row, col)}
               onMouseEnter={() => handleMouseEnter(row, col)}
             />
           ))}
           
-          {/* Layer 3: Up-slanting diagonal bands (on top) */}
+          {/* Layer 3: Up-slanting diagonal bands (on top) - fill only, no stroke on path */}
           {upSlantBands.map((band, i) => (
             <path
               key={`up-band-${i}`}
@@ -620,6 +651,28 @@ export const Grid: React.FC<GridProps> = ({
               fill={band.fill}
               stroke="none"
             />
+          ))}
+          
+          {/* Layer 3b: Up-slanting band long edge outlines */}
+          {upSlantBands.map((band, i) => (
+            <React.Fragment key={`up-band-edges-${i}`}>
+              <line
+                x1={band.edge1.x1}
+                y1={band.edge1.y1}
+                x2={band.edge1.x2}
+                y2={band.edge1.y2}
+                stroke="#2c3e50"
+                strokeWidth={0.5}
+              />
+              <line
+                x1={band.edge2.x1}
+                y1={band.edge2.y1}
+                x2={band.edge2.x2}
+                y2={band.edge2.y2}
+                stroke="#2c3e50"
+                strokeWidth={0.5}
+              />
+            </React.Fragment>
           ))}
           
           {/* Layer 4: Cardinal walls (on top of everything) */}
@@ -671,12 +724,12 @@ export const Grid: React.FC<GridProps> = ({
       {Array.from({ length: grid.height }, (_, row) =>
         Array.from({ length: grid.width }, (_, col) => {
           const inputColor = grid.colors[row][col];
-          // Use assigned color from solution if available, otherwise use input
-          const displayColor =
-            solution && inputColor === null
-              ? solution.assignedColors[row][col]
-              : inputColor;
-          const isBlank = inputColor === null && !solution;
+          // In solution view mode, always show solution colors
+          // In sketchpad mode, always show user colors (inputColor), even if null
+          const displayColor = showSolutionColors
+            ? solution!.assignedColors[row][col]
+            : inputColor;
+          const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
           
           // Determine background
@@ -710,7 +763,7 @@ export const Grid: React.FC<GridProps> = ({
                 height: cellSize,
                 backgroundColor: bgColor,
                 background: bgPattern,
-                cursor: "pointer",
+                cursor: viewMode === "solution" ? "default" : "pointer",
                 boxSizing: "border-box",
                 // Right wall
                 borderRight: wallRight
@@ -839,6 +892,9 @@ interface ControlsProps {
   solution?: GridSolution | null;
   gridType?: GridType;
   onGridTypeChange?: (gridType: GridType) => void;
+  onDownloadColors?: () => void;
+  onUploadColors?: (file: File) => void;
+  grid?: { colors: (number | null)[][] };
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -858,70 +914,29 @@ export const Controls: React.FC<ControlsProps> = ({
   solveTime,
   minWallsProportion = 0,
   onMinWallsProportionChange,
-  solution,
+  solution: _solution,
   gridType = "square",
   onGridTypeChange,
+  onDownloadColors,
+  onUploadColors,
+  grid,
 }) => {
-  const handleDownloadJSON = useCallback(() => {
-    if (!solution) return;
+  // solution is received but not used in Controls (SVG download moved to solution panel)
+  void _solution;
+  
+  // File input ref for upload
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    // Convert wall edges to line segments
-    // Each wall is between two adjacent cells
-    // For a wall between (r1, c1) and (r2, c2):
-    // - Vertical edge (same col, adjacent rows): horizontal wall line from (c1, r2) to (c1+1, r2)
-    // - Horizontal edge (same row, adjacent cols): vertical wall line from (c2, r1) to (c2, r1+1)
-    const walls = solution.wallEdges.map(edge => {
-      const { u, v } = edge;
-      // Ensure u is the "smaller" point for consistent ordering
-      const [p1, p2] = u.row < v.row || (u.row === v.row && u.col < v.col) 
-        ? [u, v] : [v, u];
-      
-      if (p1.row === p2.row) {
-        // Horizontal edge (same row) -> vertical wall between cells
-        // Wall goes from (p2.col, p1.row) to (p2.col, p1.row + 1)
-        return {
-          start: { x: p2.col, y: p1.row },
-          end: { x: p2.col, y: p1.row + 1 }
-        };
-      } else {
-        // Vertical edge (same col) -> horizontal wall between cells
-        // Wall goes from (p1.col, p2.row) to (p1.col + 1, p2.row)
-        return {
-          start: { x: p1.col, y: p2.row },
-          end: { x: p1.col + 1, y: p2.row }
-        };
-      }
-    });
-
-    // Add boundary walls (outer edges of the grid)
-    type WallSegment = { start: { x: number; y: number }; end: { x: number; y: number } };
-    const boundaryWalls: WallSegment[] = [
-      // Top edge
-      { start: { x: 0, y: 0 }, end: { x: gridWidth, y: 0 } },
-      // Bottom edge
-      { start: { x: 0, y: gridHeight }, end: { x: gridWidth, y: gridHeight } },
-      // Left edge
-      { start: { x: 0, y: 0 }, end: { x: 0, y: gridHeight } },
-      // Right edge
-      { start: { x: gridWidth, y: 0 }, end: { x: gridWidth, y: gridHeight } },
-    ];
-
-    const jsonData = {
-      walls: [...boundaryWalls, ...walls],
-      colors: solution.assignedColors
-    };
-
-    // Create and download the JSON file
-    const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'grid-solution.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [solution, gridWidth, gridHeight]);
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUploadColors) {
+      onUploadColors(file);
+    }
+    // Reset input so same file can be uploaded again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [onUploadColors]);
 
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -1069,22 +1084,53 @@ export const Controls: React.FC<ControlsProps> = ({
         >
           Maze Setup
         </button>
-        {solution && (
+      </div>
+
+      {/* Color CSV Download/Upload */}
+      <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {onDownloadColors && grid && (
           <button
-            onClick={handleDownloadJSON}
+            onClick={onDownloadColors}
             style={{
-              padding: "8px 16px",
-              backgroundColor: "#9b59b6",
+              padding: "6px 12px",
+              backgroundColor: "#8e44ad",
               color: "white",
               border: "none",
               borderRadius: "4px",
               cursor: "pointer",
+              fontSize: "13px",
             }}
           >
-            Download JSON
+            Download Colors (CSV)
           </button>
         )}
+        {onUploadColors && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              style={{ display: "none" }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: "6px 12px",
+                backgroundColor: "#2980b9",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "13px",
+              }}
+            >
+              Upload Colors (CSV)
+            </button>
+          </>
+        )}
       </div>
+
       {solutionStatus !== "none" && (
         <div
           style={{
@@ -1106,7 +1152,7 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}${solution ? ` Walls: ${Math.round(solution.wallEdges.length / (solution.wallEdges.length + solution.keptEdges.length) * 100)}%` : ""}`
+            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}${_solution ? ` Walls: ${Math.round(_solution.wallEdges.length / (_solution.wallEdges.length + _solution.keptEdges.length) * 100)}%` : ""}`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
               : `No solution exists - some color regions cannot be connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`}
