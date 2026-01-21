@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, ViewModeToggle } from "./components";
+import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
 import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
 
-// View mode: "sketchpad" is user-editable, "solution" is SAT-generated (read-only)
-type ViewMode = "sketchpad" | "solution";
+// Solution metadata - stored separately because solution may have different dimensions/type than current sketchpad
+interface SolutionMetadata {
+  gridType: GridType;
+  width: number;
+  height: number;
+}
 
 function createEmptyGrid(width: number, height: number): ColorGrid {
   return {
@@ -43,6 +47,7 @@ function App() {
   );
   const [selectedColor, setSelectedColor] = useState<number | null>(null);
   const [solution, setSolution] = useState<GridSolution | null>(null);
+  const [solutionMetadata, setSolutionMetadata] = useState<SolutionMetadata | null>(null);
   const [solving, setSolving] = useState(false);
   const [solutionStatus, setSolutionStatus] = useState<
     "none" | "found" | "unsatisfiable" | "error"
@@ -52,7 +57,6 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
-  const [viewMode, setViewMode] = useState<ViewMode>("sketchpad");
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -69,36 +73,24 @@ function App() {
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
-      // Don't allow editing when viewing SAT solution
-      if (viewMode === "solution") return;
-      
       setGrid((prev) => {
         const newColors = prev.colors.map((r) => [...r]);
         newColors[row][col] = selectedColor;
         return { ...prev, colors: newColors };
       });
-      setSolution(null);
-      setSolutionStatus("none");
-      setErrorMessage(null);
     },
-    [selectedColor, viewMode]
+    [selectedColor]
   );
 
   const handleCellDrag = useCallback(
     (row: number, col: number) => {
-      // Don't allow editing when viewing SAT solution
-      if (viewMode === "solution") return;
-      
       setGrid((prev) => {
         const newColors = prev.colors.map((r) => [...r]);
         newColors[row][col] = selectedColor;
         return { ...prev, colors: newColors };
       });
-      setSolution(null);
-      setSolutionStatus("none");
-      setErrorMessage(null);
     },
-    [selectedColor, viewMode]
+    [selectedColor]
   );
 
   const handleWidthChange = useCallback((width: number) => {
@@ -112,10 +104,6 @@ function App() {
       );
       return { width: clampedWidth, height: prev.height, colors: newColors };
     });
-    setSolution(null);
-    setSolutionStatus("none");
-    setErrorMessage(null);
-    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, []);
 
   const handleHeightChange = useCallback((height: number) => {
@@ -129,11 +117,6 @@ function App() {
       );
       return { width: prev.width, height: clampedHeight, colors: newColors };
     });
-    setSolution(null);
-    setSolutionStatus("none");
-    setErrorMessage(null);
-    setSolveTime(null);
-    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, []);
 
   const handleSolve = useCallback(() => {
@@ -144,11 +127,17 @@ function App() {
 
     setSolving(true);
     setSolution(null);
+    setSolutionMetadata(null);
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
 
     const startTime = performance.now();
+    
+    // Store the current grid settings for the solution
+    const currentGridType = gridType;
+    const currentWidth = grid.width;
+    const currentHeight = grid.height;
 
     // Create a new worker based on solver type
     const worker = solverType === "cadical" ? new CadicalWorker() : new SolverWorker();
@@ -161,9 +150,13 @@ function App() {
       
       if (success && solution) {
         setSolution(solution);
+        setSolutionMetadata({
+          gridType: currentGridType,
+          width: currentWidth,
+          height: currentHeight,
+        });
         setSolutionStatus("found");
         setErrorMessage(null);
-        setViewMode("solution"); // Automatically switch to solution view
       } else if (success && !solution) {
         // SAT solver returned null (unsatisfiable)
         setSolutionStatus("unsatisfiable");
@@ -197,20 +190,10 @@ function App() {
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
-    setSolution(null);
-    setSolutionStatus("none");
-    setErrorMessage(null);
-    setSolveTime(null);
-    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, [gridWidth, gridHeight]);
 
   const handleMazeSetup = useCallback(() => {
     setGrid(createMazeSetupGrid(gridWidth, gridHeight));
-    setSolution(null);
-    setSolutionStatus("none");
-    setErrorMessage(null);
-    setSolveTime(null);
-    setViewMode("sketchpad"); // Switch back to editable mode when solution is cleared
   }, [gridWidth, gridHeight]);
 
   const handleCancel = useCallback(() => {
@@ -222,43 +205,31 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
-    setViewMode("sketchpad"); // Switch back to editable mode when compute is cancelled
   }, []);
 
   const handleGridTypeChange = useCallback((newGridType: GridType) => {
     setGridType(newGridType);
-    setSolution(null);
-    setSolutionStatus("none");
-    setErrorMessage(null);
-    setSolveTime(null);
-    setViewMode("sketchpad");
   }, []);
 
   // Copy SAT-generated colors to sketchpad
   const handleCopyToSketchpad = useCallback(() => {
-    if (!solution) return;
+    if (!solution || !solutionMetadata) return;
     
+    // Copy the solution colors to the sketchpad, adjusting dimensions to match solution
+    setGridWidth(solutionMetadata.width);
+    setGridHeight(solutionMetadata.height);
+    setGridType(solutionMetadata.gridType);
     setGrid({
-      width: gridWidth,
-      height: gridHeight,
+      width: solutionMetadata.width,
+      height: solutionMetadata.height,
       colors: solution.assignedColors.map(row => [...row]),
     });
-    setSolution(null);
-    setSolutionStatus("none");
-    setErrorMessage(null);
-    setSolveTime(null);
-    setViewMode("sketchpad");
-  }, [solution, gridWidth, gridHeight]);
+  }, [solution, solutionMetadata]);
 
-  // Download current colorset as CSV
-  const handleDownloadColors = useCallback(() => {
-    // Get the colors based on current view mode
-    const colors = viewMode === "solution" && solution
-      ? solution.assignedColors
-      : grid.colors;
-    
+  // Download sketchpad colorset as CSV
+  const handleDownloadSketchpadColors = useCallback(() => {
     // Convert to CSV (no headers, integer values, -1 for null/clear)
-    const csvContent = colors
+    const csvContent = grid.colors
       .map(row => row.map(c => c === null ? -1 : c).join(","))
       .join("\n");
     
@@ -266,14 +237,40 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = viewMode === "solution" ? "sat-colors.csv" : "sketchpad-colors.csv";
+    a.download = "sketchpad-colors.csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [viewMode, solution, grid]);
+  }, [grid]);
 
-  // Upload colorset from CSV
+  // Download solution colorset as CSV
+  const handleDownloadSolutionColors = useCallback(() => {
+    if (!solution) return;
+    
+    // Convert to CSV (no headers, integer values, -1 for null/clear)
+    const csvContent = solution.assignedColors
+      .map(row => row.map(c => c === null ? -1 : c).join(","))
+      .join("\n");
+    
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "solution-colors.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [solution]);
+
+  // Download solution as SVG
+  const handleDownloadSVG = useCallback(() => {
+    if (!solution || !solutionMetadata) return;
+    downloadSolutionSVG(solution, solutionMetadata.width, solutionMetadata.height, solutionMetadata.gridType);
+  }, [solution, solutionMetadata]);
+
+  // Upload colorset from CSV (to sketchpad)
   const handleUploadColors = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -317,19 +314,16 @@ function App() {
         height: clampedHeight,
         colors: adjustedColors,
       });
-      setSolution(null);
-      setSolutionStatus("none");
-      setErrorMessage(null);
-      setSolveTime(null);
-      setViewMode("sketchpad");
     };
     reader.readAsText(file);
   }, [gridWidth]);
 
-  // Handle view mode change
-  const handleViewModeChange = useCallback((mode: ViewMode) => {
-    setViewMode(mode);
-  }, []);
+  // Create a grid structure for the solution display based on solution metadata
+  const solutionDisplayGrid: ColorGrid | null = solution && solutionMetadata ? {
+    width: solutionMetadata.width,
+    height: solutionMetadata.height,
+    colors: solution.assignedColors,
+  } : null;
 
   return (
     <div className="app">
@@ -340,69 +334,161 @@ function App() {
         color forms a single connected region.
       </p>
 
-      <div className="controls-panel">
-        <h3>Grid Size & Solver</h3>
-        <Controls
-          gridWidth={gridWidth}
-          gridHeight={gridHeight}
-          onWidthChange={handleWidthChange}
-          onHeightChange={handleHeightChange}
-          onSolve={handleSolve}
-          onClear={handleClear}
-          onMazeSetup={handleMazeSetup}
-          onCancel={handleCancel}
-          solving={solving}
-          solutionStatus={solutionStatus}
-          errorMessage={errorMessage}
-          solverType={solverType}
-          onSolverTypeChange={setSolverType}
-          solveTime={solveTime}
-          minWallsProportion={minWallsProportion}
-          onMinWallsProportionChange={setMinWallsProportion}
-          solution={solution}
-          gridType={gridType}
-          onGridTypeChange={handleGridTypeChange}
-          onDownloadColors={handleDownloadColors}
-          onUploadColors={handleUploadColors}
-          grid={grid}
-        />
-
-        <h3>Colors</h3>
-        <ColorPalette
-          selectedColor={selectedColor}
-          onColorSelect={setSelectedColor}
-          numColors={numColors}
-        />
-      </div>
-
-      <div className="grid-panel">
-        {/* View Mode Toggle - positioned above the canvas */}
-        <ViewModeToggle
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          solution={solution}
-          onCopyToSketchpad={handleCopyToSketchpad}
-        />
+      {/* Main content area with two panels */}
+      <div style={{ display: "flex", gap: "40px", flexWrap: "wrap", alignItems: "flex-start" }}>
         
-        {/* Both grids are always rendered, one is hidden based on viewMode */}
-        <div style={{ display: viewMode === "sketchpad" ? "block" : "none" }}>
-          <SketchpadGrid
-            grid={grid}
-            solution={solution}
-            selectedColor={selectedColor}
-            onCellClick={handleCellClick}
-            onCellDrag={handleCellDrag}
-            cellSize={40}
-            gridType={gridType}
-          />
+        {/* Sketchpad Section */}
+        <div style={{ flex: "1", minWidth: "350px" }}>
+          <div style={{ 
+            padding: "16px", 
+            backgroundColor: "#f8f9fa", 
+            borderRadius: "8px",
+            border: "2px solid #3498db",
+          }}>
+            <h2 style={{ margin: "0 0 16px 0", color: "#2c3e50", fontSize: "1.3em" }}>
+              📝 Sketchpad
+            </h2>
+            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
+              Click cells to paint colors. Click Solve to generate a solution.
+            </p>
+            
+            {/* Sketchpad Controls */}
+            <Controls
+              gridWidth={gridWidth}
+              gridHeight={gridHeight}
+              onWidthChange={handleWidthChange}
+              onHeightChange={handleHeightChange}
+              onSolve={handleSolve}
+              onClear={handleClear}
+              onMazeSetup={handleMazeSetup}
+              onCancel={handleCancel}
+              solving={solving}
+              solutionStatus={solutionStatus}
+              errorMessage={errorMessage}
+              solverType={solverType}
+              onSolverTypeChange={setSolverType}
+              solveTime={solveTime}
+              minWallsProportion={minWallsProportion}
+              onMinWallsProportionChange={setMinWallsProportion}
+              solution={solution}
+              gridType={gridType}
+              onGridTypeChange={handleGridTypeChange}
+              onDownloadColors={handleDownloadSketchpadColors}
+              onUploadColors={handleUploadColors}
+              grid={grid}
+            />
+
+            <h3 style={{ marginTop: "16px" }}>Colors</h3>
+            <ColorPalette
+              selectedColor={selectedColor}
+              onColorSelect={setSelectedColor}
+              numColors={numColors}
+            />
+
+            {/* Sketchpad Grid */}
+            <div style={{ marginTop: "16px" }}>
+              <SketchpadGrid
+                grid={grid}
+                solution={null}
+                selectedColor={selectedColor}
+                onCellClick={handleCellClick}
+                onCellDrag={handleCellDrag}
+                cellSize={40}
+                gridType={gridType}
+              />
+            </div>
+          </div>
         </div>
-        <div style={{ display: viewMode === "solution" ? "block" : "none" }}>
-          <SolutionGrid
-            grid={grid}
-            solution={solution}
-            cellSize={40}
-            gridType={gridType}
-          />
+
+        {/* Solution Section */}
+        <div style={{ flex: "1", minWidth: "350px" }}>
+          <div style={{ 
+            padding: "16px", 
+            backgroundColor: "#f0fff4", 
+            borderRadius: "8px",
+            border: "2px solid #27ae60",
+          }}>
+            <h2 style={{ margin: "0 0 16px 0", color: "#27ae60", fontSize: "1.3em" }}>
+              🎯 SAT Solution
+            </h2>
+            
+            {solution && solutionMetadata ? (
+              <>
+                <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
+                  Most recent solver output ({solutionMetadata.width}×{solutionMetadata.height} {solutionMetadata.gridType} grid).
+                  {solveTime && ` Solved in ${solveTime.toFixed(0)}ms.`}
+                </p>
+                
+                {/* Solution action buttons */}
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
+                  <button
+                    onClick={handleCopyToSketchpad}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: "#16a085",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Copy to Sketchpad
+                  </button>
+                  <button
+                    onClick={handleDownloadSVG}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: "#9b59b6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Download SVG
+                  </button>
+                  <button
+                    onClick={handleDownloadSolutionColors}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: "#8e44ad",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Download CSV
+                  </button>
+                </div>
+                
+                {/* Solution Grid */}
+                <div style={{ marginTop: "12px" }}>
+                  <SolutionGrid
+                    grid={solutionDisplayGrid!}
+                    solution={solution}
+                    cellSize={40}
+                    gridType={solutionMetadata.gridType}
+                  />
+                </div>
+              </>
+            ) : (
+              <div style={{
+                padding: "40px", 
+                textAlign: "center", 
+                color: "#7f8c8d",
+                backgroundColor: "#f5f5f5",
+                borderRadius: "4px",
+              }}>
+                <p style={{ margin: 0, fontSize: "14px" }}>
+                  {solving ? "⏳ Solving..." : "No solution yet. Click Solve to generate one."}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
