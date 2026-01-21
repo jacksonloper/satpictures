@@ -129,14 +129,27 @@ export const Grid: React.FC<GridProps> = ({
   const hexHeight = 2 * hexSize;
   const hexHorizSpacing = hexWidth;
   const hexVertSpacing = hexHeight * 0.75;
+
+  // Octagon grid calculations
+  // Octagons are laid out on a square grid but with 8 neighbors
+  // The diagonal bands have width = cellSize / 2
+  const octBandWidth = cellSize / 2;
+  // Octagon inset - how much the octagon corners are cut
+  const octInset = cellSize * 0.2;
   
   // Calculate total dimensions based on grid type
-  const totalWidth = gridType === "hex"
-    ? grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2
-    : grid.width * cellSize + wallThickness;
-  const totalHeight = gridType === "hex"
-    ? (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2
-    : grid.height * cellSize + wallThickness;
+  let totalWidth: number;
+  let totalHeight: number;
+  if (gridType === "hex") {
+    totalWidth = grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2;
+    totalHeight = (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2;
+  } else if (gridType === "octagon") {
+    totalWidth = grid.width * cellSize + wallThickness * 2;
+    totalHeight = grid.height * cellSize + wallThickness * 2;
+  } else {
+    totalWidth = grid.width * cellSize + wallThickness;
+    totalHeight = grid.height * cellSize + wallThickness;
+  }
 
   // Get hex neighbors (odd-r offset coordinates) - must match solver's getHexNeighbors
   const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
@@ -348,6 +361,329 @@ export const Grid: React.FC<GridProps> = ({
               />
             ))
           )}
+        </svg>
+      </div>
+    );
+  }
+
+  // Octagon grid rendering
+  if (gridType === "octagon") {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+
+    // Get octagon neighbors - must match solver's getOctagonNeighbors
+    const getOctagonNeighbors = (row: number, col: number): [number, number, string][] => {
+      return [
+        [row - 1, col - 1, "NW"], // NW (diagonal)
+        [row - 1, col, "N"],      // N
+        [row - 1, col + 1, "NE"], // NE (diagonal)
+        [row, col - 1, "W"],      // W
+        [row, col + 1, "E"],      // E
+        [row + 1, col - 1, "SW"], // SW (diagonal)
+        [row + 1, col, "S"],      // S
+        [row + 1, col + 1, "SE"], // SE (diagonal)
+      ];
+    };
+
+    // Create SVG octagon path
+    const createOctagonPath = (cx: number, cy: number, size: number, inset: number): string => {
+      // Octagon with flat sides at top/bottom/left/right
+      const halfSize = size / 2;
+      const points: [number, number][] = [
+        [cx - halfSize + inset, cy - halfSize],           // top-left edge
+        [cx + halfSize - inset, cy - halfSize],           // top-right edge  
+        [cx + halfSize, cy - halfSize + inset],           // right-top edge
+        [cx + halfSize, cy + halfSize - inset],           // right-bottom edge
+        [cx + halfSize - inset, cy + halfSize],           // bottom-right edge
+        [cx - halfSize + inset, cy + halfSize],           // bottom-left edge
+        [cx - halfSize, cy + halfSize - inset],           // left-bottom edge
+        [cx - halfSize, cy - halfSize + inset],           // left-top edge
+      ];
+      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+    };
+
+    // Get diagonal band polygon for a diagonal edge
+    // Bands stretch between octagons with width = halfSize
+    // Up-slanting bands (NE, SW) render on top, down-slanting bands (NW, SE) render beneath
+    const getDiagonalBandPath = (
+      cx1: number, cy1: number, 
+      cx2: number, cy2: number,
+      direction: string
+    ): string => {
+      const halfBand = octBandWidth / 2;
+      
+      // Calculate perpendicular offset for band width
+      // For diagonal bands, the perpendicular direction depends on the diagonal type
+      if (direction === "NW" || direction === "SE") {
+        // Down-slanting bands (NW-SE direction): perpendicular is along (1,1) normalized
+        const perpX = halfBand * Math.SQRT1_2;
+        const perpY = halfBand * Math.SQRT1_2;
+        return `M ${cx1 - perpX} ${cy1 + perpY} L ${cx1 + perpX} ${cy1 - perpY} L ${cx2 + perpX} ${cy2 - perpY} L ${cx2 - perpX} ${cy2 + perpY} Z`;
+      } else {
+        // Up-slanting bands (NE-SW direction): perpendicular is along (1,-1) normalized
+        const perpX = halfBand * Math.SQRT1_2;
+        const perpY = halfBand * Math.SQRT1_2;
+        return `M ${cx1 - perpX} ${cy1 - perpY} L ${cx1 + perpX} ${cy1 + perpY} L ${cx2 + perpX} ${cy2 + perpY} L ${cx2 - perpX} ${cy2 - perpY} Z`;
+      }
+    };
+
+    // Helper to get color for a cell
+    const getCellColor = (row: number, col: number): string => {
+      const inputColor = grid.colors[row][col];
+      const displayColor = solution && inputColor === null
+        ? solution.assignedColors[row][col]
+        : inputColor;
+      const isBlank = inputColor === null && !solution;
+      const isHatch = displayColor === HATCH_COLOR;
+      
+      if (isBlank) {
+        return "url(#blankPattern)";
+      } else if (isHatch) {
+        return "url(#hatchPattern)";
+      } else {
+        return COLORS[(displayColor ?? 0) % COLORS.length];
+      }
+    };
+
+    // Pre-compute all octagon data
+    interface OctData {
+      row: number;
+      col: number;
+      cx: number;
+      cy: number;
+      path: string;
+      fill: string;
+    }
+    
+    const octData: OctData[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        const path = createOctagonPath(cx, cy, cellSize, octInset);
+        const fill = getCellColor(row, col);
+
+        octData.push({ row, col, cx, cy, path, fill });
+      }
+    }
+
+    // Pre-compute diagonal bands
+    // Down-slanting bands (NW-SE) go beneath, up-slanting bands (NE-SW) go on top
+    interface DiagonalBand {
+      row1: number;
+      col1: number;
+      row2: number;
+      col2: number;
+      direction: string;
+      path: string;
+      fill: string;
+      isUpSlant: boolean;
+    }
+    
+    const downSlantBands: DiagonalBand[] = [];
+    const upSlantBands: DiagonalBand[] = [];
+    const processedBands = new Set<string>();
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        
+        const neighbors = getOctagonNeighbors(row, col);
+        for (const [nRow, nCol, direction] of neighbors) {
+          // Only process diagonal neighbors
+          if (direction !== "NW" && direction !== "NE" && direction !== "SW" && direction !== "SE") {
+            continue;
+          }
+          
+          // Check bounds
+          if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
+            continue;
+          }
+          
+          // Avoid duplicates (each band is shared by two cells)
+          const bandKey = `${Math.min(row, nRow)},${Math.min(col, nCol)}-${Math.max(row, nRow)},${Math.max(col, nCol)}`;
+          if (processedBands.has(bandKey)) {
+            continue;
+          }
+          processedBands.add(bandKey);
+          
+          const ncx = padding + cellSize / 2 + nCol * cellSize;
+          const ncy = padding + cellSize / 2 + nRow * cellSize;
+          
+          // Determine if edge is kept (passage) or blocked (wall)
+          const isWall = hasWall(row, col, nRow, nCol);
+          
+          // Determine band color
+          let bandFill: string;
+          if (isWall) {
+            bandFill = "#2c3e50"; // Black/dark color for blocked bands
+          } else {
+            // Use the color of the cells joined by the band
+            bandFill = getCellColor(row, col);
+          }
+          
+          const bandPath = getDiagonalBandPath(cx, cy, ncx, ncy, direction);
+          
+          const band: DiagonalBand = {
+            row1: row,
+            col1: col,
+            row2: nRow,
+            col2: nCol,
+            direction,
+            path: bandPath,
+            fill: bandFill,
+            isUpSlant: direction === "NE" || direction === "SW",
+          };
+          
+          if (band.isUpSlant) {
+            upSlantBands.push(band);
+          } else {
+            downSlantBands.push(band);
+          }
+        }
+      }
+    }
+
+    // Pre-compute cardinal walls (N, S, E, W edges)
+    interface CardinalWall {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    }
+    
+    const cardinalWalls: CardinalWall[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        const halfSize = cellSize / 2;
+        
+        // Check each cardinal direction
+        // North wall
+        if (row > 0 && hasWall(row, col, row - 1, col)) {
+          cardinalWalls.push({
+            x1: cx - halfSize + octInset,
+            y1: cy - halfSize,
+            x2: cx + halfSize - octInset,
+            y2: cy - halfSize,
+          });
+        }
+        // East wall
+        if (col < grid.width - 1 && hasWall(row, col, row, col + 1)) {
+          cardinalWalls.push({
+            x1: cx + halfSize,
+            y1: cy - halfSize + octInset,
+            x2: cx + halfSize,
+            y2: cy + halfSize - octInset,
+          });
+        }
+        // South wall
+        if (row < grid.height - 1 && hasWall(row, col, row + 1, col)) {
+          cardinalWalls.push({
+            x1: cx - halfSize + octInset,
+            y1: cy + halfSize,
+            x2: cx + halfSize - octInset,
+            y2: cy + halfSize,
+          });
+        }
+        // West wall
+        if (col > 0 && hasWall(row, col, row, col - 1)) {
+          cardinalWalls.push({
+            x1: cx - halfSize,
+            y1: cy - halfSize + octInset,
+            x2: cx - halfSize,
+            y2: cy + halfSize - octInset,
+          });
+        }
+      }
+    }
+
+    return (
+      <div
+        className="grid-container"
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
+          {/* Define patterns for blank and hatch fills */}
+          <defs>
+            <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect width="10" height="10" fill="#f5f5f5"/>
+              <line x1="0" y1="0" x2="10" y2="10" stroke="#e0e0e0" strokeWidth="2"/>
+            </pattern>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#fffde7"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+          </defs>
+          
+          {/* Layer 1: Down-slanting diagonal bands (beneath) */}
+          {downSlantBands.map((band, i) => (
+            <path
+              key={`down-band-${i}`}
+              d={band.path}
+              fill={band.fill}
+              stroke="none"
+            />
+          ))}
+          
+          {/* Layer 2: Octagon fills */}
+          {octData.map(({ row, col, path, fill }) => (
+            <path
+              key={`oct-${row}-${col}`}
+              d={path}
+              fill={fill}
+              stroke="none"
+              style={{ cursor: "pointer" }}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+            />
+          ))}
+          
+          {/* Layer 3: Up-slanting diagonal bands (on top) */}
+          {upSlantBands.map((band, i) => (
+            <path
+              key={`up-band-${i}`}
+              d={band.path}
+              fill={band.fill}
+              stroke="none"
+            />
+          ))}
+          
+          {/* Layer 4: Cardinal walls (on top of everything) */}
+          {cardinalWalls.map((wall, i) => (
+            <line
+              key={`cardinal-wall-${i}`}
+              x1={wall.x1}
+              y1={wall.y1}
+              x2={wall.x2}
+              y2={wall.y2}
+              stroke="#2c3e50"
+              strokeWidth={wallThickness}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Outer boundary */}
+          <rect
+            x={wallThickness / 2}
+            y={wallThickness / 2}
+            width={svgWidth - wallThickness}
+            height={svgHeight - wallThickness}
+            fill="none"
+            stroke="#2c3e50"
+            strokeWidth={wallThickness}
+          />
         </svg>
       </div>
     );
@@ -694,6 +1030,7 @@ export const Controls: React.FC<ControlsProps> = ({
             >
               <option value="square">Square</option>
               <option value="hex">Hex</option>
+              <option value="octagon">Octagon</option>
             </select>
           </label>
         )}

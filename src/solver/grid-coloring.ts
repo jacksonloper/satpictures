@@ -24,9 +24,9 @@ import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
 export const HATCH_COLOR = -2;
 
 /**
- * Grid type - square or hex
+ * Grid type - square, hex, or octagon
  */
-export type GridType = "square" | "hex";
+export type GridType = "square" | "hex" | "octagon";
 
 /**
  * Represents a point in the grid
@@ -128,11 +128,42 @@ function getHexNeighbors(p: GridPoint, width: number, height: number): GridPoint
 }
 
 /**
+ * Get the 8-neighbors of a point for octagon grid (like square but with 8 directions)
+ * Each octagon can connect to 4 cardinal + 4 diagonal neighbors
+ */
+function getOctagonNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
+  const neighbors: GridPoint[] = [];
+  const deltas = [
+    [-1, -1], // NW (diagonal)
+    [-1, 0],  // N
+    [-1, 1],  // NE (diagonal)
+    [0, -1],  // W
+    [0, 1],   // E
+    [1, -1],  // SW (diagonal)
+    [1, 0],   // S
+    [1, 1],   // SE (diagonal)
+  ];
+
+  for (const [dr, dc] of deltas) {
+    const nr = p.row + dr;
+    const nc = p.col + dc;
+    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
+      neighbors.push({ row: nr, col: nc });
+    }
+  }
+
+  return neighbors;
+}
+
+/**
  * Get neighbors based on grid type
  */
 function getNeighbors(p: GridPoint, width: number, height: number, gridType: GridType = "square"): GridPoint[] {
   if (gridType === "hex") {
     return getHexNeighbors(p, width, height);
+  }
+  if (gridType === "octagon") {
+    return getOctagonNeighbors(p, width, height);
   }
   return getSquareNeighbors(p, width, height);
 }
