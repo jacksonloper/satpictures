@@ -132,10 +132,11 @@ export const Grid: React.FC<GridProps> = ({
 
   // Octagon grid calculations
   // Octagons are laid out on a square grid but with 8 neighbors
-  // The diagonal bands have width = cellSize / 2
-  const octBandWidth = cellSize / 2;
-  // Octagon inset - how much the octagon corners are cut
-  const octInset = cellSize * 0.2;
+  // In truncated square tiling, there are small squares between octagons at the corners
+  // We render diagonal bands through those squares (not the squares themselves)
+  // The bands are half-width (narrower than the gap)
+  const octInset = cellSize * 0.2; // How much the octagon corners are cut
+  const octBandWidth = octInset; // Band width is half of the gap (the gap is 2*octInset diagonally)
   
   // Calculate total dimensions based on grid type
   let totalWidth: number;
@@ -372,20 +373,6 @@ export const Grid: React.FC<GridProps> = ({
     const svgHeight = totalHeight;
     const padding = wallThickness;
 
-    // Get octagon neighbors - must match solver's getOctagonNeighbors
-    const getOctagonNeighbors = (row: number, col: number): [number, number, string][] => {
-      return [
-        [row - 1, col - 1, "NW"], // NW (diagonal)
-        [row - 1, col, "N"],      // N
-        [row - 1, col + 1, "NE"], // NE (diagonal)
-        [row, col - 1, "W"],      // W
-        [row, col + 1, "E"],      // E
-        [row + 1, col - 1, "SW"], // SW (diagonal)
-        [row + 1, col, "S"],      // S
-        [row + 1, col + 1, "SE"], // SE (diagonal)
-      ];
-    };
-
     // Create SVG octagon path
     const createOctagonPath = (cx: number, cy: number, size: number, inset: number): string => {
       // Octagon with flat sides at top/bottom/left/right
@@ -401,31 +388,6 @@ export const Grid: React.FC<GridProps> = ({
         [cx - halfSize, cy - halfSize + inset],           // left-top edge
       ];
       return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
-    };
-
-    // Get diagonal band polygon for a diagonal edge
-    // Bands stretch between octagons with width = cellSize / 2 (octBandWidth)
-    // Up-slanting bands (NE, SW) render on top, down-slanting bands (NW, SE) render beneath
-    const getDiagonalBandPath = (
-      cx1: number, cy1: number, 
-      cx2: number, cy2: number,
-      direction: string
-    ): string => {
-      const halfBand = octBandWidth / 2;
-      
-      // Calculate perpendicular offset for band width
-      // For diagonal bands, the perpendicular direction depends on the diagonal type
-      if (direction === "NW" || direction === "SE") {
-        // Down-slanting bands (NW-SE direction): perpendicular is along (1,1) normalized
-        const perpX = halfBand * Math.SQRT1_2;
-        const perpY = halfBand * Math.SQRT1_2;
-        return `M ${cx1 - perpX} ${cy1 + perpY} L ${cx1 + perpX} ${cy1 - perpY} L ${cx2 + perpX} ${cy2 - perpY} L ${cx2 - perpX} ${cy2 + perpY} Z`;
-      } else {
-        // Up-slanting bands (NE-SW direction): perpendicular is along (1,-1) normalized
-        const perpX = halfBand * Math.SQRT1_2;
-        const perpY = halfBand * Math.SQRT1_2;
-        return `M ${cx1 - perpX} ${cy1 - perpY} L ${cx1 + perpX} ${cy1 + perpY} L ${cx2 + perpX} ${cy2 + perpY} L ${cx2 - perpX} ${cy2 - perpY} Z`;
-      }
     };
 
     // Helper to get color for a cell
@@ -469,83 +431,72 @@ export const Grid: React.FC<GridProps> = ({
       }
     }
 
-    // Pre-compute diagonal bands
-    // Down-slanting bands (NW-SE) go beneath, up-slanting bands (NE-SW) go on top
+    // Pre-compute diagonal bands at intersection points
+    // Each intersection (where 4 octagons meet) has two crossing bands:
+    // - Down-slant band connects top-left cell to bottom-right cell (NW-SE direction)
+    // - Up-slant band connects top-right cell to bottom-left cell (NE-SW direction)
+    // Down-slanting bands render beneath, up-slanting bands render on top
     interface DiagonalBand {
-      row1: number;
-      col1: number;
-      row2: number;
-      col2: number;
-      direction: string;
       path: string;
       fill: string;
-      isUpSlant: boolean;
     }
     
     const downSlantBands: DiagonalBand[] = [];
     const upSlantBands: DiagonalBand[] = [];
-    const processedBands = new Set<string>();
     
-    for (let row = 0; row < grid.height; row++) {
-      for (let col = 0; col < grid.width; col++) {
-        const cx = padding + cellSize / 2 + col * cellSize;
-        const cy = padding + cellSize / 2 + row * cellSize;
+    // Iterate over intersection points (corners where 4 cells meet)
+    // Intersection at (iRow, iCol) is between cells:
+    //   top-left: (iRow-1, iCol-1), top-right: (iRow-1, iCol)
+    //   bottom-left: (iRow, iCol-1), bottom-right: (iRow, iCol)
+    for (let iRow = 1; iRow < grid.height; iRow++) {
+      for (let iCol = 1; iCol < grid.width; iCol++) {
+        // Center of the small square gap at this intersection
+        const ix = padding + iCol * cellSize;
+        const iy = padding + iRow * cellSize;
         
-        const neighbors = getOctagonNeighbors(row, col);
-        for (const [nRow, nCol, direction] of neighbors) {
-          // Only process diagonal neighbors
-          if (direction !== "NW" && direction !== "NE" && direction !== "SW" && direction !== "SE") {
-            continue;
-          }
-          
-          // Check bounds
-          if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
-            continue;
-          }
-          
-          // Avoid duplicates (each band is shared by two cells)
-          const bandKey = `${Math.min(row, nRow)},${Math.min(col, nCol)}-${Math.max(row, nRow)},${Math.max(col, nCol)}`;
-          if (processedBands.has(bandKey)) {
-            continue;
-          }
-          processedBands.add(bandKey);
-          
-          const ncx = padding + cellSize / 2 + nCol * cellSize;
-          const ncy = padding + cellSize / 2 + nRow * cellSize;
-          
-          // Determine if edge is kept (passage) or blocked (wall)
-          const isWall = hasWall(row, col, nRow, nCol);
-          
-          // Determine band color
-          let bandFill: string;
-          if (isWall) {
-            bandFill = "#2c3e50"; // Black/dark color for blocked bands
-          } else {
-            // Use the color of the cells joined by the band
-            // Note: When there's a passage, both cells have the same color
-            // (solver enforces walls between different colors)
-            bandFill = getCellColor(row, col);
-          }
-          
-          const bandPath = getDiagonalBandPath(cx, cy, ncx, ncy, direction);
-          
-          const band: DiagonalBand = {
-            row1: row,
-            col1: col,
-            row2: nRow,
-            col2: nCol,
-            direction,
-            path: bandPath,
-            fill: bandFill,
-            isUpSlant: direction === "NE" || direction === "SW",
-          };
-          
-          if (band.isUpSlant) {
-            upSlantBands.push(band);
-          } else {
-            downSlantBands.push(band);
-          }
-        }
+        // The gap forms a small square. Its corners are at the octagon vertices.
+        // For truncated square tiling, the gap has size 2*octInset on each side.
+        const gapHalf = octInset; // Half the gap size
+        
+        // Cell coordinates for the 4 adjacent cells
+        const tlRow = iRow - 1, tlCol = iCol - 1; // top-left
+        const trRow = iRow - 1, trCol = iCol;     // top-right  
+        const blRow = iRow, blCol = iCol - 1;     // bottom-left
+        const brRow = iRow, brCol = iCol;         // bottom-right
+        
+        // Down-slant band: connects top-left to bottom-right
+        // This band runs from NW to SE through the gap
+        const downSlantWall = hasWall(tlRow, tlCol, brRow, brCol);
+        const downSlantFill = downSlantWall ? "#2c3e50" : getCellColor(tlRow, tlCol);
+        
+        // Band spans from top-left corner to bottom-right corner of the gap
+        // Band width is octBandWidth, centered on the diagonal
+        const halfBand = octBandWidth / 2;
+        // Down-slant diagonal goes from (-gapHalf, -gapHalf) to (gapHalf, gapHalf)
+        // Perpendicular direction is (1, -1) normalized
+        const downPerpX = halfBand * Math.SQRT1_2;
+        const downPerpY = halfBand * Math.SQRT1_2;
+        const downPath = `M ${ix - gapHalf + downPerpX} ${iy - gapHalf - downPerpY} ` +
+                        `L ${ix - gapHalf - downPerpX} ${iy - gapHalf + downPerpY} ` +
+                        `L ${ix + gapHalf - downPerpX} ${iy + gapHalf + downPerpY} ` +
+                        `L ${ix + gapHalf + downPerpX} ${iy + gapHalf - downPerpY} Z`;
+        downSlantBands.push({ path: downPath, fill: downSlantFill });
+        
+        // Up-slant band: connects top-right to bottom-left
+        // This band runs from NE to SW through the gap
+        const upSlantWall = hasWall(trRow, trCol, blRow, blCol);
+        const upSlantFill = upSlantWall ? "#2c3e50" : getCellColor(trRow, trCol);
+        
+        // Band spans from top-right corner to bottom-left corner of the gap
+        // Up-slant diagonal goes from (gapHalf, -gapHalf) to (-gapHalf, gapHalf)
+        // Perpendicular direction is (1, 1) normalized
+        const upPerpX = halfBand * Math.SQRT1_2;
+        const upPerpY = halfBand * Math.SQRT1_2;
+        const upPath = `M ${ix + gapHalf + upPerpX} ${iy - gapHalf + upPerpY} ` +
+                      `L ${ix + gapHalf - upPerpX} ${iy - gapHalf - upPerpY} ` +
+                      `L ${ix - gapHalf - upPerpX} ${iy + gapHalf - upPerpY} ` +
+                      `L ${ix - gapHalf + upPerpX} ${iy + gapHalf + upPerpY} Z`;
+        upSlantBands.push({ path: upPath, fill: upSlantFill });
       }
     }
 
