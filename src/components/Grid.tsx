@@ -404,7 +404,7 @@ export const Grid: React.FC<GridProps> = ({
     };
 
     // Get diagonal band polygon for a diagonal edge
-    // Bands stretch between octagons with width = halfSize
+    // Bands stretch between octagons with width = cellSize / 2 (octBandWidth)
     // Up-slanting bands (NE, SW) render on top, down-slanting bands (NW, SE) render beneath
     const getDiagonalBandPath = (
       cx1: number, cy1: number, 
@@ -522,6 +522,8 @@ export const Grid: React.FC<GridProps> = ({
             bandFill = "#2c3e50"; // Black/dark color for blocked bands
           } else {
             // Use the color of the cells joined by the band
+            // Note: When there's a passage, both cells have the same color
+            // (solver enforces walls between different colors)
             bandFill = getCellColor(row, col);
           }
           
