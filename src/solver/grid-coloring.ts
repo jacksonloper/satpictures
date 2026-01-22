@@ -24,6 +24,36 @@ import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
 export const HATCH_COLOR = -2;
 
 /**
+ * Special red with dot color index - serves as the origin for bounded reachability tree.
+ * At most one tile can have this color.
+ */
+export const RED_DOT_COLOR = -3;
+
+/**
+ * Special red with hatch color index - constrained to have reachability greater than K
+ * from the RED_DOT_COLOR origin.
+ */
+export const RED_HATCH_COLOR = -4;
+
+/**
+ * The base red color that RED_DOT_COLOR and RED_HATCH_COLOR are treated as for connectivity purposes.
+ * These special colors are just markers/constraints - in the solution output they become RED_BASE_COLOR.
+ */
+export const RED_BASE_COLOR = 0;
+
+/**
+ * Get the effective color for connectivity and disconnection purposes.
+ * RED_DOT_COLOR and RED_HATCH_COLOR are treated as RED_BASE_COLOR (0) for coloring,
+ * they just add extra constraints.
+ */
+function getEffectiveColor(color: number): number {
+  if (color === RED_DOT_COLOR || color === RED_HATCH_COLOR) {
+    return RED_BASE_COLOR;
+  }
+  return color;
+}
+
+/**
  * Grid type - square, hex, or octagon
  */
 export type GridType = "square" | "hex" | "octagon";
@@ -61,6 +91,7 @@ export interface GridSolution {
   keptEdges: Edge[];
   wallEdges: Edge[];
   assignedColors: number[][]; // Full grid with all colors determined
+  reachabilityLevels?: number[][] | null; // Optional: distance from RED_DOT_COLOR origin (null if not computed)
 }
 
 /**
@@ -241,7 +272,7 @@ function createTrivialSolution(width: number, height: number, gridType: GridType
     Array.from({ length: width }, () => 0)
   );
 
-  return { keptEdges, wallEdges, assignedColors };
+  return { keptEdges, wallEdges, assignedColors, reachabilityLevels: null };
 }
 
 /**
@@ -256,6 +287,8 @@ export interface SolveOptions {
   minWallsProportion?: number;
   /** Grid type: square (4-neighbors) or hex (6-neighbors) */
   gridType?: GridType;
+  /** K value for bounded reachability - RED_HATCH_COLOR cells must have reachability > K from RED_DOT_COLOR (default 0) */
+  reachabilityK?: number;
 }
 
 /**
@@ -294,16 +327,19 @@ export function solveGridColoring(
   // ============================================
   // Only consider colors that have at least one fixed cell.
   // Blank cells will only be assigned these colors, reducing the encoding size.
+  // RED_DOT_COLOR and RED_HATCH_COLOR are treated as RED_BASE_COLOR for this purpose.
   const usedColors = new Set<number>();
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const c = colors[row][col];
       if (c !== null) {
-        usedColors.add(c);
+        // Use effective color - RED_DOT_COLOR and RED_HATCH_COLOR → RED_BASE_COLOR
+        usedColors.add(getEffectiveColor(c));
       }
     }
   }
   // Convert to sorted array for consistent ordering
+  // This will NOT include RED_DOT_COLOR or RED_HATCH_COLOR as separate colors
   const activeColors = Array.from(usedColors).sort((a, b) => a - b);
   
   // Safety check: if somehow no colors are fixed (shouldn't happen given isAllBlank check),
@@ -318,12 +354,13 @@ export function solveGridColoring(
   // For blank cells (null), create variables cellColor[row][col][c] meaning "cell has color c"
   // For fixed cells, we don't need variables - color is known
   // OPTIMIZATION: Only create variables for colors that have at least one fixed cell
+  // Note: Blank cells can only be assigned regular colors (not RED_DOT_COLOR or RED_HATCH_COLOR)
   const colorVars = new Map<string, number>(); // Maps colorVarKey to variable number
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       if (colors[row][col] === null) {
-        // Blank cell - create variables only for active colors
+        // Blank cell - create variables only for active colors (which are all regular colors)
         const varsForCell: number[] = [];
         for (const c of activeColors) {
           const varNum = builder.createNamedVariable(colorVarKey(row, col, c));
@@ -339,19 +376,22 @@ export function solveGridColoring(
   // Helper to get color variables for a cell
   // Returns array of [color, variable] pairs where variable being true means cell has that color
   // For fixed cells, returns single element with the fixed color
+  // Note: Returns EFFECTIVE colors (RED_DOT_COLOR and RED_HATCH_COLOR → RED_BASE_COLOR)
   function getCellColorInfo(
     row: number,
     col: number
   ): { color: number; var: number | null }[] {
     const fixedColor = colors[row][col];
     if (fixedColor !== null) {
-      return [{ color: fixedColor, var: null }]; // Fixed color, no variable
+      // Return the effective color for connectivity purposes
+      return [{ color: getEffectiveColor(fixedColor), var: null }];
     }
     // Blank cell - return only active color options with their variables
     const result: { color: number; var: number | null }[] = [];
     for (const c of activeColors) {
       const v = colorVars.get(colorVarKey(row, col, c))!;
-      result.push({ color: c, var: v });
+      // Use effective color for comparison
+      result.push({ color: getEffectiveColor(c), var: v });
     }
     return result;
   }
@@ -423,6 +463,8 @@ export function solveGridColoring(
   // 1b. DEGREE CONSTRAINTS (1-3 edges per cell)
   // ============================================
   // Each cell must have between 1 and 3 edges (passages)
+  // Exception: cells that are isolated (all neighbors are fixed to different colors) 
+  // don't need any edges - they form valid singleton regions
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       // Get all edge variables incident to this cell
@@ -437,8 +479,33 @@ export function solveGridColoring(
       }
 
       if (incidentEdges.length > 0) {
-        // At least 1 edge: OR of all incident edges
-        builder.addOr(incidentEdges);
+        // Check if this cell could possibly have a same-color neighbor
+        // A cell is "potentially connected" if:
+        // - It's blank (could be any color, so can match any neighbor)
+        // - OR it has at least one neighbor that is blank or same color
+        const cellColor = colors[row][col];
+        const effectiveCellColor = cellColor !== null ? getEffectiveColor(cellColor) : null;
+        
+        let hasPotentialSameColorNeighbor = effectiveCellColor === null; // blank cells can match any neighbor
+        if (!hasPotentialSameColorNeighbor && effectiveCellColor !== null) {
+          // Fixed cell - check if any neighbor could be the same color
+          for (const n of neighbors) {
+            const neighborColor = colors[n.row][n.col];
+            const effectiveNeighborColor = neighborColor !== null ? getEffectiveColor(neighborColor) : null;
+            if (effectiveNeighborColor === null || effectiveNeighborColor === effectiveCellColor) {
+              // Neighbor is blank (could match) or has same color
+              hasPotentialSameColorNeighbor = true;
+              break;
+            }
+          }
+        }
+        
+        // Only require at least 1 edge if the cell could have a same-color neighbor
+        // Isolated singleton cells (all neighbors are different fixed colors) don't need edges
+        if (hasPotentialSameColorNeighbor) {
+          // At least 1 edge: OR of all incident edges
+          builder.addOr(incidentEdges);
+        }
 
         // At most 3 edges: for each subset of 4 edges, at least one must be false
         // This means we forbid any 4 edges from being true simultaneously
@@ -473,6 +540,7 @@ export function solveGridColoring(
   // With blank cells, we need conditional constraints based on color assignment
   // OPTIMIZATION: Only process active colors (those with at least one fixed cell)
   // EXCEPTION: Skip hatch color - it doesn't need to form a connected component
+  // NOTE: RED_DOT_COLOR and RED_HATCH_COLOR cells participate in RED_BASE_COLOR's connectivity
 
   for (const color of activeColors) {
     // Skip hatch color - it doesn't need to form a connected component
@@ -481,13 +549,16 @@ export function solveGridColoring(
     }
 
     // Find all vertices that could have this color (fixed to this color OR blank)
+    // For RED_BASE_COLOR, also include RED_DOT_COLOR and RED_HATCH_COLOR cells
     const potentialVertices: GridPoint[] = [];
     const fixedVertices: GridPoint[] = [];
 
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const cellColor = colors[row][col];
-        if (cellColor === color) {
+        const effectiveColor = cellColor !== null ? getEffectiveColor(cellColor) : null;
+        
+        if (effectiveColor === color) {
           potentialVertices.push({ row, col });
           fixedVertices.push({ row, col });
         } else if (cellColor === null) {
@@ -505,8 +576,9 @@ export function solveGridColoring(
     // Returns the variable, or null if the vertex is fixed to this color (always true)
     function getMemberVar(v: GridPoint): number | null {
       const cellColor = colors[v.row][v.col];
-      if (cellColor === color) {
-        return null; // Fixed to this color - always member
+      const effectiveColor = cellColor !== null ? getEffectiveColor(cellColor) : null;
+      if (effectiveColor === color) {
+        return null; // Fixed to this color (or effective color) - always member
       }
       // Must be blank - return the color variable
       return colorVars.get(colorVarKey(v.row, v.col, color))!;
@@ -821,6 +893,150 @@ export function solveGridColoring(
   }
 
   // ============================================
+  // 3. RED_DOT_COLOR CONSTRAINT: At most one cell
+  // ============================================
+  // Find all cells that have RED_DOT_COLOR as input (these are fixed, not assignable to blank cells)
+  // Since RED_DOT_COLOR is not in activeColors, blank cells cannot be assigned this marker
+  const redDotCells: GridPoint[] = [];
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      if (colors[row][col] === RED_DOT_COLOR) {
+        redDotCells.push({ row, col });
+      }
+    }
+  }
+
+  // If there are multiple RED_DOT_COLOR cells, it's unsatisfiable (at most one allowed)
+  if (redDotCells.length > 1) {
+    return null;
+  }
+
+  // ============================================
+  // 4. BOUNDED REACHABILITY CONSTRAINT
+  // ============================================
+  // RED_HATCH_COLOR cells must have reachability > K from RED_DOT_COLOR origin
+  // This is computed over all edges (any color can participate in the reachability path)
+  //
+  // We use the standard bounded-reachability SAT encoding:
+  //   R[i][v] = "v is reachable from origin using kept edges in at most i steps"
+  //
+  // Constraints:
+  //   Base: R[0][origin] = true, R[0][other] = false
+  //   Step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor of v} (R[i-1][u] ∧ edge(u,v))
+  //   Forbidden: For each RED_HATCH cell h: ¬R[K][h] (not reachable in ≤ K steps)
+  //
+  // This correctly enforces that the shortest-path distance from origin to h is > K.
+  
+  const reachabilityK = options?.reachabilityK ?? 0;
+  
+  // Find all RED_HATCH_COLOR cells (these are fixed, not assignable to blank cells)
+  const redHatchCells: GridPoint[] = [];
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      if (colors[row][col] === RED_HATCH_COLOR) {
+        redHatchCells.push({ row, col });
+      }
+    }
+  }
+
+  // Only add reachability constraints if we have RED_DOT_COLOR and RED_HATCH_COLOR cells and K > 0
+  if (redDotCells.length > 0 && redHatchCells.length > 0 && reachabilityK > 0) {
+    const origin = redDotCells[0]; // Guaranteed at most one by earlier check
+    
+    // R[i][row,col] variables: reachable in at most i steps
+    // We only need levels 0 through K (to check if reachable in ≤ K steps)
+    const R: Map<string, number>[] = [];
+    for (let step = 0; step <= reachabilityK; step++) {
+      R.push(new Map<string, number>());
+    }
+    
+    // Create variables for all cells at all steps
+    for (let step = 0; step <= reachabilityK; step++) {
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          const key = `${row},${col}`;
+          const varName = `R_${step}_${row}_${col}`;
+          R[step].set(key, builder.createNamedVariable(varName));
+        }
+      }
+    }
+    
+    // Base case (step 0): only origin is reachable
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const key = `${row},${col}`;
+        const r0 = R[0].get(key)!;
+        if (row === origin.row && col === origin.col) {
+          // R[0][origin] = true
+          builder.addUnit(r0);
+        } else {
+          // R[0][other] = false
+          builder.addUnit(-r0);
+        }
+      }
+    }
+    
+    // Inductive step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
+    // Encoding:
+    //   R[i][v] → R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
+    //   (R[i-1][v] OR any neighbor term) → R[i][v]
+    for (let step = 1; step <= reachabilityK; step++) {
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          const key = `${row},${col}`;
+          const rCurr = R[step].get(key)!;
+          const rPrev = R[step - 1].get(key)!;
+          const neighbors = getNeighbors({ row, col }, width, height, gridType);
+          
+          // Collect all "reachable through neighbor" terms
+          // For each neighbor u: reachThroughU[u] = R[i-1][u] ∧ edge(u,v)
+          const reachThroughNeighbor: number[] = [];
+          
+          for (const n of neighbors) {
+            const nKey = `${n.row},${n.col}`;
+            const rPrevN = R[step - 1].get(nKey)!;
+            const eKey = edgeKey({ row, col }, n);
+            const edgeVar = edgeVars.get(eKey);
+            if (edgeVar === undefined) continue;
+            
+            // Create helper variable: reachThrough = R[i-1][n] ∧ edge(n,v)
+            const reachThrough = builder.createNamedVariable(
+              `reach_through_${step}_${n.row}_${n.col}_to_${row}_${col}`
+            );
+            reachThroughNeighbor.push(reachThrough);
+            
+            // reachThrough → R[i-1][n]
+            builder.solver.addClause([-reachThrough, rPrevN]);
+            // reachThrough → edge
+            builder.solver.addClause([-reachThrough, edgeVar]);
+            // (R[i-1][n] ∧ edge) → reachThrough
+            builder.solver.addClause([-rPrevN, -edgeVar, reachThrough]);
+          }
+          
+          // R[i][v] ↔ R[i-1][v] OR ⋁ reachThroughNeighbor
+          // Forward: (R[i-1][v] OR any reachThrough) → R[i][v]
+          builder.solver.addClause([-rPrev, rCurr]); // R[i-1][v] → R[i][v]
+          for (const rt of reachThroughNeighbor) {
+            builder.solver.addClause([-rt, rCurr]); // reachThrough → R[i][v]
+          }
+          
+          // Backward: R[i][v] → (R[i-1][v] OR ⋁ reachThroughNeighbor)
+          const backwardClause = [-rCurr, rPrev, ...reachThroughNeighbor];
+          builder.solver.addClause(backwardClause);
+        }
+      }
+    }
+    
+    // Constraint: RED_HATCH cells must NOT be reachable in ≤ K steps
+    // i.e., ¬R[K][h] for each RED_HATCH cell h
+    for (const cell of redHatchCells) {
+      const key = `${cell.row},${cell.col}`;
+      const rK = R[reachabilityK].get(key)!;
+      builder.addUnit(-rK); // NOT reachable in ≤ K steps
+    }
+  }
+
+  // ============================================
   // SOLVE
   // ============================================
   const result: SolveResult = solver.solve();
@@ -846,6 +1062,8 @@ export function solveGridColoring(
   }
 
   // Extract assigned colors
+  // NOTE: RED_DOT_COLOR and RED_HATCH_COLOR are converted to RED_BASE_COLOR in the output
+  // These special colors are just input markers for constraints, not actual output colors
   const assignedColors: number[][] = Array.from({ length: height }, () =>
     Array.from({ length: width }, () => 0)
   );
@@ -854,7 +1072,8 @@ export function solveGridColoring(
     for (let col = 0; col < width; col++) {
       const fixedColor = colors[row][col];
       if (fixedColor !== null) {
-        assignedColors[row][col] = fixedColor;
+        // Convert special marker colors to their effective (base) color
+        assignedColors[row][col] = getEffectiveColor(fixedColor);
       } else {
         // Find which color variable is true (only check active colors)
         let foundColor = false;
@@ -875,7 +1094,49 @@ export function solveGridColoring(
     }
   }
 
-  return { keptEdges, wallEdges, assignedColors };
+  // Compute reachability levels via BFS from RED_DOT_COLOR origin
+  let reachabilityLevels: number[][] | null = null;
+  if (redDotCells.length > 0) {
+    reachabilityLevels = Array.from({ length: height }, () =>
+      Array.from({ length: width }, () => -1) // -1 means unreachable
+    );
+    
+    // Build adjacency from kept edges
+    const adjacency = new Map<string, GridPoint[]>();
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        adjacency.set(`${row},${col}`, []);
+      }
+    }
+    for (const edge of keptEdges) {
+      const uKey = `${edge.u.row},${edge.u.col}`;
+      const vKey = `${edge.v.row},${edge.v.col}`;
+      adjacency.get(uKey)!.push(edge.v);
+      adjacency.get(vKey)!.push(edge.u);
+    }
+    
+    // BFS from origin
+    const queue: GridPoint[] = [];
+    for (const origin of redDotCells) {
+      reachabilityLevels[origin.row][origin.col] = 0;
+      queue.push(origin);
+    }
+    
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const currentLevel = reachabilityLevels[current.row][current.col];
+      const neighbors = adjacency.get(`${current.row},${current.col}`)!;
+      
+      for (const neighbor of neighbors) {
+        if (reachabilityLevels[neighbor.row][neighbor.col] === -1) {
+          reachabilityLevels[neighbor.row][neighbor.col] = currentLevel + 1;
+          queue.push(neighbor);
+        }
+      }
+    }
+  }
+
+  return { keptEdges, wallEdges, assignedColors, reachabilityLevels };
 }
 
 /**

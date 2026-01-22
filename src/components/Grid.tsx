@@ -1,9 +1,9 @@
 import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridSolution, GridType } from "../solver";
-import { HATCH_COLOR } from "../solver";
+import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "../solver";
 
-// Re-export HATCH_COLOR for convenience
-export { HATCH_COLOR };
+// Re-export color constants for convenience
+export { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR };
 
 // Predefined color palette
 const COLORS = [
@@ -47,6 +47,28 @@ repeating-linear-gradient(
 ),
 #fffde7`;
 
+// Red with dot appearance - red background with a white dot (origin for bounded reachability)
+const RED_DOT_BG_COLOR = "#e74c3c"; // red
+const RED_DOT_PATTERN = `radial-gradient(circle at center, white 4px, transparent 4px), #e74c3c`;
+
+// Red with hatch appearance - red background with crosshatch pattern
+const RED_HATCH_BG_COLOR = "#e74c3c"; // red
+const RED_HATCH_PATTERN = `repeating-linear-gradient(
+  45deg,
+  rgba(255, 255, 255, 0.5),
+  rgba(255, 255, 255, 0.5) 2px,
+  transparent 2px,
+  transparent 8px
+),
+repeating-linear-gradient(
+  -45deg,
+  rgba(255, 255, 255, 0.5),
+  rgba(255, 255, 255, 0.5) 2px,
+  transparent 2px,
+  transparent 8px
+),
+#e74c3c`;
+
 interface GridProps {
   grid: ColorGrid;
   solution: GridSolution | null;
@@ -56,6 +78,7 @@ interface GridProps {
   cellSize?: number;
   gridType?: GridType;
   viewMode?: "sketchpad" | "solution";
+  showReachabilityLevels?: boolean;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -67,6 +90,7 @@ export const Grid: React.FC<GridProps> = ({
   cellSize = 40,
   gridType = "square",
   viewMode = "sketchpad",
+  showReachabilityLevels = false,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -270,6 +294,7 @@ export const Grid: React.FC<GridProps> = ({
       isBlank: boolean;
       isHatch: boolean;
       walls: { x1: number; y1: number; x2: number; y2: number }[];
+      reachLevel: number | null;
     }[] = [];
     
     for (let row = 0; row < grid.height; row++) {
@@ -282,12 +307,18 @@ export const Grid: React.FC<GridProps> = ({
           : inputColor;
         const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
+        const isRedDot = displayColor === RED_DOT_COLOR;
+        const isRedHatch = displayColor === RED_HATCH_COLOR;
         
         let fill: string;
         if (isBlank) {
           fill = "url(#blankPattern)";
         } else if (isHatch) {
           fill = "url(#hatchPattern)";
+        } else if (isRedDot) {
+          fill = "url(#redDotPattern)";
+        } else if (isRedHatch) {
+          fill = "url(#redHatchPattern)";
         } else {
           fill = COLORS[(displayColor ?? 0) % COLORS.length];
         }
@@ -312,7 +343,12 @@ export const Grid: React.FC<GridProps> = ({
           }
         }
         
-        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls });
+        // Get reachability level if available
+        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+          ? solution.reachabilityLevels[row][col] 
+          : null;
+        
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls, reachLevel });
       }
     }
     
@@ -337,6 +373,15 @@ export const Grid: React.FC<GridProps> = ({
               <rect width="8" height="8" fill="#fffde7"/>
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
+              <rect width="20" height="20" fill="#e74c3c"/>
+              <circle cx="10" cy="10" r="4" fill="white"/>
+            </pattern>
+            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#e74c3c"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
             </pattern>
           </defs>
           
@@ -367,6 +412,28 @@ export const Grid: React.FC<GridProps> = ({
                 strokeLinecap="round"
               />
             ))
+          )}
+          
+          {/* Third pass: render reachability levels on top of everything */}
+          {hexData.map(({ row, col, cx, cy, reachLevel }) =>
+            reachLevel !== null && (
+              <text
+                key={`level-${row}-${col}`}
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontWeight="bold"
+                fontSize={cellSize > 30 ? "14px" : "10px"}
+                style={{
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {reachLevel === -1 ? "∞" : reachLevel}
+              </text>
+            )
           )}
         </svg>
       </div>
@@ -406,11 +473,17 @@ export const Grid: React.FC<GridProps> = ({
         : inputColor;
       const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
+      const isRedDot = displayColor === RED_DOT_COLOR;
+      const isRedHatch = displayColor === RED_HATCH_COLOR;
       
       if (isBlank) {
         return "url(#blankPattern)";
       } else if (isHatch) {
         return "url(#hatchPattern)";
+      } else if (isRedDot) {
+        return "url(#redDotPattern)";
+      } else if (isRedHatch) {
+        return "url(#redHatchPattern)";
       } else {
         return COLORS[(displayColor ?? 0) % COLORS.length];
       }
@@ -424,6 +497,7 @@ export const Grid: React.FC<GridProps> = ({
       cy: number;
       path: string;
       fill: string;
+      reachLevel: number | null;
     }
     
     const octData: OctData[] = [];
@@ -434,8 +508,13 @@ export const Grid: React.FC<GridProps> = ({
         const cy = padding + cellSize / 2 + row * cellSize;
         const path = createOctagonPath(cx, cy, cellSize, octInset);
         const fill = getCellColor(row, col);
+        
+        // Get reachability level if available
+        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+          ? solution.reachabilityLevels[row][col] 
+          : null;
 
-        octData.push({ row, col, cx, cy, path, fill });
+        octData.push({ row, col, cx, cy, path, fill, reachLevel });
       }
     }
 
@@ -618,6 +697,15 @@ export const Grid: React.FC<GridProps> = ({
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
             </pattern>
+            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
+              <rect width="20" height="20" fill="#e74c3c"/>
+              <circle cx="10" cy="10" r="4" fill="white"/>
+            </pattern>
+            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#e74c3c"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+            </pattern>
           </defs>
           
           {/* Layer 1: Down-slanting diagonal bands (beneath) - no outline */}
@@ -699,6 +787,28 @@ export const Grid: React.FC<GridProps> = ({
             stroke="#2c3e50"
             strokeWidth={wallThickness}
           />
+          
+          {/* Reachability levels on top of everything */}
+          {octData.map(({ row, col, cx, cy, reachLevel }) =>
+            reachLevel !== null && (
+              <text
+                key={`level-${row}-${col}`}
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontWeight="bold"
+                fontSize={cellSize > 30 ? "14px" : "10px"}
+                style={{
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {reachLevel === -1 ? "∞" : reachLevel}
+              </text>
+            )
+          )}
         </svg>
       </div>
     );
@@ -731,6 +841,8 @@ export const Grid: React.FC<GridProps> = ({
             : inputColor;
           const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
+          const isRedDot = displayColor === RED_DOT_COLOR;
+          const isRedHatch = displayColor === RED_HATCH_COLOR;
           
           // Determine background
           let bgColor: string;
@@ -741,6 +853,12 @@ export const Grid: React.FC<GridProps> = ({
           } else if (isHatch) {
             bgColor = HATCH_BG_COLOR;
             bgPattern = HATCH_PATTERN;
+          } else if (isRedDot) {
+            bgColor = RED_DOT_BG_COLOR;
+            bgPattern = RED_DOT_PATTERN;
+          } else if (isRedHatch) {
+            bgColor = RED_HATCH_BG_COLOR;
+            bgPattern = RED_HATCH_PATTERN;
           } else {
             bgColor = COLORS[(displayColor ?? 0) % COLORS.length];
             bgPattern = bgColor;
@@ -749,6 +867,11 @@ export const Grid: React.FC<GridProps> = ({
           // Check walls on each side
           const wallRight = col < grid.width - 1 && hasWall(row, col, row, col + 1);
           const wallBottom = row < grid.height - 1 && hasWall(row, col, row + 1, col);
+          
+          // Get reachability level if available
+          const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+            ? solution.reachabilityLevels[row][col] 
+            : null;
 
           return (
             <div
@@ -773,8 +896,23 @@ export const Grid: React.FC<GridProps> = ({
                 borderBottom: wallBottom
                   ? `${wallThickness}px solid #2c3e50`
                   : "none",
+                // Center text for reachability level
+                display: reachLevel !== null ? "flex" : undefined,
+                alignItems: reachLevel !== null ? "center" : undefined,
+                justifyContent: reachLevel !== null ? "center" : undefined,
               }}
-            />
+            >
+              {reachLevel !== null && (
+                <span style={{
+                  color: "#fff",
+                  fontWeight: "bold",
+                  fontSize: cellSize > 30 ? "14px" : "10px",
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                }}>
+                  {reachLevel === -1 ? "∞" : reachLevel}
+                </span>
+              )}
+            </div>
           );
         })
       )}
@@ -868,6 +1006,48 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
         }}
         title="Hatch (doesn't need to be connected)"
       />
+      {/* Red with Dot - origin for bounded reachability (at most one) */}
+      <button
+        onClick={() => onColorSelect(RED_DOT_COLOR)}
+        style={{
+          width: "36px",
+          height: "36px",
+          background: RED_DOT_PATTERN,
+          border:
+            selectedColor === RED_DOT_COLOR
+              ? "3px solid #2c3e50"
+              : "2px solid #bdc3c7",
+          borderRadius: "4px",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow:
+            selectedColor === RED_DOT_COLOR
+              ? "0 0 0 2px #3498db"
+              : "none",
+        }}
+        title="Red with Dot (origin - at most one allowed)"
+      />
+      {/* Red with Hatch - must be at reachability > K from origin */}
+      <button
+        onClick={() => onColorSelect(RED_HATCH_COLOR)}
+        style={{
+          width: "36px",
+          height: "36px",
+          background: RED_HATCH_PATTERN,
+          border:
+            selectedColor === RED_HATCH_COLOR
+              ? "3px solid #2c3e50"
+              : "2px solid #bdc3c7",
+          borderRadius: "4px",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow:
+            selectedColor === RED_HATCH_COLOR
+              ? "0 0 0 2px #3498db"
+              : "none",
+        }}
+        title="Red with Hatch (reachability > K from origin)"
+      />
     </div>
   );
 };
@@ -895,6 +1075,8 @@ interface ControlsProps {
   onDownloadColors?: () => void;
   onUploadColors?: (file: File) => void;
   grid?: { colors: (number | null)[][] };
+  reachabilityK?: number;
+  onReachabilityKChange?: (k: number) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -920,12 +1102,22 @@ export const Controls: React.FC<ControlsProps> = ({
   onDownloadColors,
   onUploadColors,
   grid,
+  reachabilityK = 0,
+  onReachabilityKChange,
 }) => {
   // solution is received but not used in Controls (SVG download moved to solution panel)
   void _solution;
   
   // File input ref for upload
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  
+  // Local state for K value input to allow empty while typing
+  const [localKValue, setLocalKValue] = useState<string>(reachabilityK.toString());
+  
+  // Sync local state when prop changes (e.g., from parent)
+  React.useEffect(() => {
+    setLocalKValue(reachabilityK.toString());
+  }, [reachabilityK]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -937,6 +1129,29 @@ export const Controls: React.FC<ControlsProps> = ({
       fileInputRef.current.value = "";
     }
   }, [onUploadColors]);
+  
+  const handleKValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setLocalKValue(value);
+    // Update parent immediately with parsed value (allows real-time updates)
+    // but allow empty string temporarily during editing
+    if (value !== '' && onReachabilityKChange) {
+      const parsed = parseInt(value);
+      if (!isNaN(parsed)) {
+        onReachabilityKChange(Math.max(0, parsed));
+      }
+    }
+  }, [onReachabilityKChange]);
+  
+  const handleKValueBlur = useCallback(() => {
+    // On blur, normalize empty to 0
+    const parsed = parseInt(localKValue);
+    const validValue = isNaN(parsed) ? 0 : Math.max(0, parsed);
+    setLocalKValue(validValue.toString());
+    if (onReachabilityKChange) {
+      onReachabilityKChange(validValue);
+    }
+  }, [localKValue, onReachabilityKChange]);
 
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -1023,6 +1238,27 @@ export const Controls: React.FC<ControlsProps> = ({
               style={{ flex: 1, cursor: "pointer" }}
             />
             <span style={{ minWidth: "36px", textAlign: "right" }}>{Math.round(minWallsProportion * 100)}%</span>
+          </label>
+        )}
+        {onReachabilityKChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>K Value:</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={localKValue}
+              onChange={handleKValueChange}
+              onBlur={handleKValueBlur}
+              style={{
+                width: "60px",
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border: "1px solid #bdc3c7",
+                fontSize: "14px",
+              }}
+            />
+            <span style={{ fontSize: "12px", color: "#7f8c8d" }}>(Red+Hatch must have reachability &gt; K)</span>
           </label>
         )}
       </div>

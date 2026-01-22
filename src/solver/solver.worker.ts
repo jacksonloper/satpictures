@@ -12,6 +12,7 @@ export interface SolverRequest {
   numColors: number;
   minWallsProportion?: number;
   gridType?: GridType;
+  reachabilityK?: number;
 }
 
 export interface SolverResponse {
@@ -41,10 +42,10 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { grid, numColors, minWallsProportion, gridType } = event.data;
+  const { grid, numColors, minWallsProportion, gridType, reachabilityK } = event.data;
 
   try {
-    const solution = solveGridColoring(grid, numColors, { minWallsProportion, gridType });
+    const solution = solveGridColoring(grid, numColors, { minWallsProportion, gridType, reachabilityK });
     const response: SolverResponse = {
       success: true,
       solution,
