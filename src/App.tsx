@@ -10,6 +10,7 @@ interface SolutionMetadata {
   gridType: GridType;
   width: number;
   height: number;
+  reachabilityK: number; // K value that was used for the solve
 }
 
 function createEmptyGrid(width: number, height: number): ColorGrid {
@@ -140,6 +141,7 @@ function App() {
     const currentGridType = gridType;
     const currentWidth = grid.width;
     const currentHeight = grid.height;
+    const currentK = reachabilityK;
 
     // Create a new worker based on solver type
     const worker = solverType === "cadical" ? new CadicalWorker() : new SolverWorker();
@@ -156,6 +158,7 @@ function App() {
           gridType: currentGridType,
           width: currentWidth,
           height: currentHeight,
+          reachabilityK: currentK,
         });
         setSolutionStatus("found");
         setErrorMessage(null);
@@ -421,6 +424,7 @@ function App() {
                 <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
                   Most recent solver output ({solutionMetadata.width}×{solutionMetadata.height} {solutionMetadata.gridType} grid).
                   {solveTime && ` Solved in ${solveTime.toFixed(0)}ms.`}
+                  {solutionMetadata.reachabilityK > 0 && ` K=${solutionMetadata.reachabilityK}.`}
                 </p>
                 
                 {/* Solution action buttons */}

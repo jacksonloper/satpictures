@@ -1054,6 +1054,14 @@ export const Controls: React.FC<ControlsProps> = ({
   
   // File input ref for upload
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  
+  // Local state for K value input to allow empty while typing
+  const [localKValue, setLocalKValue] = useState<string>(reachabilityK.toString());
+  
+  // Sync local state when prop changes (e.g., from parent)
+  React.useEffect(() => {
+    setLocalKValue(reachabilityK.toString());
+  }, [reachabilityK]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1065,6 +1073,29 @@ export const Controls: React.FC<ControlsProps> = ({
       fileInputRef.current.value = "";
     }
   }, [onUploadColors]);
+  
+  const handleKValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setLocalKValue(value);
+    // Update parent immediately with parsed value (allows real-time updates)
+    // but allow empty string temporarily during editing
+    if (value !== '' && onReachabilityKChange) {
+      const parsed = parseInt(value);
+      if (!isNaN(parsed)) {
+        onReachabilityKChange(Math.max(0, parsed));
+      }
+    }
+  }, [onReachabilityKChange]);
+  
+  const handleKValueBlur = useCallback(() => {
+    // On blur, normalize empty to 0
+    const parsed = parseInt(localKValue);
+    const validValue = isNaN(parsed) ? 0 : Math.max(0, parsed);
+    setLocalKValue(validValue.toString());
+    if (onReachabilityKChange) {
+      onReachabilityKChange(validValue);
+    }
+  }, [localKValue, onReachabilityKChange]);
 
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -1157,10 +1188,12 @@ export const Controls: React.FC<ControlsProps> = ({
           <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span style={{ minWidth: "50px" }}>K Value:</span>
             <input
-              type="number"
-              min="0"
-              value={reachabilityK}
-              onChange={(e) => onReachabilityKChange(Math.max(0, parseInt(e.target.value) || 0))}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={localKValue}
+              onChange={handleKValueChange}
+              onBlur={handleKValueBlur}
               style={{
                 width: "60px",
                 padding: "4px 8px",
