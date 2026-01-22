@@ -191,18 +191,19 @@ function getOctagonNeighbors(p: GridPoint, width: number, height: number): GridP
  * Cairo tiling uses pentagonal tiles with parity-dependent adjacencies.
  * Each tile has 4 cardinal neighbors plus 1 diagonal neighbor depending on parity.
  * 
- * Parity-based adjacency offsets:
- * - (0,0): cardinal + (-1,+1) diagonal (NE)
- * - (1,0): cardinal + (-1,-1) diagonal (NW)
- * - (0,1): cardinal + (+1,+1) diagonal (SE)
- * - (1,1): cardinal + (+1,-1) diagonal (SW)
+ * Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
+ * parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
+ * - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
+ * - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
+ * - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
+ * - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
  */
 function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
   const neighbors: GridPoint[] = [];
   
-  // Parity of the cell
-  const parityRow = p.row % 2;
+  // Parity of the cell: (col%2, row%2) matches Python's (i%2, j%2)
   const parityCol = p.col % 2;
+  const parityRow = p.row % 2;
   
   // Cardinal directions (same for all parities)
   const cardinalDeltas = [
@@ -212,24 +213,22 @@ function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoi
     [0, 1],   // E
   ];
   
-  // Diagonal neighbor depends on parity (i%2, j%2)
-  // Note: row = j, col = i in the original Python code convention
-  // The Python code uses (i, j) where i is column and j is row
-  // Our code uses row/col where row is vertical position
-  // In Python: parity_adjacency based on (i%2, j%2) = (col%2, row%2)
-  let diagonalDelta: [number, number];
+  // Diagonal neighbor depends on parity (col%2, row%2)
+  // Python offsets are (di, dj) where di=col change, dj=row change
+  // We need [dr, dc] = [dj, di]
+  let diagonalDelta: [number, number];  // [dr, dc]
   if (parityCol === 0 && parityRow === 0) {
-    // (0,0): diagonal (-1,1) means row-1, col+1 (NE)
-    diagonalDelta = [-1, 1];
+    // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
+    diagonalDelta = [1, -1];
   } else if (parityCol === 1 && parityRow === 0) {
-    // (1,0): diagonal (-1,-1) means row-1, col-1 (NW)
+    // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
     diagonalDelta = [-1, -1];
   } else if (parityCol === 0 && parityRow === 1) {
-    // (0,1): diagonal (1,1) means row+1, col+1 (SE)
+    // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
     diagonalDelta = [1, 1];
   } else {
-    // (1,1): diagonal (1,-1) means row+1, col-1 (SW)
-    diagonalDelta = [1, -1];
+    // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
+    diagonalDelta = [-1, 1];
   }
   
   // Add cardinal neighbors

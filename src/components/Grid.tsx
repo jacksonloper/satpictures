@@ -956,9 +956,15 @@ export const Grid: React.FC<GridProps> = ({
     };
     
     // Get Cairo neighbors (must match solver's getCairoNeighbors)
+    // Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
+    // parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
+    // - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
+    // - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
+    // - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
+    // - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
     const getCairoNeighbors = (row: number, col: number): [number, number, string][] => {
-      const parityRow = row % 2;
       const parityCol = col % 2;
+      const parityRow = row % 2;
       
       // Cardinal directions (same for all parities)
       const cardinals: [number, number, string][] = [
@@ -968,16 +974,21 @@ export const Grid: React.FC<GridProps> = ({
         [row, col + 1, "E"],
       ];
       
-      // Diagonal neighbor depends on parity
+      // Diagonal neighbor depends on parity (col%2, row%2)
+      // Python offsets are (di, dj) where di=col change, dj=row change
       let diagonal: [number, number, string];
       if (parityCol === 0 && parityRow === 0) {
-        diagonal = [row - 1, col + 1, "NE"];
+        // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
+        diagonal = [row + 1, col - 1, "SW"];
       } else if (parityCol === 1 && parityRow === 0) {
+        // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
         diagonal = [row - 1, col - 1, "NW"];
       } else if (parityCol === 0 && parityRow === 1) {
+        // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
         diagonal = [row + 1, col + 1, "SE"];
       } else {
-        diagonal = [row + 1, col - 1, "SW"];
+        // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
+        diagonal = [row - 1, col + 1, "NE"];
       }
       
       return [...cardinals, diagonal];

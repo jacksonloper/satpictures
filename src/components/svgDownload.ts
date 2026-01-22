@@ -343,9 +343,15 @@ export function downloadSolutionSVG(
     };
     
     // Get Cairo neighbors (must match solver's getCairoNeighbors)
+    // Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
+    // parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
+    // - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
+    // - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
+    // - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
+    // - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
     const getCairoNeighbors = (row: number, col: number): [number, number][] => {
-      const parityRow = row % 2;
       const parityCol = col % 2;
+      const parityRow = row % 2;
       
       const cardinals: [number, number][] = [
         [row - 1, col],
@@ -354,15 +360,21 @@ export function downloadSolutionSVG(
         [row, col + 1],
       ];
       
+      // Diagonal neighbor depends on parity (col%2, row%2)
+      // Python offsets are (di, dj) where di=col change, dj=row change
       let diagonal: [number, number];
       if (parityCol === 0 && parityRow === 0) {
-        diagonal = [row - 1, col + 1];
+        // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
+        diagonal = [row + 1, col - 1];
       } else if (parityCol === 1 && parityRow === 0) {
+        // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
         diagonal = [row - 1, col - 1];
       } else if (parityCol === 0 && parityRow === 1) {
+        // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
         diagonal = [row + 1, col + 1];
       } else {
-        diagonal = [row + 1, col - 1];
+        // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
+        diagonal = [row - 1, col + 1];
       }
       
       return [...cardinals, diagonal];
