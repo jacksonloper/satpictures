@@ -78,6 +78,7 @@ interface GridProps {
   cellSize?: number;
   gridType?: GridType;
   viewMode?: "sketchpad" | "solution";
+  showReachabilityLevels?: boolean;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -89,6 +90,7 @@ export const Grid: React.FC<GridProps> = ({
   cellSize = 40,
   gridType = "square",
   viewMode = "sketchpad",
+  showReachabilityLevels = false,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -809,6 +811,11 @@ export const Grid: React.FC<GridProps> = ({
           // Check walls on each side
           const wallRight = col < grid.width - 1 && hasWall(row, col, row, col + 1);
           const wallBottom = row < grid.height - 1 && hasWall(row, col, row + 1, col);
+          
+          // Get reachability level if available
+          const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+            ? solution.reachabilityLevels[row][col] 
+            : null;
 
           return (
             <div
@@ -833,8 +840,23 @@ export const Grid: React.FC<GridProps> = ({
                 borderBottom: wallBottom
                   ? `${wallThickness}px solid #2c3e50`
                   : "none",
+                // Center text for reachability level
+                display: reachLevel !== null ? "flex" : undefined,
+                alignItems: reachLevel !== null ? "center" : undefined,
+                justifyContent: reachLevel !== null ? "center" : undefined,
               }}
-            />
+            >
+              {reachLevel !== null && (
+                <span style={{
+                  color: "#fff",
+                  fontWeight: "bold",
+                  fontSize: cellSize > 30 ? "14px" : "10px",
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                }}>
+                  {reachLevel === -1 ? "∞" : reachLevel}
+                </span>
+              )}
+            </div>
           );
         })
       )}

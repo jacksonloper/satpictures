@@ -58,6 +58,7 @@ function App() {
   const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
   const [reachabilityK, setReachabilityK] = useState(0);
+  const [showReachabilityLevels, setShowReachabilityLevels] = useState(false);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -466,6 +467,22 @@ function App() {
                   >
                     Download CSV
                   </button>
+                  {solution.reachabilityLevels && (
+                    <button
+                      onClick={() => setShowReachabilityLevels(!showReachabilityLevels)}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: showReachabilityLevels ? "#27ae60" : "#95a5a6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {showReachabilityLevels ? "Hide Levels" : "Show Levels"}
+                    </button>
+                  )}
                 </div>
                 
                 {/* Solution Grid */}
@@ -475,6 +492,7 @@ function App() {
                     solution={solution}
                     cellSize={40}
                     gridType={solutionMetadata.gridType}
+                    showReachabilityLevels={showReachabilityLevels}
                   />
                 </div>
               </>

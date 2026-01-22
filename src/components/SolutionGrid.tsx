@@ -7,6 +7,7 @@ interface SolutionGridProps {
   solution: GridSolution | null;
   cellSize?: number;
   gridType?: GridType;
+  showReachabilityLevels?: boolean;
 }
 
 /**
@@ -19,6 +20,7 @@ export const SolutionGrid: React.FC<SolutionGridProps> = ({
   solution,
   cellSize = 40,
   gridType = "square",
+  showReachabilityLevels = false,
 }) => {
   // No-op handlers since solution view is read-only
   const noOp = () => {};
@@ -33,6 +35,7 @@ export const SolutionGrid: React.FC<SolutionGridProps> = ({
       cellSize={cellSize}
       gridType={gridType}
       viewMode="solution"
+      showReachabilityLevels={showReachabilityLevels}
     />
   );
 };
