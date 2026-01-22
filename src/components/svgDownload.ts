@@ -5,7 +5,7 @@
  */
 
 import type { GridSolution, GridType } from "../solver";
-import { HATCH_COLOR } from "../solver";
+import { getCairoType, HATCH_COLOR } from "../solver";
 
 // Color palette matching the Grid component
 const COLORS = [
@@ -266,10 +266,6 @@ export function downloadSolutionSVG(
     
     const offsetX = 0.67 * cairoScale + padding;
     const offsetY = 0.67 * cairoScale + padding;
-    
-    const getCairoType = (row: number, col: number): number => {
-      return (row % 2) * 2 + (col % 2);
-    };
 
     // Create pentagon path using pre-computed vertices
     const createCairoPentagonPath = (row: number, col: number): string => {
