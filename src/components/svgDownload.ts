@@ -5,7 +5,7 @@
  */
 
 import type { GridSolution, GridType } from "../solver";
-import { getCairoType, HATCH_COLOR } from "../solver";
+import { HATCH_COLOR } from "../solver";
 
 // Color palette matching the Grid component
 const COLORS = [
@@ -247,56 +247,41 @@ export function downloadSolutionSVG(
   } else if (gridType === "cairo") {
     // Cairo pentagon grid SVG rendering
     const padding = wallThickness;
-    const svgWidth = gridWidth * cellSize + padding * 2;
-    const svgHeight = gridHeight * cellSize + padding * 2;
+    const cairoScale = cellSize * 1.5;
+    
+    // Pre-computed pentagon vertices for each type (hub at origin)
+    const CAIRO_PENTAGONS: [number, number][][] = [
+      [[-0.166667, -0.333333], [0.000000, 0.000000], [0.333333, -0.166667], [0.500000, -0.500000], [0.166667, -0.666667]],
+      [[0.333333, -0.166667], [0.000000, 0.000000], [0.166667, 0.333333], [0.500000, 0.500000], [0.666667, 0.166667]],
+      [[-0.333333, 0.166667], [0.000000, 0.000000], [-0.166667, -0.333333], [-0.500000, -0.500000], [-0.666667, -0.166667]],
+      [[0.166667, 0.333333], [0.000000, 0.000000], [-0.333333, 0.166667], [-0.500000, 0.500000], [-0.166667, 0.666667]],
+    ];
+    
+    const cairoMaxX = Math.ceil(gridWidth / 2) + 0.67;
+    const cairoMinX = -0.67;
+    const cairoMaxY = Math.ceil(gridHeight / 2) + 0.67;
+    const cairoMinY = -0.67;
+    const svgWidth = (cairoMaxX - cairoMinX) * cairoScale + padding * 2;
+    const svgHeight = (cairoMaxY - cairoMinY) * cairoScale + padding * 2;
+    
+    const offsetX = 0.67 * cairoScale + padding;
+    const offsetY = 0.67 * cairoScale + padding;
+    
+    const getCairoType = (row: number, col: number): number => {
+      return (row % 2) * 2 + (col % 2);
+    };
 
-    // Create pentagon path based on type
-    const createCairoPentagonPath = (cx: number, cy: number, type: number, size: number): string => {
-      const s = size * 0.45;
-      const h = s * 1.2;
-      const w = s * 0.8;
+    // Create pentagon path using pre-computed vertices
+    const createCairoPentagonPath = (row: number, col: number): string => {
+      const type = getCairoType(row, col);
+      const vertices = CAIRO_PENTAGONS[type];
+      const hubX = Math.floor(col / 2);
+      const hubY = Math.floor(row / 2);
       
-      let points: [number, number][];
-      
-      switch (type) {
-        case 0:
-          points = [
-            [cx - w, cy - h],
-            [cx + s, cy - s*0.3],
-            [cx + s, cy + s*0.5],
-            [cx - s*0.3, cy + h*0.7],
-            [cx - h*0.8, cy + s*0.1],
-          ];
-          break;
-        case 1:
-          points = [
-            [cx + w, cy - h],
-            [cx - s, cy - s*0.3],
-            [cx - s, cy + s*0.5],
-            [cx + s*0.3, cy + h*0.7],
-            [cx + h*0.8, cy + s*0.1],
-          ];
-          break;
-        case 2:
-          points = [
-            [cx - w, cy + h],
-            [cx + s, cy + s*0.3],
-            [cx + s, cy - s*0.5],
-            [cx - s*0.3, cy - h*0.7],
-            [cx - h*0.8, cy - s*0.1],
-          ];
-          break;
-        case 3:
-        default:
-          points = [
-            [cx + w, cy + h],
-            [cx - s, cy + s*0.3],
-            [cx - s, cy - s*0.5],
-            [cx + s*0.3, cy - h*0.7],
-            [cx + h*0.8, cy - s*0.1],
-          ];
-          break;
-      }
+      const points = vertices.map(([vx, vy]) => [
+        offsetX + (hubX + vx) * cairoScale,
+        offsetY + (hubY + vy) * cairoScale,
+      ]);
       
       return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
     };
@@ -312,13 +297,9 @@ export function downloadSolutionSVG(
     svgContent += `  </defs>\n`;
 
     // Render pentagons
-    const cairoUnit = cellSize * 0.9;
     for (let row = 0; row < gridHeight; row++) {
       for (let col = 0; col < gridWidth; col++) {
-        const cx = padding + cellSize / 2 + col * cellSize;
-        const cy = padding + cellSize / 2 + row * cellSize;
-        const type = getCairoType(row, col);
-        const path = createCairoPentagonPath(cx, cy, type, cairoUnit);
+        const path = createCairoPentagonPath(row, col);
         const color = solution.assignedColors[row][col];
         const isHatch = color === HATCH_COLOR;
         const fill = isHatch ? "url(#hatchPattern)" : getColor(row, col);

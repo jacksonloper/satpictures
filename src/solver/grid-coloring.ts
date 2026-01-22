@@ -205,38 +205,29 @@ export function getCairoType(row: number, col: number): number {
  * Cairo pentagons have 5 neighbors each. The neighbors depend on the type (rotation)
  * of the pentagon, which is determined by (row % 2, col % 2).
  * 
- * Each type has the 4 cardinal neighbors plus one diagonal extra:
- *   Type 0 (even row, even col): N, S, E, W + NW
- *   Type 1 (even row, odd col):  N, S, E, W + NE
- *   Type 2 (odd row, even col):  N, S, E, W + SW
- *   Type 3 (odd row, odd col):   N, S, E, W + SE
+ * The adjacency pattern is derived from the actual Cairo tiling geometry where
+ * pentagons are arranged in 2x2 groups sharing a common hub vertex.
+ * 
+ * Type mapping: type = (row % 2) * 2 + (col % 2)
+ *   Type 0 (row%2=0, col%2=0): neighbors at deltas (1,0), (-2,1), (-1,1), (0,1), (1,2)
+ *   Type 1 (row%2=0, col%2=1): neighbors at deltas (0,-1), (2,-1), (1,0), (1,1), (1,2)
+ *   Type 2 (row%2=1, col%2=0): neighbors at deltas (-1,-2), (-1,-1), (-1,0), (-2,1), (0,1)
+ *   Type 3 (row%2=1, col%2=1): neighbors at deltas (-1,-2), (0,-1), (1,-1), (2,-1), (-1,0)
  */
 function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
   const neighbors: GridPoint[] = [];
   const type = getCairoType(p.row, p.col);
   
-  // Cardinal directions (shared by all types)
-  const cardinalDeltas = [
-    [-1, 0],  // N
-    [1, 0],   // S
-    [0, -1],  // W
-    [0, 1],   // E
-  ];
+  // Deltas as [row_delta, col_delta] for each type
+  // Derived from the actual Cairo tiling geometry
+  const deltas: { [key: number]: [number, number][] } = {
+    0: [[1, 0], [-2, 1], [-1, 1], [0, 1], [1, 2]],
+    1: [[0, -1], [2, -1], [1, 0], [1, 1], [1, 2]],
+    2: [[-1, -2], [-1, -1], [-1, 0], [-2, 1], [0, 1]],
+    3: [[-1, -2], [0, -1], [1, -1], [2, -1], [-1, 0]],
+  };
   
-  // Extra diagonal neighbor depends on type
-  let extraDelta: [number, number];
-  switch (type) {
-    case 0: extraDelta = [-1, -1]; break; // NW
-    case 1: extraDelta = [-1, 1]; break;  // NE
-    case 2: extraDelta = [1, -1]; break;  // SW
-    case 3: extraDelta = [1, 1]; break;   // SE
-    default: extraDelta = [-1, -1];
-  }
-  
-  // Add all neighbors (cardinal + extra)
-  const allDeltas = [...cardinalDeltas, extraDelta];
-  
-  for (const [dr, dc] of allDeltas) {
+  for (const [dr, dc] of deltas[type]) {
     const nr = p.row + dr;
     const nc = p.col + dc;
     if (nr >= 0 && nr < height && nc >= 0 && nc < width) {

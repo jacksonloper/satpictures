@@ -168,11 +168,24 @@ export const Grid: React.FC<GridProps> = ({
   const octBandWidth = octInset * 0.6; // Band width is thinner than the gap
 
   // Cairo pentagon grid calculations
-  // Cairo pentagons are arranged in a grid with 4 types (rotations) based on (row%2, col%2)
-  // Each pentagon has 2 right angles (90°) and 3 angles of 120°
-  // The pentagons have one short edge and four longer edges
-  // For rendering, we use a unit cell approach where each grid cell contains one pentagon
-  const cairoUnit = cellSize * 0.9; // Scale factor for the pentagon
+  // Cairo pentagons are arranged in 2x2 groups sharing a common hub vertex.
+  // The layout uses hub-group translations: each 2x2 block has hubs at unit grid positions.
+  // Pentagon vertices are pre-rotated versions of a base shape.
+  // Scale factor: multiply unit coords by cairoScale to get pixel positions
+  const cairoScale = cellSize * 1.5; // Scale for the cairo coordinate system
+  
+  // Pre-computed pentagon vertices for each type (hub at origin)
+  // Derived from the Python reference: globally rotated -45° and scaled
+  const CAIRO_PENTAGONS: [number, number][][] = [
+    // Type 0: rotation 0° (row%2=0, col%2=0)
+    [[-0.166667, -0.333333], [0.000000, 0.000000], [0.333333, -0.166667], [0.500000, -0.500000], [0.166667, -0.666667]],
+    // Type 1: rotation 90° (row%2=0, col%2=1)
+    [[0.333333, -0.166667], [0.000000, 0.000000], [0.166667, 0.333333], [0.500000, 0.500000], [0.666667, 0.166667]],
+    // Type 2: rotation -90° (row%2=1, col%2=0)
+    [[-0.333333, 0.166667], [0.000000, 0.000000], [-0.166667, -0.333333], [-0.500000, -0.500000], [-0.666667, -0.166667]],
+    // Type 3: rotation 180° (row%2=1, col%2=1)
+    [[0.166667, 0.333333], [0.000000, 0.000000], [-0.333333, 0.166667], [-0.500000, 0.500000], [-0.166667, 0.666667]],
+  ];
   
   // Calculate total dimensions based on grid type
   let totalWidth: number;
@@ -184,9 +197,15 @@ export const Grid: React.FC<GridProps> = ({
     totalWidth = grid.width * cellSize + wallThickness * 2;
     totalHeight = grid.height * cellSize + wallThickness * 2;
   } else if (gridType === "cairo") {
-    // Cairo grid uses same spacing as square grid
-    totalWidth = grid.width * cellSize + wallThickness * 2;
-    totalHeight = grid.height * cellSize + wallThickness * 2;
+    // Cairo grid: bounding box extends from about -0.67 to (width-1)/2 + 0.67 in x
+    // and from -0.67 to (height-1)/2 + 0.67 in y (in unit coords)
+    // After scaling by cairoScale and adding padding
+    const cairoMaxX = Math.ceil(grid.width / 2) + 0.67;
+    const cairoMinX = -0.67;
+    const cairoMaxY = Math.ceil(grid.height / 2) + 0.67;
+    const cairoMinY = -0.67;
+    totalWidth = (cairoMaxX - cairoMinX) * cairoScale + wallThickness * 2;
+    totalHeight = (cairoMaxY - cairoMinY) * cairoScale + wallThickness * 2;
   } else {
     totalWidth = grid.width * cellSize + wallThickness;
     totalHeight = grid.height * cellSize + wallThickness;
@@ -830,91 +849,61 @@ export const Grid: React.FC<GridProps> = ({
     const svgWidth = totalWidth;
     const svgHeight = totalHeight;
     const padding = wallThickness;
+    
+    // Offset to center the grid (since coords can go negative)
+    const offsetX = 0.67 * cairoScale + padding;
+    const offsetY = 0.67 * cairoScale + padding;
 
-    // Create SVG path for a Cairo pentagon based on type (rotation)
-    // The cairo pentagon has 2 right angles (90°) and 3 angles of 120°
-    // We define the shape relative to the cell center
-    const createCairoPentagonPath = (cx: number, cy: number, type: number, size: number): string => {
-      // Cairo pentagon vertices relative to center
-      // The pentagon has one short edge and four longer edges
-      // Size is roughly half the cell size
-      const s = size * 0.45; // Scale factor
-      const h = s * 1.2; // Height factor
-      const w = s * 0.8; // Width factor for the "bump"
+    // Create SVG path for a Cairo pentagon using pre-computed vertices
+    const createCairoPentagonPath = (row: number, col: number): string => {
+      const type = getCairoType(row, col);
+      const vertices = CAIRO_PENTAGONS[type];
       
-      // Base pentagon shape (type 0) - pointing toward NW corner
-      // Then rotate based on type
-      let points: [number, number][];
+      // Hub position in unit coords: (col/2, row/2) where / is integer division
+      const hubX = Math.floor(col / 2);
+      const hubY = Math.floor(row / 2);
       
-      // Type 0: Extra neighbor at NW - pentagon points NW
-      // Type 1: Extra neighbor at NE - pentagon points NE  
-      // Type 2: Extra neighbor at SW - pentagon points SW
-      // Type 3: Extra neighbor at SE - pentagon points SE
-      
-      switch (type) {
-        case 0: // NW - pentagon has bump pointing to top-left
-          points = [
-            [cx - w, cy - h],    // top-left (bump vertex)
-            [cx + s, cy - s*0.3], // top-right
-            [cx + s, cy + s*0.5], // right
-            [cx - s*0.3, cy + h*0.7], // bottom
-            [cx - h*0.8, cy + s*0.1], // left
-          ];
-          break;
-        case 1: // NE - pentagon has bump pointing to top-right
-          points = [
-            [cx + w, cy - h],    // top-right (bump vertex)
-            [cx - s, cy - s*0.3], // top-left
-            [cx - s, cy + s*0.5], // left
-            [cx + s*0.3, cy + h*0.7], // bottom
-            [cx + h*0.8, cy + s*0.1], // right
-          ];
-          break;
-        case 2: // SW - pentagon has bump pointing to bottom-left
-          points = [
-            [cx - w, cy + h],    // bottom-left (bump vertex)
-            [cx + s, cy + s*0.3], // bottom-right
-            [cx + s, cy - s*0.5], // right
-            [cx - s*0.3, cy - h*0.7], // top
-            [cx - h*0.8, cy - s*0.1], // left
-          ];
-          break;
-        case 3: // SE - pentagon has bump pointing to bottom-right
-        default:
-          points = [
-            [cx + w, cy + h],    // bottom-right (bump vertex)
-            [cx - s, cy + s*0.3], // bottom-left
-            [cx - s, cy - s*0.5], // left
-            [cx + s*0.3, cy - h*0.7], // top
-            [cx + h*0.8, cy - s*0.1], // right
-          ];
-          break;
-      }
+      // Convert vertices to pixel coordinates
+      const points = vertices.map(([vx, vy]) => [
+        offsetX + (hubX + vx) * cairoScale,
+        offsetY + (hubY + vy) * cairoScale,
+      ]);
       
       return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
     };
+    
+    // Get center position for a tile (for wall drawing and labels)
+    const getCairoCenter = (row: number, col: number): [number, number] => {
+      const type = getCairoType(row, col);
+      const vertices = CAIRO_PENTAGONS[type];
+      const hubX = Math.floor(col / 2);
+      const hubY = Math.floor(row / 2);
+      
+      // Calculate centroid of the pentagon
+      let sumX = 0, sumY = 0;
+      for (const [vx, vy] of vertices) {
+        sumX += hubX + vx;
+        sumY += hubY + vy;
+      }
+      return [
+        offsetX + (sumX / 5) * cairoScale,
+        offsetY + (sumY / 5) * cairoScale,
+      ];
+    };
 
-    // Get Cairo neighbors for wall detection
+    // Get Cairo neighbors for wall detection (matches the solver)
     const getCairoNeighborsWithDir = (row: number, col: number): [number, number, string][] => {
       const type = getCairoType(row, col);
-      const cardinals: [number, number, string][] = [
-        [row - 1, col, "N"],
-        [row + 1, col, "S"],
-        [row, col - 1, "W"],
-        [row, col + 1, "E"],
-      ];
       
-      // Extra diagonal based on type
-      let extra: [number, number, string];
-      switch (type) {
-        case 0: extra = [row - 1, col - 1, "NW"]; break;
-        case 1: extra = [row - 1, col + 1, "NE"]; break;
-        case 2: extra = [row + 1, col - 1, "SW"]; break;
-        case 3: extra = [row + 1, col + 1, "SE"]; break;
-        default: extra = [row - 1, col - 1, "NW"];
-      }
+      // Deltas as [row_delta, col_delta] for each type - must match solver
+      const deltas: { [key: number]: [number, number][] } = {
+        0: [[1, 0], [-2, 1], [-1, 1], [0, 1], [1, 2]],
+        1: [[0, -1], [2, -1], [1, 0], [1, 1], [1, 2]],
+        2: [[-1, -2], [-1, -1], [-1, 0], [-2, 1], [0, 1]],
+        3: [[-1, -2], [0, -1], [1, -1], [2, -1], [-1, 0]],
+      };
       
-      return [...cardinals, extra];
+      return deltas[type].map(([dr, dc]) => [row + dr, col + dc, `${dr},${dc}`]);
     };
 
     // Pre-compute all cairo pentagon data
@@ -957,10 +946,9 @@ export const Grid: React.FC<GridProps> = ({
           fill = COLORS[(displayColor ?? 0) % COLORS.length];
         }
 
-        const cx = padding + cellSize / 2 + col * cellSize;
-        const cy = padding + cellSize / 2 + row * cellSize;
         const type = getCairoType(row, col);
-        const path = createCairoPentagonPath(cx, cy, type, cairoUnit);
+        const path = createCairoPentagonPath(row, col);
+        const [cx, cy] = getCairoCenter(row, col);
         
         const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
           ? solution.reachabilityLevels[row][col] 
@@ -981,11 +969,9 @@ export const Grid: React.FC<GridProps> = ({
     const cairoWalls: CairoWall[] = [];
     
     // For Cairo grid, we draw walls as lines between pentagon centers where there's a wall
-    // This is simpler than trying to compute exact edge positions
     for (let row = 0; row < grid.height; row++) {
       for (let col = 0; col < grid.width; col++) {
-        const cx = padding + cellSize / 2 + col * cellSize;
-        const cy = padding + cellSize / 2 + row * cellSize;
+        const [cx, cy] = getCairoCenter(row, col);
         
         const neighbors = getCairoNeighborsWithDir(row, col);
         for (const [nRow, nCol] of neighbors) {
@@ -993,8 +979,7 @@ export const Grid: React.FC<GridProps> = ({
             // Only draw wall once (from lower index to higher)
             if (row < nRow || (row === nRow && col < nCol)) {
               if (hasWall(row, col, nRow, nCol)) {
-                const ncx = padding + cellSize / 2 + nCol * cellSize;
-                const ncy = padding + cellSize / 2 + nRow * cellSize;
+                const [ncx, ncy] = getCairoCenter(nRow, nCol);
                 
                 // Draw wall line perpendicular to the connection, at midpoint
                 const midX = (cx + ncx) / 2;
@@ -1004,8 +989,9 @@ export const Grid: React.FC<GridProps> = ({
                 const dx = ncx - cx;
                 const dy = ncy - cy;
                 const len = Math.sqrt(dx * dx + dy * dy);
-                const perpX = -dy / len * cellSize * 0.35;
-                const perpY = dx / len * cellSize * 0.35;
+                const wallLen = cairoScale * 0.25;
+                const perpX = -dy / len * wallLen;
+                const perpY = dx / len * wallLen;
                 
                 cairoWalls.push({
                   x1: midX - perpX,
