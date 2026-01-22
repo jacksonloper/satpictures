@@ -361,6 +361,53 @@ export function getCairoNeighborsWithDirection(row: number, col: number): [numbe
 }
 
 /**
+ * Get Cairo Bridge neighbors with direction labels.
+ * Cairo Bridge has 7 neighbors: 4 cardinal + 3 diagonal (excluding the one diametrically opposed to Cairo's diagonal).
+ * 
+ * For Cairo, the diagonal neighbor depends on parity (col%2, row%2):
+ * - (0,0): diagonal is SW → excluded is NE
+ * - (1,0): diagonal is NW → excluded is SE  
+ * - (0,1): diagonal is SE → excluded is NW
+ * - (1,1): diagonal is NE → excluded is SW
+ */
+export function getCairoBridgeNeighborsWithDirection(row: number, col: number): [number, number, string][] {
+  const parityCol = col % 2;
+  const parityRow = row % 2;
+
+  const cardinals: [number, number, string][] = [
+    [row - 1, col, "N"],
+    [row + 1, col, "S"],
+    [row, col - 1, "W"],
+    [row, col + 1, "E"],
+  ];
+
+  // All diagonal directions
+  const allDiagonals: [number, number, string][] = [
+    [row - 1, col - 1, "NW"],
+    [row - 1, col + 1, "NE"],
+    [row + 1, col - 1, "SW"],
+    [row + 1, col + 1, "SE"],
+  ];
+
+  // Determine which diagonal to exclude based on parity
+  let excludedDiagonal: string;
+  if (parityCol === 0 && parityRow === 0) {
+    excludedDiagonal = "NE";
+  } else if (parityCol === 1 && parityRow === 0) {
+    excludedDiagonal = "SE";
+  } else if (parityCol === 0 && parityRow === 1) {
+    excludedDiagonal = "NW";
+  } else {
+    excludedDiagonal = "SW";
+  }
+
+  // Include only diagonals that aren't excluded
+  const diagonals = allDiagonals.filter(([, , dir]) => dir !== excludedDiagonal);
+
+  return [...cardinals, ...diagonals];
+}
+
+/**
  * Find shared edge between two Cairo tiles
  */
 export function findSharedEdge(
@@ -476,7 +523,7 @@ export function calculateGridDimensions(
       totalWidth: width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2,
       totalHeight: (height - 1) * hexVertSpacing + hexHeight + wallThickness * 2,
     };
-  } else if (gridType === "octagon" || gridType === "cairo") {
+  } else if (gridType === "octagon" || gridType === "cairo" || gridType === "cairobridge") {
     return {
       totalWidth: width * cellSize + wallThickness * 2,
       totalHeight: height * cellSize + wallThickness * 2,
