@@ -424,7 +424,7 @@ export function downloadSolutionSVG(
         const color = solution.assignedColors[row][col];
         const isHatch = color === HATCH_COLOR;
         const fill = isHatch ? "url(#hatchPattern)" : getColor(row, col);
-        svgContent += `  <path d="${pathData}" fill="${fill}" stroke="#2c3e50" stroke-width="0.5" />\n`;
+        svgContent += `  <path d="${pathData}" fill="${fill}" />\n`;
       }
     }
 
