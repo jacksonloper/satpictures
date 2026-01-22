@@ -861,10 +861,10 @@ export const Grid: React.FC<GridProps> = ({
       const type = getCairoType(row, col);
       const vertices = CAIRO_PENTAGONS[type];
       
-      // Hub position: u = col // 2 (controls X), v = row // 2 (controls Y)
+      // Hub position: u = row // 2 (controls X via T1g), v = col // 2 (controls Y via T2g)
       // G = u * T1g + v * T2g where T1g ≈ (1,0) and T2g ≈ (0,1)
-      const hubX = Math.floor(col / 2);
-      const hubY = Math.floor(row / 2);
+      const hubX = Math.floor(row / 2);
+      const hubY = Math.floor(col / 2);
       
       // Convert vertices to pixel coordinates
       const points = vertices.map(([vx, vy]) => [
@@ -879,9 +879,9 @@ export const Grid: React.FC<GridProps> = ({
     const getCairoCenter = (row: number, col: number): [number, number] => {
       const type = getCairoType(row, col);
       const vertices = CAIRO_PENTAGONS[type];
-      // Hub position: u = col // 2 (controls X), v = row // 2 (controls Y)
-      const hubX = Math.floor(col / 2);
-      const hubY = Math.floor(row / 2);
+      // Hub position: u = row // 2 (controls X), v = col // 2 (controls Y)
+      const hubX = Math.floor(row / 2);
+      const hubY = Math.floor(col / 2);
       
       // Calculate centroid of the pentagon
       let sumX = 0, sumY = 0;
@@ -900,12 +900,12 @@ export const Grid: React.FC<GridProps> = ({
       const type = getCairoType(row, col);
       
       // Deltas as [row_delta, col_delta] for each type - must match solver
-      // type = (row % 2) * 2 + (1 - col % 2)
+      // type = (row % 2) * 2 + (col % 2)
       const deltas: { [key: number]: [number, number][] } = {
-        0: [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, 0]],  // row%2=0, col%2=1
-        1: [[-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]],   // row%2=0, col%2=0
-        2: [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0]],   // row%2=1, col%2=1
-        3: [[-1, 0], [0, -1], [0, 1], [1, 0], [1, 1]],    // row%2=1, col%2=0
+        0: [[0, 1], [1, -2], [1, -1], [1, 0], [2, 1]],      // row%2=0, col%2=0
+        1: [[-2, -1], [-1, -1], [0, -1], [1, -2], [1, 0]],  // row%2=0, col%2=1
+        2: [[-1, 0], [-1, 2], [0, 1], [1, 1], [2, 1]],      // row%2=1, col%2=0
+        3: [[-2, -1], [-1, 0], [-1, 1], [-1, 2], [0, -1]],  // row%2=1, col%2=1
       };
       
       return deltas[type].map(([dr, dc]) => [row + dr, col + dc, `${dr},${dc}`]);
