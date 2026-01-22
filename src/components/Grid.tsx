@@ -294,6 +294,7 @@ export const Grid: React.FC<GridProps> = ({
       isBlank: boolean;
       isHatch: boolean;
       walls: { x1: number; y1: number; x2: number; y2: number }[];
+      reachLevel: number | null;
     }[] = [];
     
     for (let row = 0; row < grid.height; row++) {
@@ -342,7 +343,12 @@ export const Grid: React.FC<GridProps> = ({
           }
         }
         
-        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls });
+        // Get reachability level if available
+        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+          ? solution.reachabilityLevels[row][col] 
+          : null;
+        
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls, reachLevel });
       }
     }
     
@@ -407,6 +413,28 @@ export const Grid: React.FC<GridProps> = ({
               />
             ))
           )}
+          
+          {/* Third pass: render reachability levels on top of everything */}
+          {hexData.map(({ row, col, cx, cy, reachLevel }) =>
+            reachLevel !== null && (
+              <text
+                key={`level-${row}-${col}`}
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontWeight="bold"
+                fontSize={cellSize > 30 ? "14px" : "10px"}
+                style={{
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {reachLevel === -1 ? "∞" : reachLevel}
+              </text>
+            )
+          )}
         </svg>
       </div>
     );
@@ -469,6 +497,7 @@ export const Grid: React.FC<GridProps> = ({
       cy: number;
       path: string;
       fill: string;
+      reachLevel: number | null;
     }
     
     const octData: OctData[] = [];
@@ -479,8 +508,13 @@ export const Grid: React.FC<GridProps> = ({
         const cy = padding + cellSize / 2 + row * cellSize;
         const path = createOctagonPath(cx, cy, cellSize, octInset);
         const fill = getCellColor(row, col);
+        
+        // Get reachability level if available
+        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+          ? solution.reachabilityLevels[row][col] 
+          : null;
 
-        octData.push({ row, col, cx, cy, path, fill });
+        octData.push({ row, col, cx, cy, path, fill, reachLevel });
       }
     }
 
@@ -753,6 +787,28 @@ export const Grid: React.FC<GridProps> = ({
             stroke="#2c3e50"
             strokeWidth={wallThickness}
           />
+          
+          {/* Reachability levels on top of everything */}
+          {octData.map(({ row, col, cx, cy, reachLevel }) =>
+            reachLevel !== null && (
+              <text
+                key={`level-${row}-${col}`}
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontWeight="bold"
+                fontSize={cellSize > 30 ? "14px" : "10px"}
+                style={{
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {reachLevel === -1 ? "∞" : reachLevel}
+              </text>
+            )
+          )}
         </svg>
       </div>
     );
