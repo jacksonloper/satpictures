@@ -1158,8 +1158,6 @@ export const Grid: React.FC<GridProps> = ({
               key={`fill-${row}-${col}`}
               d={path}
               fill={fill}
-              stroke="#2c3e50"
-              strokeWidth={0.5}
               style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
               onMouseDown={() => handleMouseDown(row, col)}
               onMouseEnter={() => handleMouseEnter(row, col)}
