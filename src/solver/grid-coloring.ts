@@ -54,9 +54,9 @@ function getEffectiveColor(color: number): number {
 }
 
 /**
- * Grid type - square, hex, or octagon
+ * Grid type - square, hex, octagon, or cairo
  */
-export type GridType = "square" | "hex" | "octagon";
+export type GridType = "square" | "hex" | "octagon" | "cairo";
 
 /**
  * Represents a point in the grid
@@ -187,6 +187,71 @@ function getOctagonNeighbors(p: GridPoint, width: number, height: number): GridP
 }
 
 /**
+ * Get the neighbors of a point for Cairo pentagonal tiling.
+ * Cairo tiling uses pentagonal tiles with parity-dependent adjacencies.
+ * Each tile has 4 cardinal neighbors plus 1 diagonal neighbor depending on parity.
+ * 
+ * Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
+ * parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
+ * - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
+ * - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
+ * - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
+ * - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
+ */
+function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
+  const neighbors: GridPoint[] = [];
+  
+  // Parity of the cell: (col%2, row%2) matches Python's (i%2, j%2)
+  const parityCol = p.col % 2;
+  const parityRow = p.row % 2;
+  
+  // Cardinal directions (same for all parities)
+  const cardinalDeltas = [
+    [-1, 0],  // N
+    [1, 0],   // S
+    [0, -1],  // W
+    [0, 1],   // E
+  ];
+  
+  // Diagonal neighbor depends on parity (col%2, row%2)
+  // Python offsets are (di, dj) where di=col change, dj=row change
+  // We need [dr, dc] = [dj, di]
+  let diagonalDelta: [number, number];  // [dr, dc]
+  if (parityCol === 0 && parityRow === 0) {
+    // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
+    diagonalDelta = [1, -1];
+  } else if (parityCol === 1 && parityRow === 0) {
+    // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
+    diagonalDelta = [-1, -1];
+  } else if (parityCol === 0 && parityRow === 1) {
+    // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
+    diagonalDelta = [1, 1];
+  } else {
+    // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
+    diagonalDelta = [-1, 1];
+  }
+  
+  // Add cardinal neighbors
+  for (const [dr, dc] of cardinalDeltas) {
+    const nr = p.row + dr;
+    const nc = p.col + dc;
+    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
+      neighbors.push({ row: nr, col: nc });
+    }
+  }
+  
+  // Add diagonal neighbor
+  const [ddr, ddc] = diagonalDelta;
+  const dnr = p.row + ddr;
+  const dnc = p.col + ddc;
+  if (dnr >= 0 && dnr < height && dnc >= 0 && dnc < width) {
+    neighbors.push({ row: dnr, col: dnc });
+  }
+  
+  return neighbors;
+}
+
+/**
  * Get neighbors based on grid type
  */
 function getNeighbors(p: GridPoint, width: number, height: number, gridType: GridType = "square"): GridPoint[] {
@@ -195,6 +260,9 @@ function getNeighbors(p: GridPoint, width: number, height: number, gridType: Gri
   }
   if (gridType === "octagon") {
     return getOctagonNeighbors(p, width, height);
+  }
+  if (gridType === "cairo") {
+    return getCairoNeighbors(p, width, height);
   }
   return getSquareNeighbors(p, width, height);
 }
