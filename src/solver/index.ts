@@ -6,6 +6,7 @@
 
 export {
   createTestGrid,
+  getCairoType,
   HATCH_COLOR,
   RED_DOT_COLOR,
   RED_HATCH_COLOR,

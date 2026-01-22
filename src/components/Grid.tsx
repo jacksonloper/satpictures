@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridSolution, GridType } from "../solver";
-import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "../solver";
+import { getCairoType, HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "../solver";
 
 // Re-export color constants for convenience
 export { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR };
@@ -166,6 +166,13 @@ export const Grid: React.FC<GridProps> = ({
   // The bands are narrower than the gap for a thinner look
   const octInset = cellSize * 0.3; // How much the octagon corners are cut
   const octBandWidth = octInset * 0.6; // Band width is thinner than the gap
+
+  // Cairo pentagon grid calculations
+  // Cairo pentagons are arranged in a grid with 4 types (rotations) based on (row%2, col%2)
+  // Each pentagon has 2 right angles (90°) and 3 angles of 120°
+  // The pentagons have one short edge and four longer edges
+  // For rendering, we use a unit cell approach where each grid cell contains one pentagon
+  const cairoUnit = cellSize * 0.9; // Scale factor for the pentagon
   
   // Calculate total dimensions based on grid type
   let totalWidth: number;
@@ -174,6 +181,10 @@ export const Grid: React.FC<GridProps> = ({
     totalWidth = grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2;
     totalHeight = (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2;
   } else if (gridType === "octagon") {
+    totalWidth = grid.width * cellSize + wallThickness * 2;
+    totalHeight = grid.height * cellSize + wallThickness * 2;
+  } else if (gridType === "cairo") {
+    // Cairo grid uses same spacing as square grid
     totalWidth = grid.width * cellSize + wallThickness * 2;
     totalHeight = grid.height * cellSize + wallThickness * 2;
   } else {
@@ -814,6 +825,299 @@ export const Grid: React.FC<GridProps> = ({
     );
   }
 
+  // Cairo pentagon grid rendering
+  if (gridType === "cairo") {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+
+    // Create SVG path for a Cairo pentagon based on type (rotation)
+    // The cairo pentagon has 2 right angles (90°) and 3 angles of 120°
+    // We define the shape relative to the cell center
+    const createCairoPentagonPath = (cx: number, cy: number, type: number, size: number): string => {
+      // Cairo pentagon vertices relative to center
+      // The pentagon has one short edge and four longer edges
+      // Size is roughly half the cell size
+      const s = size * 0.45; // Scale factor
+      const h = s * 1.2; // Height factor
+      const w = s * 0.8; // Width factor for the "bump"
+      
+      // Base pentagon shape (type 0) - pointing toward NW corner
+      // Then rotate based on type
+      let points: [number, number][];
+      
+      // Type 0: Extra neighbor at NW - pentagon points NW
+      // Type 1: Extra neighbor at NE - pentagon points NE  
+      // Type 2: Extra neighbor at SW - pentagon points SW
+      // Type 3: Extra neighbor at SE - pentagon points SE
+      
+      switch (type) {
+        case 0: // NW - pentagon has bump pointing to top-left
+          points = [
+            [cx - w, cy - h],    // top-left (bump vertex)
+            [cx + s, cy - s*0.3], // top-right
+            [cx + s, cy + s*0.5], // right
+            [cx - s*0.3, cy + h*0.7], // bottom
+            [cx - h*0.8, cy + s*0.1], // left
+          ];
+          break;
+        case 1: // NE - pentagon has bump pointing to top-right
+          points = [
+            [cx + w, cy - h],    // top-right (bump vertex)
+            [cx - s, cy - s*0.3], // top-left
+            [cx - s, cy + s*0.5], // left
+            [cx + s*0.3, cy + h*0.7], // bottom
+            [cx + h*0.8, cy + s*0.1], // right
+          ];
+          break;
+        case 2: // SW - pentagon has bump pointing to bottom-left
+          points = [
+            [cx - w, cy + h],    // bottom-left (bump vertex)
+            [cx + s, cy + s*0.3], // bottom-right
+            [cx + s, cy - s*0.5], // right
+            [cx - s*0.3, cy - h*0.7], // top
+            [cx - h*0.8, cy - s*0.1], // left
+          ];
+          break;
+        case 3: // SE - pentagon has bump pointing to bottom-right
+        default:
+          points = [
+            [cx + w, cy + h],    // bottom-right (bump vertex)
+            [cx - s, cy + s*0.3], // bottom-left
+            [cx - s, cy - s*0.5], // left
+            [cx + s*0.3, cy - h*0.7], // top
+            [cx + h*0.8, cy - s*0.1], // right
+          ];
+          break;
+      }
+      
+      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+    };
+
+    // Get Cairo neighbors for wall detection
+    const getCairoNeighborsWithDir = (row: number, col: number): [number, number, string][] => {
+      const type = getCairoType(row, col);
+      const cardinals: [number, number, string][] = [
+        [row - 1, col, "N"],
+        [row + 1, col, "S"],
+        [row, col - 1, "W"],
+        [row, col + 1, "E"],
+      ];
+      
+      // Extra diagonal based on type
+      let extra: [number, number, string];
+      switch (type) {
+        case 0: extra = [row - 1, col - 1, "NW"]; break;
+        case 1: extra = [row - 1, col + 1, "NE"]; break;
+        case 2: extra = [row + 1, col - 1, "SW"]; break;
+        case 3: extra = [row + 1, col + 1, "SE"]; break;
+        default: extra = [row - 1, col - 1, "NW"];
+      }
+      
+      return [...cardinals, extra];
+    };
+
+    // Pre-compute all cairo pentagon data
+    interface CairoData {
+      row: number;
+      col: number;
+      cx: number;
+      cy: number;
+      type: number;
+      path: string;
+      fill: string;
+      isBlank: boolean;
+      isHatch: boolean;
+      reachLevel: number | null;
+    }
+    
+    const cairoData: CairoData[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const inputColor = grid.colors[row][col];
+        const displayColor = showSolutionColors
+          ? solution!.assignedColors[row][col]
+          : inputColor;
+        const isBlank = inputColor === null && !showSolutionColors;
+        const isHatch = displayColor === HATCH_COLOR;
+        const isRedDot = displayColor === RED_DOT_COLOR;
+        const isRedHatch = displayColor === RED_HATCH_COLOR;
+        
+        let fill: string;
+        if (isBlank) {
+          fill = "url(#blankPattern)";
+        } else if (isHatch) {
+          fill = "url(#hatchPattern)";
+        } else if (isRedDot) {
+          fill = "url(#redDotPattern)";
+        } else if (isRedHatch) {
+          fill = "url(#redHatchPattern)";
+        } else {
+          fill = COLORS[(displayColor ?? 0) % COLORS.length];
+        }
+
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        const type = getCairoType(row, col);
+        const path = createCairoPentagonPath(cx, cy, type, cairoUnit);
+        
+        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+          ? solution.reachabilityLevels[row][col] 
+          : null;
+        
+        cairoData.push({ row, col, cx, cy, type, path, fill, isBlank, isHatch, reachLevel });
+      }
+    }
+
+    // Pre-compute walls
+    interface CairoWall {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    }
+    
+    const cairoWalls: CairoWall[] = [];
+    
+    // For Cairo grid, we draw walls as lines between pentagon centers where there's a wall
+    // This is simpler than trying to compute exact edge positions
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        
+        const neighbors = getCairoNeighborsWithDir(row, col);
+        for (const [nRow, nCol] of neighbors) {
+          if (nRow >= 0 && nRow < grid.height && nCol >= 0 && nCol < grid.width) {
+            // Only draw wall once (from lower index to higher)
+            if (row < nRow || (row === nRow && col < nCol)) {
+              if (hasWall(row, col, nRow, nCol)) {
+                const ncx = padding + cellSize / 2 + nCol * cellSize;
+                const ncy = padding + cellSize / 2 + nRow * cellSize;
+                
+                // Draw wall line perpendicular to the connection, at midpoint
+                const midX = (cx + ncx) / 2;
+                const midY = (cy + ncy) / 2;
+                
+                // Calculate perpendicular direction
+                const dx = ncx - cx;
+                const dy = ncy - cy;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const perpX = -dy / len * cellSize * 0.35;
+                const perpY = dx / len * cellSize * 0.35;
+                
+                cairoWalls.push({
+                  x1: midX - perpX,
+                  y1: midY - perpY,
+                  x2: midX + perpX,
+                  y2: midY + perpY,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return (
+      <div
+        className="grid-container"
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#1a1a1a" }}>
+          {/* Define patterns for blank and hatch fills */}
+          <defs>
+            <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect width="10" height="10" fill="#f5f5f5"/>
+              <line x1="0" y1="0" x2="10" y2="10" stroke="#e0e0e0" strokeWidth="2"/>
+            </pattern>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#fffde7"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
+              <rect width="20" height="20" fill="#e74c3c"/>
+              <circle cx="10" cy="10" r="4" fill="white"/>
+            </pattern>
+            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#e74c3c"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+            </pattern>
+          </defs>
+          
+          {/* Render pentagon fills */}
+          {cairoData.map(({ row, col, path, fill }) => (
+            <path
+              key={`cairo-${row}-${col}`}
+              d={path}
+              fill={fill}
+              stroke="#333"
+              strokeWidth={0.5}
+              style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+            />
+          ))}
+          
+          {/* Render walls */}
+          {cairoWalls.map((wall, i) => (
+            <line
+              key={`cairo-wall-${i}`}
+              x1={wall.x1}
+              y1={wall.y1}
+              x2={wall.x2}
+              y2={wall.y2}
+              stroke="#e74c3c"
+              strokeWidth={wallThickness}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Outer boundary */}
+          <rect
+            x={wallThickness / 2}
+            y={wallThickness / 2}
+            width={svgWidth - wallThickness}
+            height={svgHeight - wallThickness}
+            fill="none"
+            stroke="#2c3e50"
+            strokeWidth={wallThickness}
+          />
+          
+          {/* Reachability levels */}
+          {cairoData.map(({ row, col, cx, cy, reachLevel }) =>
+            reachLevel !== null && (
+              <text
+                key={`level-${row}-${col}`}
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontWeight="bold"
+                fontSize={cellSize > 30 ? "14px" : "10px"}
+                style={{
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {reachLevel === -1 ? "∞" : reachLevel}
+              </text>
+            )
+          )}
+        </svg>
+      </div>
+    );
+  }
+
   // Square grid rendering (original code)
 
   return (
@@ -1223,6 +1527,7 @@ export const Controls: React.FC<ControlsProps> = ({
               <option value="square">Square</option>
               <option value="hex">Hex</option>
               <option value="octagon">Octagon</option>
+              <option value="cairo">Cairo</option>
             </select>
           </label>
         )}

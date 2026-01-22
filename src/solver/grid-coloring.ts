@@ -54,9 +54,9 @@ function getEffectiveColor(color: number): number {
 }
 
 /**
- * Grid type - square, hex, or octagon
+ * Grid type - square, hex, octagon, or cairo
  */
-export type GridType = "square" | "hex" | "octagon";
+export type GridType = "square" | "hex" | "octagon" | "cairo";
 
 /**
  * Represents a point in the grid
@@ -187,6 +187,67 @@ function getOctagonNeighbors(p: GridPoint, width: number, height: number): GridP
 }
 
 /**
+ * Get the Cairo pentagon type (0-3) based on position.
+ * The four types correspond to four rotations of the pentagon.
+ * Type is determined by (row % 2, col % 2):
+ *   Type 0: (0, 0) - even row, even col
+ *   Type 1: (0, 1) - even row, odd col  
+ *   Type 2: (1, 0) - odd row, even col
+ *   Type 3: (1, 1) - odd row, odd col
+ */
+export function getCairoType(row: number, col: number): number {
+  return (row % 2) * 2 + (col % 2);
+}
+
+/**
+ * Get the 5-neighbors of a point for Cairo pentagon grid within bounds.
+ * 
+ * Cairo pentagons have 5 neighbors each. The neighbors depend on the type (rotation)
+ * of the pentagon, which is determined by (row % 2, col % 2).
+ * 
+ * Each type has the 4 cardinal neighbors plus one diagonal extra:
+ *   Type 0 (even row, even col): N, S, E, W + NW
+ *   Type 1 (even row, odd col):  N, S, E, W + NE
+ *   Type 2 (odd row, even col):  N, S, E, W + SW
+ *   Type 3 (odd row, odd col):   N, S, E, W + SE
+ */
+function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
+  const neighbors: GridPoint[] = [];
+  const type = getCairoType(p.row, p.col);
+  
+  // Cardinal directions (shared by all types)
+  const cardinalDeltas = [
+    [-1, 0],  // N
+    [1, 0],   // S
+    [0, -1],  // W
+    [0, 1],   // E
+  ];
+  
+  // Extra diagonal neighbor depends on type
+  let extraDelta: [number, number];
+  switch (type) {
+    case 0: extraDelta = [-1, -1]; break; // NW
+    case 1: extraDelta = [-1, 1]; break;  // NE
+    case 2: extraDelta = [1, -1]; break;  // SW
+    case 3: extraDelta = [1, 1]; break;   // SE
+    default: extraDelta = [-1, -1];
+  }
+  
+  // Add all neighbors (cardinal + extra)
+  const allDeltas = [...cardinalDeltas, extraDelta];
+  
+  for (const [dr, dc] of allDeltas) {
+    const nr = p.row + dr;
+    const nc = p.col + dc;
+    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
+      neighbors.push({ row: nr, col: nc });
+    }
+  }
+
+  return neighbors;
+}
+
+/**
  * Get neighbors based on grid type
  */
 function getNeighbors(p: GridPoint, width: number, height: number, gridType: GridType = "square"): GridPoint[] {
@@ -195,6 +256,9 @@ function getNeighbors(p: GridPoint, width: number, height: number, gridType: Gri
   }
   if (gridType === "octagon") {
     return getOctagonNeighbors(p, width, height);
+  }
+  if (gridType === "cairo") {
+    return getCairoNeighbors(p, width, height);
   }
   return getSquareNeighbors(p, width, height);
 }
@@ -307,6 +371,15 @@ export function solveGridColoring(
 ): GridSolution | null {
   const { width, height, colors } = grid;
   const gridType = options?.gridType ?? "square";
+
+  // ============================================
+  // CAIRO GRID: Not yet supported by solver
+  // ============================================
+  // Cairo tiling has complex adjacency rules that the solver doesn't handle yet.
+  // Return null to indicate unsatisfiable/unsupported.
+  if (gridType === "cairo") {
+    return null;
+  }
 
   // ============================================
   // FAST PATH: All-blank grid optimization

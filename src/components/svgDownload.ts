@@ -244,6 +244,97 @@ export function downloadSolutionSVG(
 
     svgContent += `</svg>`;
 
+  } else if (gridType === "cairo") {
+    // Cairo pentagon grid SVG rendering
+    const padding = wallThickness;
+    const svgWidth = gridWidth * cellSize + padding * 2;
+    const svgHeight = gridHeight * cellSize + padding * 2;
+
+    // Cairo type helper
+    const getCairoType = (row: number, col: number): number => {
+      return (row % 2) * 2 + (col % 2);
+    };
+
+    // Create pentagon path based on type
+    const createCairoPentagonPath = (cx: number, cy: number, type: number, size: number): string => {
+      const s = size * 0.45;
+      const h = s * 1.2;
+      const w = s * 0.8;
+      
+      let points: [number, number][];
+      
+      switch (type) {
+        case 0:
+          points = [
+            [cx - w, cy - h],
+            [cx + s, cy - s*0.3],
+            [cx + s, cy + s*0.5],
+            [cx - s*0.3, cy + h*0.7],
+            [cx - h*0.8, cy + s*0.1],
+          ];
+          break;
+        case 1:
+          points = [
+            [cx + w, cy - h],
+            [cx - s, cy - s*0.3],
+            [cx - s, cy + s*0.5],
+            [cx + s*0.3, cy + h*0.7],
+            [cx + h*0.8, cy + s*0.1],
+          ];
+          break;
+        case 2:
+          points = [
+            [cx - w, cy + h],
+            [cx + s, cy + s*0.3],
+            [cx + s, cy - s*0.5],
+            [cx - s*0.3, cy - h*0.7],
+            [cx - h*0.8, cy - s*0.1],
+          ];
+          break;
+        case 3:
+        default:
+          points = [
+            [cx + w, cy + h],
+            [cx - s, cy + s*0.3],
+            [cx - s, cy - s*0.5],
+            [cx + s*0.3, cy - h*0.7],
+            [cx + h*0.8, cy - s*0.1],
+          ];
+          break;
+      }
+      
+      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+    };
+
+    svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
+    svgContent += `  <rect width="${svgWidth}" height="${svgHeight}" fill="#1a1a1a" />\n`;
+    svgContent += `  <defs>\n`;
+    svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
+    svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
+    svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+    svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+    svgContent += `    </pattern>\n`;
+    svgContent += `  </defs>\n`;
+
+    // Render pentagons
+    const cairoUnit = cellSize * 0.9;
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        const cx = padding + cellSize / 2 + col * cellSize;
+        const cy = padding + cellSize / 2 + row * cellSize;
+        const type = getCairoType(row, col);
+        const path = createCairoPentagonPath(cx, cy, type, cairoUnit);
+        const color = solution.assignedColors[row][col];
+        const isHatch = color === HATCH_COLOR;
+        const fill = isHatch ? "url(#hatchPattern)" : getColor(row, col);
+        svgContent += `  <path d="${path}" fill="${fill}" stroke="#333" stroke-width="0.5" />\n`;
+      }
+    }
+
+    // Add outer border
+    svgContent += `  <rect x="${wallThickness / 2}" y="${wallThickness / 2}" width="${svgWidth - wallThickness}" height="${svgHeight - wallThickness}" fill="none" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+    svgContent += `</svg>`;
+
   } else {
     // Square grid SVG rendering
     const svgWidth = gridWidth * cellSize + wallThickness;
