@@ -258,7 +258,51 @@ export function downloadSolutionSVG(
       }
     }
 
-    // Render bridge connections
+    // Render walls FIRST (for Cairo-like shared edges only)
+    const processedEdges = new Set<string>();
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        const tile = getCairoTile(row, col);
+        const neighbors = getCairoBridgeNeighborsWithDirection(row, col);
+        const parityCol = col % 2;
+        const parityRow = row % 2;
+        
+        for (const [nRow, nCol, direction] of neighbors) {
+          if (nRow < 0 || nRow >= gridHeight || nCol < 0 || nCol >= gridWidth) {
+            continue;
+          }
+          
+          const edgeKey = row < nRow || (row === nRow && col < nCol)
+            ? `${row},${col}-${nRow},${nCol}`
+            : `${nRow},${nCol}-${row},${col}`;
+            
+          if (processedEdges.has(edgeKey)) {
+            continue;
+          }
+          processedEdges.add(edgeKey);
+          
+          // Only draw walls for shared-edge neighbors (cardinal + Cairo's diagonal)
+          const isCardinal = direction === "N" || direction === "S" || direction === "E" || direction === "W";
+          let isCairoDiagonal = false;
+          if (parityCol === 0 && parityRow === 0 && direction === "SW") isCairoDiagonal = true;
+          else if (parityCol === 1 && parityRow === 0 && direction === "NW") isCairoDiagonal = true;
+          else if (parityCol === 0 && parityRow === 1 && direction === "SE") isCairoDiagonal = true;
+          else if (parityCol === 1 && parityRow === 1 && direction === "NE") isCairoDiagonal = true;
+          
+          if ((isCardinal || isCairoDiagonal) && hasWall(row, col, nRow, nCol)) {
+            const neighborTile = getCairoTile(nRow, nCol);
+            const sharedEdge = findSharedEdge(tile, neighborTile);
+            
+            if (sharedEdge) {
+              const [p1, p2] = sharedEdge.map(toSvg);
+              svgContent += `  <line x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0]}" y2="${p2[1]}" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
+            }
+          }
+        }
+      }
+    }
+
+    // Render bridge connections ON TOP of walls
     const bridgeBandWidth = cellSize * 0.08;
     const processedBridges = new Set<string>();
     
@@ -309,20 +353,30 @@ export function downloadSolutionSVG(
           const neighborTile = getCairoTile(nRow, nCol);
           const centroid2 = toSvg(polyCentroid(neighborTile));
           
-          // Create a thin band between the two centroids
+          // Create a thin band covering only the middle 30% of the trajectory
           const dx = centroid2[0] - centroid1[0];
           const dy = centroid2[1] - centroid1[1];
           const len = Math.sqrt(dx * dx + dy * dy);
+          
+          // Unit vector along the bridge direction
+          const unitX = dx / len;
+          const unitY = dy / len;
+          
+          // Start at 35% and end at 65% of the trajectory (middle 30%)
+          const startX = centroid1[0] + unitX * len * 0.35;
+          const startY = centroid1[1] + unitY * len * 0.35;
+          const endX = centroid1[0] + unitX * len * 0.65;
+          const endY = centroid1[1] + unitY * len * 0.65;
           
           // Perpendicular unit vector
           const perpX = -dy / len * bridgeBandWidth / 2;
           const perpY = dx / len * bridgeBandWidth / 2;
           
-          // Four corners of the bridge band
-          const c1x = centroid1[0] + perpX, c1y = centroid1[1] + perpY;
-          const c2x = centroid1[0] - perpX, c2y = centroid1[1] - perpY;
-          const c3x = centroid2[0] - perpX, c3y = centroid2[1] - perpY;
-          const c4x = centroid2[0] + perpX, c4y = centroid2[1] + perpY;
+          // Four corners of the bridge band (shortened)
+          const c1x = startX + perpX, c1y = startY + perpY;
+          const c2x = startX - perpX, c2y = startY - perpY;
+          const c3x = endX - perpX, c3y = endY - perpY;
+          const c4x = endX + perpX, c4y = endY + perpY;
           
           const color = solution.assignedColors[row][col];
           const isHatch = color === HATCH_COLOR;
@@ -332,50 +386,6 @@ export function downloadSolutionSVG(
           // Long edge outlines
           svgContent += `  <line x1="${c1x}" y1="${c1y}" x2="${c4x}" y2="${c4y}" stroke="${WALL_COLOR}" stroke-width="0.5" />\n`;
           svgContent += `  <line x1="${c2x}" y1="${c2y}" x2="${c3x}" y2="${c3y}" stroke="${WALL_COLOR}" stroke-width="0.5" />\n`;
-        }
-      }
-    }
-
-    // Render walls (for Cairo-like shared edges only)
-    const processedEdges = new Set<string>();
-    for (let row = 0; row < gridHeight; row++) {
-      for (let col = 0; col < gridWidth; col++) {
-        const tile = getCairoTile(row, col);
-        const neighbors = getCairoBridgeNeighborsWithDirection(row, col);
-        const parityCol = col % 2;
-        const parityRow = row % 2;
-        
-        for (const [nRow, nCol, direction] of neighbors) {
-          if (nRow < 0 || nRow >= gridHeight || nCol < 0 || nCol >= gridWidth) {
-            continue;
-          }
-          
-          const edgeKey = row < nRow || (row === nRow && col < nCol)
-            ? `${row},${col}-${nRow},${nCol}`
-            : `${nRow},${nCol}-${row},${col}`;
-            
-          if (processedEdges.has(edgeKey)) {
-            continue;
-          }
-          processedEdges.add(edgeKey);
-          
-          // Only draw walls for shared-edge neighbors (cardinal + Cairo's diagonal)
-          const isCardinal = direction === "N" || direction === "S" || direction === "E" || direction === "W";
-          let isCairoDiagonal = false;
-          if (parityCol === 0 && parityRow === 0 && direction === "SW") isCairoDiagonal = true;
-          else if (parityCol === 1 && parityRow === 0 && direction === "NW") isCairoDiagonal = true;
-          else if (parityCol === 0 && parityRow === 1 && direction === "SE") isCairoDiagonal = true;
-          else if (parityCol === 1 && parityRow === 1 && direction === "NE") isCairoDiagonal = true;
-          
-          if ((isCardinal || isCairoDiagonal) && hasWall(row, col, nRow, nCol)) {
-            const neighborTile = getCairoTile(nRow, nCol);
-            const sharedEdge = findSharedEdge(tile, neighborTile);
-            
-            if (sharedEdge) {
-              const [p1, p2] = sharedEdge.map(toSvg);
-              svgContent += `  <line x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0]}" y2="${p2[1]}" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
-            }
-          }
         }
       }
     }

@@ -1063,23 +1063,34 @@ export const Grid: React.FC<GridProps> = ({
           const neighborTile = getCairoTile(nRow, nCol);
           const centroid2 = toSvg(polyCentroid(neighborTile));
           
-          // Create a thin band between the two centroids
+          // Create a thin band covering only the middle 30% of the trajectory
           const dx = centroid2[0] - centroid1[0];
           const dy = centroid2[1] - centroid1[1];
           const len = Math.sqrt(dx * dx + dy * dy);
+          
+          // Unit vector along the bridge direction
+          const unitX = dx / len;
+          const unitY = dy / len;
+          
+          // Start at 35% and end at 65% of the trajectory (middle 30%)
+          const startX = centroid1[0] + unitX * len * 0.35;
+          const startY = centroid1[1] + unitY * len * 0.35;
+          const endX = centroid1[0] + unitX * len * 0.65;
+          const endY = centroid1[1] + unitY * len * 0.65;
           
           // Perpendicular unit vector
           const perpX = -dy / len * bridgeBandWidth / 2;
           const perpY = dx / len * bridgeBandWidth / 2;
           
-          // Four corners of the bridge band
-          const c1x = centroid1[0] + perpX, c1y = centroid1[1] + perpY;
-          const c2x = centroid1[0] - perpX, c2y = centroid1[1] - perpY;
-          const c3x = centroid2[0] - perpX, c3y = centroid2[1] - perpY;
-          const c4x = centroid2[0] + perpX, c4y = centroid2[1] + perpY;
+          // Four corners of the bridge band (shortened)
+          const c1x = startX + perpX, c1y = startY + perpY;
+          const c2x = startX - perpX, c2y = startY - perpY;
+          const c3x = endX - perpX, c3y = endY - perpY;
+          const c4x = endX + perpX, c4y = endY + perpY;
           
           const bridgePath = `M ${c1x} ${c1y} L ${c2x} ${c2y} L ${c3x} ${c3y} L ${c4x} ${c4y} Z`;
-          const bridgeFill = getCellColor(row, col);
+          // In sketchpad mode, don't fill with color since we don't know what it will be
+          const bridgeFill = showSolutionColors ? getCellColor(row, col) : "none";
           
           bridges.push({
             path: bridgePath,
@@ -1136,7 +1147,21 @@ export const Grid: React.FC<GridProps> = ({
             />
           ))}
           
-          {/* Second pass: render bridge connections (thin bands) */}
+          {/* Second pass: render all walls */}
+          {cairoWalls.map((wall, i) => (
+            <line
+              key={`wall-${i}`}
+              x1={wall.x1}
+              y1={wall.y1}
+              x2={wall.x2}
+              y2={wall.y2}
+              stroke={WALL_COLOR}
+              strokeWidth={wallThickness}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Third pass: render bridge connections on top of walls (thin bands) */}
           {bridges.map((bridge, i) => (
             <g key={`bridge-${i}`}>
               <path
@@ -1162,20 +1187,6 @@ export const Grid: React.FC<GridProps> = ({
                 strokeWidth={0.5}
               />
             </g>
-          ))}
-          
-          {/* Third pass: render all walls on top */}
-          {cairoWalls.map((wall, i) => (
-            <line
-              key={`wall-${i}`}
-              x1={wall.x1}
-              y1={wall.y1}
-              x2={wall.x2}
-              y2={wall.y2}
-              stroke={WALL_COLOR}
-              strokeWidth={wallThickness}
-              strokeLinecap="round"
-            />
           ))}
           
           {/* Fourth pass: render reachability levels on top of everything */}
