@@ -10,6 +10,7 @@ interface SketchpadGridProps {
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
   gridType?: GridType;
+  showCoordinates?: boolean;
 }
 
 /**
@@ -24,6 +25,7 @@ export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
   onCellDrag,
   cellSize = 40,
   gridType = "square",
+  showCoordinates = false,
 }) => {
   return (
     <Grid
@@ -35,6 +37,7 @@ export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
       cellSize={cellSize}
       gridType={gridType}
       viewMode="sketchpad"
+      showCoordinates={showCoordinates}
     />
   );
 };

@@ -79,6 +79,7 @@ interface GridProps {
   gridType?: GridType;
   viewMode?: "sketchpad" | "solution";
   showReachabilityLevels?: boolean;
+  showCoordinates?: boolean;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -91,6 +92,7 @@ export const Grid: React.FC<GridProps> = ({
   gridType = "square",
   viewMode = "sketchpad",
   showReachabilityLevels = false,
+  showCoordinates = false,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -1099,6 +1101,26 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Coordinates display */}
+          {showCoordinates && cairoData.map(({ row, col, cx, cy }) => (
+            <text
+              key={`coord-${row}-${col}`}
+              x={cx}
+              y={cy}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fill="#fff"
+              fontWeight="bold"
+              fontSize={cellSize > 30 ? "10px" : "8px"}
+              style={{
+                textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
+                pointerEvents: "none",
+              }}
+            >
+              {`${row},${col}`}
+            </text>
+          ))}
         </svg>
       </div>
     );
@@ -1367,6 +1389,8 @@ interface ControlsProps {
   grid?: { colors: (number | null)[][] };
   reachabilityK?: number;
   onReachabilityKChange?: (k: number) => void;
+  showCoordinates?: boolean;
+  onShowCoordinatesChange?: (show: boolean) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -1394,6 +1418,8 @@ export const Controls: React.FC<ControlsProps> = ({
   grid,
   reachabilityK = 0,
   onReachabilityKChange,
+  showCoordinates = false,
+  onShowCoordinatesChange,
 }) => {
   // solution is received but not used in Controls (SVG download moved to solution panel)
   void _solution;
@@ -1515,6 +1541,18 @@ export const Controls: React.FC<ControlsProps> = ({
               <option value="octagon">Octagon</option>
               <option value="cairo">Cairo</option>
             </select>
+          </label>
+        )}
+        {onShowCoordinatesChange && (
+          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ minWidth: "50px" }}>Show:</span>
+            <input
+              type="checkbox"
+              checked={showCoordinates}
+              onChange={(e) => onShowCoordinatesChange(e.target.checked)}
+              style={{ cursor: "pointer" }}
+            />
+            <span style={{ fontSize: "14px" }}>Coordinates (row,col)</span>
           </label>
         )}
         {onMinWallsProportionChange && (

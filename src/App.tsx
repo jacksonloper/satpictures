@@ -76,6 +76,7 @@ function App() {
   const [gridType, setGridType] = useState<GridType>("square");
   const [reachabilityK, setReachabilityK] = useState(0);
   const [showReachabilityLevels, setShowReachabilityLevels] = useState(false);
+  const [showCoordinates, setShowCoordinates] = useState(false);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -399,6 +400,8 @@ function App() {
               grid={grid}
               reachabilityK={reachabilityK}
               onReachabilityKChange={setReachabilityK}
+              showCoordinates={showCoordinates}
+              onShowCoordinatesChange={setShowCoordinates}
             />
 
             <h3 style={{ marginTop: "16px" }}>Colors</h3>
@@ -418,6 +421,7 @@ function App() {
                 onCellDrag={handleCellDrag}
                 cellSize={40}
                 gridType={gridType}
+                showCoordinates={showCoordinates}
               />
             </div>
           </div>
