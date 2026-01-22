@@ -233,81 +233,6 @@ function bitsNeeded(n: number): number {
 }
 
 /**
- * Add constraint that binary number represented by bits >= minValue
- * bits[0] is LSB, bits[n-1] is MSB
- */
-function addGreaterOrEqualConstraint(
-  builder: FormulaBuilder,
-  bits: number[],
-  minValue: number
-): void {
-  const numBits = bits.length;
-  
-  // Convert minValue to binary array (LSB first)
-  const minBits: boolean[] = [];
-  let temp = minValue;
-  for (let i = 0; i < numBits; i++) {
-    minBits.push((temp & 1) === 1);
-    temp >>= 1;
-  }
-  
-  // If minValue >= 2^numBits, it's unsatisfiable
-  if (temp > 0) {
-    builder.addUnit(bits[0]); // Force contradiction
-    builder.addUnit(-bits[0]);
-    return;
-  }
-  
-  // Use sequential encoding from MSB to LSB
-  // geq[i] = true iff bits[i..n-1] >= minBits[i..n-1]
-  // geq[n-1] = bits[n-1] OR NOT minBits[n-1]
-  // geq[i] = (bits[i] AND NOT minBits[i]) OR (bits[i] == minBits[i] AND geq[i+1])
-  //        = (bits[i] > minBits[i]) OR (bits[i] == minBits[i] AND geq[i+1])
-  
-  const geqVars: number[] = [];
-  for (let i = 0; i < numBits; i++) {
-    geqVars.push(builder.createNamedVariable(`geq_${i}`));
-  }
-  
-  // Process from MSB (index numBits-1) down to LSB (index 0)
-  for (let i = numBits - 1; i >= 0; i--) {
-    const bit = bits[i];
-    const minBit = minBits[i];
-    
-    if (i === numBits - 1) {
-      // MSB: geq[i] = bit >= minBit = bit OR NOT minBit
-      if (minBit) {
-        // minBit=1: geq ↔ bit
-        builder.solver.addClause([-geqVars[i], bit]);
-        builder.solver.addClause([geqVars[i], -bit]);
-      } else {
-        // minBit=0: geq is always true
-        builder.addUnit(geqVars[i]);
-      }
-    } else {
-      // geq[i] = (bit > minBit) OR (bit == minBit AND geq[i+1])
-      if (minBit) {
-        // minBit=1: bit > minBit is impossible
-        // bit == minBit means bit=1
-        // geq[i] = bit AND geq[i+1]
-        builder.solver.addClause([-geqVars[i], bit]);
-        builder.solver.addClause([-geqVars[i], geqVars[i + 1]]);
-        builder.solver.addClause([geqVars[i], -bit, -geqVars[i + 1]]);
-      } else {
-        // minBit=0: bit > minBit means bit=1
-        // bit == minBit means bit=0
-        // geq[i] = bit OR (NOT bit AND geq[i+1]) = bit OR geq[i+1]
-        builder.solver.addClause([geqVars[i], -bit, -geqVars[i + 1]]);
-        builder.solver.addClause([-geqVars[i], bit, geqVars[i + 1]]);
-      }
-    }
-  }
-  
-  // Final constraint: geq[0] must be true
-  builder.addUnit(geqVars[0]);
-}
-
-/**
  * Create a key for a cell's color variable
  */
 function colorVarKey(row: number, col: number, color: number): string {
@@ -964,6 +889,17 @@ export function solveGridColoring(
   // ============================================
   // RED_HATCH_COLOR cells must have reachability > K from RED_DOT_COLOR origin
   // This is computed over all edges (any color can participate in the reachability path)
+  //
+  // We use the standard bounded-reachability SAT encoding:
+  //   R[i][v] = "v is reachable from origin using kept edges in at most i steps"
+  //
+  // Constraints:
+  //   Base: R[0][origin] = true, R[0][other] = false
+  //   Step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor of v} (R[i-1][u] ∧ edge(u,v))
+  //   Forbidden: For each RED_HATCH cell h: ¬R[K][h] (not reachable in ≤ K steps)
+  //
+  // This correctly enforces that the shortest-path distance from origin to h is > K.
+  
   const reachabilityK = options?.reachabilityK ?? 0;
   
   // Find all RED_HATCH_COLOR cells (these are fixed, not assignable to blank cells)
@@ -977,117 +913,99 @@ export function solveGridColoring(
   }
 
   // Only add reachability constraints if we have RED_DOT_COLOR and RED_HATCH_COLOR cells and K > 0
-  // We use a simpler approach: require level difference of at most 1 between adjacent cells
-  // Then check the constraint post-solve via BFS
-  let reachLevelVars: Map<string, number[]> | null = null;
-  const reachNumBits = bitsNeeded(width * height + 1);
-  
   if (redDotCells.length > 0 && redHatchCells.length > 0 && reachabilityK > 0) {
-    reachLevelVars = new Map<string, number[]>();
+    const origin = redDotCells[0]; // Guaranteed at most one by earlier check
     
-    // Create reachability level variables for all cells
+    // R[i][row,col] variables: reachable in at most i steps
+    // We only need levels 0 through K (to check if reachable in ≤ K steps)
+    const R: Map<string, number>[] = [];
+    for (let step = 0; step <= reachabilityK; step++) {
+      R.push(new Map<string, number>());
+    }
+    
+    // Create variables for all cells at all steps
+    for (let step = 0; step <= reachabilityK; step++) {
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          const key = `${row},${col}`;
+          const varName = `R_${step}_${row}_${col}`;
+          R[step].set(key, builder.createNamedVariable(varName));
+        }
+      }
+    }
+    
+    // Base case (step 0): only origin is reachable
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const key = `${row},${col}`;
-        const bits = createBinaryIntVariables(builder, `reach_level_${row},${col}`, reachNumBits);
-        reachLevelVars.set(key, bits);
+        const r0 = R[0].get(key)!;
+        if (row === origin.row && col === origin.col) {
+          // R[0][origin] = true
+          builder.addUnit(r0);
+        } else {
+          // R[0][other] = false
+          builder.addUnit(-r0);
+        }
       }
     }
     
-    // Origin (RED_DOT_COLOR) has level 0
-    for (const cell of redDotCells) {
-      const key = `${cell.row},${cell.col}`;
-      const bits = reachLevelVars.get(key)!;
-      for (const bit of bits) {
-        builder.addUnit(-bit);
-      }
-    }
-    
-    // For each non-origin cell: it must have at least one neighbor with level = current - 1
-    // and an edge to that neighbor (parent relationship in BFS tree)
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        if (colors[row][col] === RED_DOT_COLOR) continue;
-        
-        const vKey = `${row},${col}`;
-        const vBits = reachLevelVars.get(vKey)!;
-        const neighbors = getNeighbors({ row, col }, width, height, gridType);
-        
-        // Create helper variables for "neighbor n is parent (has level = myLevel - 1 and edge exists)"
-        const parentOptions: number[] = [];
-        
-        for (const n of neighbors) {
-          const nKey = `${n.row},${n.col}`;
-          const nBits = reachLevelVars.get(nKey)!;
-          const eKey = edgeKey({ row, col }, n);
-          const edgeVar = edgeVars.get(eKey);
-          if (edgeVar === undefined) continue;
+    // Inductive step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
+    // Encoding:
+    //   R[i][v] → R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
+    //   (R[i-1][v] OR any neighbor term) → R[i][v]
+    for (let step = 1; step <= reachabilityK; step++) {
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          const key = `${row},${col}`;
+          const rCurr = R[step].get(key)!;
+          const rPrev = R[step - 1].get(key)!;
+          const neighbors = getNeighbors({ row, col }, width, height, gridType);
           
-          // Create parent variable: "n is parent of v"
-          const pVar = builder.createNamedVariable(`reach_parent_${n.row},${n.col}->${row},${col}`);
-          parentOptions.push(pVar);
+          // Collect all "reachable through neighbor" terms
+          // For each neighbor u: reachThroughU[u] = R[i-1][u] ∧ edge(u,v)
+          const reachThroughNeighbor: number[] = [];
           
-          // pVar implies edge exists
-          builder.addImplies(pVar, edgeVar);
-          
-          // pVar implies level[v] = level[n] + 1
-          // Encode this using half-adder style:
-          // level[v] = level[n] + 1
-          // For each bit position, under pVar:
-          //   vBits[0] = NOT nBits[0]
-          //   carry[0] = nBits[0]
-          //   vBits[i] = nBits[i] XOR carry[i-1]
-          //   carry[i] = nBits[i] AND carry[i-1]
-          
-          // Previous implementation was correct, but let's simplify
-          // We use the fact that level + 1:
-          // If level ends in 0, level+1 ends in 1 (flip last bit)
-          // If level ends in 1, level+1 ends in 0 and carry propagates
-          
-          let carryVar = builder.createNamedVariable(`carry_${n.row},${n.col}->${row},${col}_init`);
-          // Initial carry is 1 (we're adding 1)
-          builder.solver.addClause([-pVar, carryVar]);
-          
-          for (let i = 0; i < reachNumBits; i++) {
-            const nextCarry = i + 1 < reachNumBits 
-              ? builder.createNamedVariable(`carry_${n.row},${n.col}->${row},${col}_${i}`)
-              : null;
+          for (const n of neighbors) {
+            const nKey = `${n.row},${n.col}`;
+            const rPrevN = R[step - 1].get(nKey)!;
+            const eKey = edgeKey({ row, col }, n);
+            const edgeVar = edgeVars.get(eKey);
+            if (edgeVar === undefined) continue;
             
-            // vBits[i] = nBits[i] XOR carryVar
-            // pVar → (vBits[i] ↔ (nBits[i] XOR carryVar))
-            builder.solver.addClause([-pVar, -vBits[i], nBits[i], carryVar]);
-            builder.solver.addClause([-pVar, -vBits[i], -nBits[i], -carryVar]);
-            builder.solver.addClause([-pVar, vBits[i], -nBits[i], carryVar]);
-            builder.solver.addClause([-pVar, vBits[i], nBits[i], -carryVar]);
+            // Create helper variable: reachThrough = R[i-1][n] ∧ edge(n,v)
+            const reachThrough = builder.createNamedVariable(
+              `reach_through_${step}_${n.row}_${n.col}_to_${row}_${col}`
+            );
+            reachThroughNeighbor.push(reachThrough);
             
-            // nextCarry = nBits[i] AND carryVar
-            if (nextCarry !== null) {
-              builder.solver.addClause([-pVar, -nextCarry, nBits[i]]);
-              builder.solver.addClause([-pVar, -nextCarry, carryVar]);
-              builder.solver.addClause([-pVar, nextCarry, -nBits[i], -carryVar]);
-              carryVar = nextCarry;
-            }
+            // reachThrough → R[i-1][n]
+            builder.solver.addClause([-reachThrough, rPrevN]);
+            // reachThrough → edge
+            builder.solver.addClause([-reachThrough, edgeVar]);
+            // (R[i-1][n] ∧ edge) → reachThrough
+            builder.solver.addClause([-rPrevN, -edgeVar, reachThrough]);
           }
-        }
-        
-        // At most one parent (tree structure)
-        if (parentOptions.length > 0) {
-          builder.addAtMostOne(parentOptions);
-          // At least one parent (cell is reachable)
-          builder.addOr(parentOptions);
+          
+          // R[i][v] ↔ R[i-1][v] OR ⋁ reachThroughNeighbor
+          // Forward: (R[i-1][v] OR any reachThrough) → R[i][v]
+          builder.solver.addClause([-rPrev, rCurr]); // R[i-1][v] → R[i][v]
+          for (const rt of reachThroughNeighbor) {
+            builder.solver.addClause([-rt, rCurr]); // reachThrough → R[i][v]
+          }
+          
+          // Backward: R[i][v] → (R[i-1][v] OR ⋁ reachThroughNeighbor)
+          const backwardClause = [-rCurr, rPrev, ...reachThroughNeighbor];
+          builder.solver.addClause(backwardClause);
         }
       }
     }
     
-    // RED_HATCH cells must have level > K (i.e., level >= K + 1)
+    // Constraint: RED_HATCH cells must NOT be reachable in ≤ K steps
+    // i.e., ¬R[K][h] for each RED_HATCH cell h
     for (const cell of redHatchCells) {
       const key = `${cell.row},${cell.col}`;
-      const bits = reachLevelVars.get(key)!;
-      const minLevel = reachabilityK + 1;
-      
-      // Encode level >= minLevel using a cleaner approach
-      // Create a constraint that the binary number represented by bits is >= minLevel
-      addGreaterOrEqualConstraint(builder, bits, minLevel);
+      const rK = R[reachabilityK].get(key)!;
+      builder.addUnit(-rK); // NOT reachable in ≤ K steps
     }
   }
 
