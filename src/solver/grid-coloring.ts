@@ -463,6 +463,8 @@ export function solveGridColoring(
   // 1b. DEGREE CONSTRAINTS (1-3 edges per cell)
   // ============================================
   // Each cell must have between 1 and 3 edges (passages)
+  // Exception: cells that are isolated (all neighbors are fixed to different colors) 
+  // don't need any edges - they form valid singleton regions
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       // Get all edge variables incident to this cell
@@ -477,8 +479,33 @@ export function solveGridColoring(
       }
 
       if (incidentEdges.length > 0) {
-        // At least 1 edge: OR of all incident edges
-        builder.addOr(incidentEdges);
+        // Check if this cell could possibly have a same-color neighbor
+        // A cell is "potentially connected" if:
+        // - It's blank (could be any color, so can match any neighbor)
+        // - OR it has at least one neighbor that is blank or same color
+        const cellColor = colors[row][col];
+        const effectiveCellColor = cellColor !== null ? getEffectiveColor(cellColor) : null;
+        
+        let hasPotentialSameColorNeighbor = effectiveCellColor === null; // blank cells can match any neighbor
+        if (!hasPotentialSameColorNeighbor && effectiveCellColor !== null) {
+          // Fixed cell - check if any neighbor could be the same color
+          for (const n of neighbors) {
+            const neighborColor = colors[n.row][n.col];
+            const effectiveNeighborColor = neighborColor !== null ? getEffectiveColor(neighborColor) : null;
+            if (effectiveNeighborColor === null || effectiveNeighborColor === effectiveCellColor) {
+              // Neighbor is blank (could match) or has same color
+              hasPotentialSameColorNeighbor = true;
+              break;
+            }
+          }
+        }
+        
+        // Only require at least 1 edge if the cell could have a same-color neighbor
+        // Isolated singleton cells (all neighbors are different fixed colors) don't need edges
+        if (hasPotentialSameColorNeighbor) {
+          // At least 1 edge: OR of all incident edges
+          builder.addOr(incidentEdges);
+        }
 
         // At most 3 edges: for each subset of 4 edges, at least one must be false
         // This means we forbid any 4 edges from being true simultaneously

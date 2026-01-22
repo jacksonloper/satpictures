@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
 import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
+import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
@@ -27,14 +28,29 @@ function createMazeSetupGrid(
   width: number,
   height: number
 ): ColorGrid {
+  // Maze setup for bounded reachability problem:
+  // - Orange hatch (HATCH_COLOR) all the way around the border (walls)
+  // - Red dot (RED_DOT_COLOR) at position (1, 0) - second row, first column (origin)
+  // - Red hatch (RED_HATCH_COLOR) at position (height-2, width-1) - penultimate row, last column (target)
+  // - All other interior cells: red (color 0)
+  // 
+  // This creates a maze where the solver must find a path from origin to target
+  // with distance > K through the red interior.
   return {
     width,
     height,
     colors: Array.from({ length: height }, (_, row) =>
-      Array.from({ length: width }, () => {
-        if (row === 0) return 0; // Top edge is color 0
-        if (row === height - 1) return 1; // Bottom edge is color 1
-        return 2; // Everything in between is color 2
+      Array.from({ length: width }, (_, col) => {
+        // Origin: second row, first column - red dot
+        if (row === 1 && col === 0) return RED_DOT_COLOR;
+        // Target: penultimate row, last column - red hatch
+        if (row === height - 2 && col === width - 1) return RED_HATCH_COLOR;
+        // Border cells (except origin and target): orange hatch (walls)
+        if (row === 0 || row === height - 1 || col === 0 || col === width - 1) {
+          return HATCH_COLOR;
+        }
+        // Interior: red
+        return 0;
       })
     ),
   };
