@@ -2,3 +2,4 @@ export { ColorPalette, Controls, Grid, COLORS, HATCH_COLOR, RED_DOT_COLOR, RED_H
 export { SketchpadGrid } from "./SketchpadGrid";
 export { SolutionGrid } from "./SolutionGrid";
 export { downloadSolutionSVG } from "./svgDownload";
+export * from "./gridConstants";
