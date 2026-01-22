@@ -861,9 +861,10 @@ export const Grid: React.FC<GridProps> = ({
       const type = getCairoType(row, col);
       const vertices = CAIRO_PENTAGONS[type];
       
-      // Hub position in unit coords: (col/2, row/2) where / is integer division
-      const hubX = Math.floor(col / 2);
-      const hubY = Math.floor(row / 2);
+      // Hub position in unit coords
+      // Swap row/col in hub calculation so (0,0) is at top-left
+      const hubX = Math.floor(row / 2);
+      const hubY = Math.floor(col / 2);
       
       // Convert vertices to pixel coordinates
       const points = vertices.map(([vx, vy]) => [
@@ -878,8 +879,9 @@ export const Grid: React.FC<GridProps> = ({
     const getCairoCenter = (row: number, col: number): [number, number] => {
       const type = getCairoType(row, col);
       const vertices = CAIRO_PENTAGONS[type];
-      const hubX = Math.floor(col / 2);
-      const hubY = Math.floor(row / 2);
+      // Swap row/col in hub calculation so (0,0) is at top-left
+      const hubX = Math.floor(row / 2);
+      const hubY = Math.floor(col / 2);
       
       // Calculate centroid of the pentagon
       let sumX = 0, sumY = 0;
@@ -898,12 +900,12 @@ export const Grid: React.FC<GridProps> = ({
       const type = getCairoType(row, col);
       
       // Deltas as [row_delta, col_delta] for each type - must match solver
-      // type = (col % 2) * 2 + (row % 2)
+      // type = (row % 2) * 2 + (col % 2)
       const deltas: { [key: number]: [number, number][] } = {
-        0: [[-2, 1], [-1, 1], [0, 1], [1, 0], [1, 2]],
-        1: [[-2, 1], [-1, -2], [-1, -1], [-1, 0], [0, 1]],
-        2: [[0, -1], [1, 0], [1, 1], [1, 2], [2, -1]],
-        3: [[-1, -2], [-1, 0], [0, -1], [1, -1], [2, -1]],
+        0: [[0, 1], [1, -2], [1, -1], [1, 0], [2, 1]],
+        1: [[-2, -1], [-1, -1], [0, -1], [1, -2], [1, 0]],
+        2: [[-1, 0], [-1, 2], [0, 1], [1, 1], [2, 1]],
+        3: [[-2, -1], [-1, 0], [-1, 1], [-1, 2], [0, -1]],
       };
       
       return deltas[type].map(([dr, dc]) => [row + dr, col + dc, `${dr},${dc}`]);

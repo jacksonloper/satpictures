@@ -196,26 +196,26 @@ function getOctagonNeighbors(p: GridPoint, width: number, height: number): GridP
  *   Type 3: (1, 1) - odd row, odd col
  */
 export function getCairoType(row: number, col: number): number {
-  // Type is based on parity (col % 2, row % 2) to match Python reference
-  // where (i, j) uses i=col (horizontal) and j=row (vertical)
+  // Type is based on parity (row % 2, col % 2) 
+  // so that (0,0) is at top-left with increasing row going right and col going down
   // parity_rot = {(0,0): 0°, (1,0): 90°, (0,1): -90°, (1,1): 180°}
-  return (col % 2) * 2 + (row % 2);
+  return (row % 2) * 2 + (col % 2);
 }
 
 /**
  * Get the 5-neighbors of a point for Cairo pentagon grid within bounds.
  * 
  * Cairo pentagons have 5 neighbors each. The neighbors depend on the type (rotation)
- * of the pentagon, which is determined by (col % 2, row % 2) to match the Python reference.
+ * of the pentagon, which is determined by (row % 2, col % 2).
  * 
  * The adjacency pattern is derived from the actual Cairo tiling geometry where
  * pentagons are arranged in 2x2 groups sharing a common hub vertex.
  * 
- * Type mapping: type = (col % 2) * 2 + (row % 2)
- *   Type 0 (col%2=0, row%2=0): neighbors at deltas (-2,1), (-1,1), (0,1), (1,0), (1,2)
- *   Type 1 (col%2=0, row%2=1): neighbors at deltas (-2,1), (-1,-2), (-1,-1), (-1,0), (0,1)
- *   Type 2 (col%2=1, row%2=0): neighbors at deltas (0,-1), (1,0), (1,1), (1,2), (2,-1)
- *   Type 3 (col%2=1, row%2=1): neighbors at deltas (-1,-2), (-1,0), (0,-1), (1,-1), (2,-1)
+ * Type mapping: type = (row % 2) * 2 + (col % 2)
+ *   Type 0 (row%2=0, col%2=0): neighbors at deltas (0,1), (1,-2), (1,-1), (1,0), (2,1)
+ *   Type 1 (row%2=0, col%2=1): neighbors at deltas (-2,-1), (-1,-1), (0,-1), (1,-2), (1,0)
+ *   Type 2 (row%2=1, col%2=0): neighbors at deltas (-1,0), (-1,2), (0,1), (1,1), (2,1)
+ *   Type 3 (row%2=1, col%2=1): neighbors at deltas (-2,-1), (-1,0), (-1,1), (-1,2), (0,-1)
  */
 function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
   const neighbors: GridPoint[] = [];
@@ -223,12 +223,12 @@ function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoi
   
   // Deltas as [row_delta, col_delta] for each type
   // Derived from the actual Cairo tiling geometry
-  // type = (col % 2) * 2 + (row % 2)
+  // type = (row % 2) * 2 + (col % 2)
   const deltas: { [key: number]: [number, number][] } = {
-    0: [[-2, 1], [-1, 1], [0, 1], [1, 0], [1, 2]],
-    1: [[-2, 1], [-1, -2], [-1, -1], [-1, 0], [0, 1]],
-    2: [[0, -1], [1, 0], [1, 1], [1, 2], [2, -1]],
-    3: [[-1, -2], [-1, 0], [0, -1], [1, -1], [2, -1]],
+    0: [[0, 1], [1, -2], [1, -1], [1, 0], [2, 1]],
+    1: [[-2, -1], [-1, -1], [0, -1], [1, -2], [1, 0]],
+    2: [[-1, 0], [-1, 2], [0, 1], [1, 1], [2, 1]],
+    3: [[-2, -1], [-1, 0], [-1, 1], [-1, 2], [0, -1]],
   };
   
   for (const [dr, dc] of deltas[type]) {
