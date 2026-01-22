@@ -1,26 +1,33 @@
 import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridSolution, GridType } from "../solver";
 import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "../solver";
+import {
+  COLORS,
+  HATCH_BG_COLOR,
+  BLANK_COLOR,
+  WALL_COLOR,
+  DEFAULT_WALL_THICKNESS,
+  getHexDimensions,
+  getHexNeighbors,
+  createHexPath,
+  getHexCenter,
+  getHexWallSegment,
+  getOctagonDimensions,
+  createOctagonPath,
+  getCairoTile,
+  getCairoNeighborsWithDirection,
+  findSharedEdge,
+  createCairoTransformer,
+  polyCentroid,
+  calculateGridDimensions,
+} from "./gridConstants";
 
 // Re-export color constants for convenience
 export { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR };
-
-// Predefined color palette
-const COLORS = [
-  "#e74c3c", // red
-  "#3498db", // blue
-  "#2ecc71", // green
-  "#f39c12", // orange
-  "#9b59b6", // purple
-  "#1abc9c", // teal
-  "#e91e63", // pink
-  "#795548", // brown
-  "#607d8b", // gray-blue
-  "#00bcd4", // cyan
-];
+// Re-export COLORS for components that need it
+export { COLORS };
 
 // Blank cell appearance
-const BLANK_COLOR = "#f5f5f5";
 const BLANK_PATTERN = `repeating-linear-gradient(
   45deg,
   #e0e0e0,
@@ -30,7 +37,6 @@ const BLANK_PATTERN = `repeating-linear-gradient(
 )`;
 
 // Hatch cell appearance - crosshatch pattern on yellow background
-const HATCH_BG_COLOR = "#fffde7"; // light yellow
 const HATCH_PATTERN = `repeating-linear-gradient(
   45deg,
   #ff9800,
@@ -45,7 +51,7 @@ repeating-linear-gradient(
   transparent 2px,
   transparent 8px
 ),
-#fffde7`;
+${HATCH_BG_COLOR}`;
 
 // Red with dot appearance - red background with a white dot (origin for bounded reachability)
 const RED_DOT_BG_COLOR = "#e74c3c"; // red
@@ -148,139 +154,22 @@ export const Grid: React.FC<GridProps> = ({
     [solution, keptEdgeSet, grid]
   );
 
-  const wallThickness = 3;
+  const wallThickness = DEFAULT_WALL_THICKNESS;
   
   // Hex grid calculations
-  // Using pointy-topped hexagons with odd-r offset coordinates
-  // For pointy-topped hex: width = sqrt(3) * size, height = 2 * size
-  const hexSize = cellSize * 0.5; // radius from center to vertex
-  const hexWidth = Math.sqrt(3) * hexSize;
-  const hexHeight = 2 * hexSize;
-  const hexHorizSpacing = hexWidth;
-  const hexVertSpacing = hexHeight * 0.75;
+  const { hexSize, hexWidth, hexHorizSpacing, hexVertSpacing } = getHexDimensions(cellSize);
 
   // Octagon grid calculations
-  // Octagons are laid out on a square grid but with 8 neighbors
-  // In truncated square tiling, there are small squares between octagons at the corners
-  // We render diagonal bands through those squares (not the squares themselves)
-  // The bands are narrower than the gap for a thinner look
-  const octInset = cellSize * 0.3; // How much the octagon corners are cut
-  const octBandWidth = octInset * 0.6; // Band width is thinner than the gap
+  const { octInset, octBandWidth } = getOctagonDimensions(cellSize);
   
   // Calculate total dimensions based on grid type
-  let totalWidth: number;
-  let totalHeight: number;
-  if (gridType === "hex") {
-    totalWidth = grid.width * hexHorizSpacing + hexWidth / 2 + wallThickness * 2;
-    totalHeight = (grid.height - 1) * hexVertSpacing + hexHeight + wallThickness * 2;
-  } else if (gridType === "octagon") {
-    totalWidth = grid.width * cellSize + wallThickness * 2;
-    totalHeight = grid.height * cellSize + wallThickness * 2;
-  } else if (gridType === "cairo") {
-    // Cairo tiling: each 2x2 block of tiles forms a repeating unit
-    // We use a grid spacing based on the cell size
-    totalWidth = grid.width * cellSize + wallThickness * 2;
-    totalHeight = grid.height * cellSize + wallThickness * 2;
-  } else {
-    totalWidth = grid.width * cellSize + wallThickness;
-    totalHeight = grid.height * cellSize + wallThickness;
-  }
-
-  // Get hex neighbors (odd-r offset coordinates) - must match solver's getHexNeighbors
-  const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
-    const isOddRow = row % 2 === 1;
-    if (isOddRow) {
-      // Odd rows: match solver's deltas exactly
-      return [
-        [row - 1, col, "NW"],     // NW (top-left) - solver: [-1, 0]
-        [row - 1, col + 1, "NE"], // NE (top-right) - solver: [-1, 1]
-        [row, col - 1, "W"],      // W (left) - solver: [0, -1]
-        [row, col + 1, "E"],      // E (right) - solver: [0, 1]
-        [row + 1, col, "SW"],     // SW (bottom-left) - solver: [1, 0]
-        [row + 1, col + 1, "SE"], // SE (bottom-right) - solver: [1, 1]
-      ];
-    } else {
-      // Even rows: match solver's deltas exactly
-      return [
-        [row - 1, col - 1, "NW"], // NW (top-left) - solver: [-1, -1]
-        [row - 1, col, "NE"],     // NE (top-right) - solver: [-1, 0]
-        [row, col - 1, "W"],      // W (left) - solver: [0, -1]
-        [row, col + 1, "E"],      // E (right) - solver: [0, 1]
-        [row + 1, col - 1, "SW"], // SW (bottom-left) - solver: [1, -1]
-        [row + 1, col, "SE"],     // SE (bottom-right) - solver: [1, 0]
-      ];
-    }
-  };
-
-  // Create SVG hexagon path - pointy-topped
-  const createHexPath = (cx: number, cy: number, size: number): string => {
-    // Pointy-topped hexagon: vertices at 30, 90, 150, 210, 270, 330 degrees
-    const points: [number, number][] = [];
-    for (let i = 0; i < 6; i++) {
-      const angleDeg = 60 * i - 30; // Start at -30 degrees for pointy-top
-      const angleRad = (Math.PI / 180) * angleDeg;
-      points.push([cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)]);
-    }
-    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
-  };
-
-  // Create wall segment between two hex cells - for pointy-topped hexagons
-  const getHexWallSegment = (
-    _row: number, _col: number, 
-    nRow: number, nCol: number,
-    direction: string,
-    cx: number, cy: number,
-    size: number
-  ): { x1: number; y1: number; x2: number; y2: number } | null => {
-    // Check if neighbor is within bounds
-    if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
-      return null; // Boundary - will be handled separately
-    }
-    
-    // For pointy-topped hex, calculate the edge positions
-    // Vertices are at angles: -30, 30, 90, 150, 210, 270 degrees
-    const getVertex = (angleDeg: number): [number, number] => {
-      const angleRad = (Math.PI / 180) * angleDeg;
-      return [cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)];
-    };
-    
-    // Return the edge segment for this direction
-    // Mapping verified by testing that edge coordinates match from both cells
-    switch (direction) {
-      case "NW": { // Between 210° and 270° vertices
-        const v1 = getVertex(210);
-        const v2 = getVertex(270);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "NE": { // Between 270° and -30° vertices
-        const v1 = getVertex(270);
-        const v2 = getVertex(-30);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "W": { // Between 150° and 210° vertices
-        const v1 = getVertex(150);
-        const v2 = getVertex(210);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "E": { // Between -30° and 30° vertices
-        const v1 = getVertex(-30);
-        const v2 = getVertex(30);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "SW": { // Between 90° and 150° vertices
-        const v1 = getVertex(90);
-        const v2 = getVertex(150);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      case "SE": { // Between 30° and 90° vertices
-        const v1 = getVertex(30);
-        const v2 = getVertex(90);
-        return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] };
-      }
-      default:
-        return null;
-    }
-  };
+  const { totalWidth, totalHeight } = calculateGridDimensions(
+    grid.width,
+    grid.height,
+    cellSize,
+    gridType,
+    wallThickness
+  );
 
   // For hex grid, we use SVG
   if (gridType === "hex") {
@@ -329,9 +218,7 @@ export const Grid: React.FC<GridProps> = ({
         }
 
         // Calculate hex center position - for pointy-topped, odd rows are offset right
-        const isOddRow = row % 2 === 1;
-        const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
-        const cy = padding + hexSize + row * hexVertSpacing;
+        const { cx, cy } = getHexCenter(row, col, hexWidth, hexSize, hexHorizSpacing, hexVertSpacing, padding);
         
         const path = createHexPath(cx, cy, hexSize);
 
@@ -340,8 +227,12 @@ export const Grid: React.FC<GridProps> = ({
         const walls: { x1: number; y1: number; x2: number; y2: number }[] = [];
         
         for (const [nRow, nCol, direction] of neighbors) {
+          // Skip walls to out-of-bounds neighbors (boundary)
+          if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
+            continue;
+          }
           if (hasWall(row, col, nRow, nCol)) {
-            const segment = getHexWallSegment(row, col, nRow, nCol, direction, cx, cy, hexSize);
+            const segment = getHexWallSegment(direction, cx, cy, hexSize);
             if (segment) {
               walls.push(segment);
             }
@@ -412,7 +303,7 @@ export const Grid: React.FC<GridProps> = ({
                 y1={wall.y1}
                 x2={wall.x2}
                 y2={wall.y2}
-                stroke="#2c3e50"
+                stroke={WALL_COLOR}
                 strokeWidth={wallThickness}
                 strokeLinecap="round"
               />
@@ -450,23 +341,6 @@ export const Grid: React.FC<GridProps> = ({
     const svgWidth = totalWidth;
     const svgHeight = totalHeight;
     const padding = wallThickness;
-
-    // Create SVG octagon path
-    const createOctagonPath = (cx: number, cy: number, size: number, inset: number): string => {
-      // Octagon with flat sides at top/bottom/left/right
-      const halfSize = size / 2;
-      const points: [number, number][] = [
-        [cx - halfSize + inset, cy - halfSize],           // top-left edge
-        [cx + halfSize - inset, cy - halfSize],           // top-right edge  
-        [cx + halfSize, cy - halfSize + inset],           // right-top edge
-        [cx + halfSize, cy + halfSize - inset],           // right-bottom edge
-        [cx + halfSize - inset, cy + halfSize],           // bottom-right edge
-        [cx - halfSize + inset, cy + halfSize],           // bottom-left edge
-        [cx - halfSize, cy + halfSize - inset],           // left-bottom edge
-        [cx - halfSize, cy - halfSize + inset],           // left-top edge
-      ];
-      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
-    };
 
     // Helper to get color for a cell
     const getCellColor = (row: number, col: number): string => {
@@ -754,7 +628,7 @@ export const Grid: React.FC<GridProps> = ({
                 y1={band.edge1.y1}
                 x2={band.edge1.x2}
                 y2={band.edge1.y2}
-                stroke="#2c3e50"
+                stroke={WALL_COLOR}
                 strokeWidth={0.5}
               />
               <line
@@ -762,7 +636,7 @@ export const Grid: React.FC<GridProps> = ({
                 y1={band.edge2.y1}
                 x2={band.edge2.x2}
                 y2={band.edge2.y2}
-                stroke="#2c3e50"
+                stroke={WALL_COLOR}
                 strokeWidth={0.5}
               />
             </React.Fragment>
@@ -776,7 +650,7 @@ export const Grid: React.FC<GridProps> = ({
               y1={wall.y1}
               x2={wall.x2}
               y2={wall.y2}
-              stroke="#2c3e50"
+              stroke={WALL_COLOR}
               strokeWidth={wallThickness}
               strokeLinecap="round"
             />
@@ -789,7 +663,7 @@ export const Grid: React.FC<GridProps> = ({
             width={svgWidth - wallThickness}
             height={svgHeight - wallThickness}
             fill="none"
-            stroke="#2c3e50"
+            stroke={WALL_COLOR}
             strokeWidth={wallThickness}
           />
           
@@ -825,174 +699,10 @@ export const Grid: React.FC<GridProps> = ({
     const svgHeight = totalHeight;
     const padding = wallThickness;
     
-    // Cairo pentagon base vertices (from Python reference code)
-    // Base pentagon vertices (centered at hub vertex for rotation)
-    const V = [
-      [-2.0, 0.0],
-      [-3.0, 3.0],   // hub 90° vertex
-      [ 0.0, 4.0],
-      [ 3.0, 3.0],   // other 90° vertex
-      [ 2.0, 0.0]
-    ];
-    const hub = V[1]; // [-3.0, 3.0]
-    const P0 = V.map(v => [v[0] - hub[0], v[1] - hub[1]]); // hub at origin
-    
-    // Rotation matrix function
-    const rotMat = (deg: number): [number, number, number, number] => {
-      const th = deg * Math.PI / 180;
-      return [Math.cos(th), -Math.sin(th), Math.sin(th), Math.cos(th)];
-    };
-    
-    // Apply rotation matrix to a point
-    const applyRot = (p: [number, number], rot: [number, number, number, number]): [number, number] => {
-      return [rot[0] * p[0] + rot[1] * p[1], rot[2] * p[0] + rot[3] * p[1]];
-    };
-    
-    // Parity-based rotation angles
-    const parityRot: { [key: string]: number } = {
-      "0,0": -90.0,
-      "1,0": 0.0,
-      "0,1": 180.0,
-      "1,1": 90.0,
-    };
-    
-    // Global transformations (from Python code)
-    const T1 = [6.0, 6.0];
-    const T2 = [6.0, -6.0];
-    const Q = rotMat(-45.0);
-    const s = 1.0 / (6.0 * Math.sqrt(2.0));
-    
-    // Pre-transform the base polygon
-    const P0g = P0.map(p => {
-      const rotated = applyRot(p as [number, number], Q);
-      return [rotated[0] * s, rotated[1] * s];
-    });
-    
-    // Transform the translation vectors
-    const T1g = [
-      (Q[0] * T1[0] + Q[1] * T1[1]) * s,
-      (Q[2] * T1[0] + Q[3] * T1[1]) * s
-    ];
-    const T2g = [
-      -(Q[0] * T2[0] + Q[1] * T2[1]) * s,
-      -(Q[2] * T2[0] + Q[3] * T2[1]) * s
-    ];
-    
-    // Get Cairo tile vertices for a given (row, col) position
-    // row corresponds to j, col corresponds to i in Python code
-    const getCairoTile = (row: number, col: number): [number, number][] => {
-      const parityCol = col % 2;  // a = i % 2
-      const parityRow = row % 2;  // b = j % 2
-      const u = Math.floor(col / 2);  // u = i // 2
-      const v = Math.floor(row / 2);  // v = j // 2
-      
-      const rot = parityRot[`${parityCol},${parityRow}`];
-      const rotMatrix = rotMat(rot);
-      
-      // Rotate the base polygon
-      const poly = P0g.map(p => applyRot(p as [number, number], rotMatrix));
-      
-      // Apply group translation
-      const G = [
-        u * T1g[0] + v * T2g[0],
-        u * T1g[1] + v * T2g[1]
-      ];
-      
-      // Translate and return
-      return poly.map(p => [p[0] + G[0], p[1] + G[1]] as [number, number]);
-    };
-    
-    // Calculate bounding box of all tiles to normalize coordinates
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let row = 0; row < grid.height; row++) {
-      for (let col = 0; col < grid.width; col++) {
-        const tile = getCairoTile(row, col);
-        for (const [x, y] of tile) {
-          minX = Math.min(minX, x);
-          maxX = Math.max(maxX, x);
-          minY = Math.min(minY, y);
-          maxY = Math.max(maxY, y);
-        }
-      }
-    }
-    
-    // Calculate scale to fit the grid
-    const rangeX = maxX - minX;
-    const rangeY = maxY - minY;
+    // Create coordinate transformer
     const availableWidth = svgWidth - 2 * padding;
     const availableHeight = svgHeight - 2 * padding;
-    const scale = Math.min(availableWidth / rangeX, availableHeight / rangeY);
-    
-    // Transform normalized coordinates to SVG coordinates
-    const toSvg = (p: [number, number]): [number, number] => {
-      return [
-        padding + (p[0] - minX) * scale,
-        padding + (p[1] - minY) * scale
-      ];
-    };
-    
-    // Polygon centroid calculation
-    const polyCentroid = (poly: [number, number][]): [number, number] => {
-      const x = poly.map(p => p[0]);
-      const y = poly.map(p => p[1]);
-      let A = 0;
-      let Cx = 0;
-      let Cy = 0;
-      for (let i = 0; i < poly.length; i++) {
-        const j = (i + 1) % poly.length;
-        const cross = x[i] * y[j] - x[j] * y[i];
-        A += cross;
-        Cx += (x[i] + x[j]) * cross;
-        Cy += (y[i] + y[j]) * cross;
-      }
-      A /= 2;
-      if (Math.abs(A) < 1e-12) {
-        return [
-          poly.reduce((sum, p) => sum + p[0], 0) / poly.length,
-          poly.reduce((sum, p) => sum + p[1], 0) / poly.length
-        ];
-      }
-      return [Cx / (6 * A), Cy / (6 * A)];
-    };
-    
-    // Get Cairo neighbors (must match solver's getCairoNeighbors)
-    // Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
-    // parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
-    // - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
-    // - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
-    // - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
-    // - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
-    const getCairoNeighbors = (row: number, col: number): [number, number, string][] => {
-      const parityCol = col % 2;
-      const parityRow = row % 2;
-      
-      // Cardinal directions (same for all parities)
-      const cardinals: [number, number, string][] = [
-        [row - 1, col, "N"],
-        [row + 1, col, "S"],
-        [row, col - 1, "W"],
-        [row, col + 1, "E"],
-      ];
-      
-      // Diagonal neighbor depends on parity (col%2, row%2)
-      // Python offsets are (di, dj) where di=col change, dj=row change
-      let diagonal: [number, number, string];
-      if (parityCol === 0 && parityRow === 0) {
-        // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
-        diagonal = [row + 1, col - 1, "SW"];
-      } else if (parityCol === 1 && parityRow === 0) {
-        // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
-        diagonal = [row - 1, col - 1, "NW"];
-      } else if (parityCol === 0 && parityRow === 1) {
-        // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
-        diagonal = [row + 1, col + 1, "SE"];
-      } else {
-        // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
-        diagonal = [row - 1, col + 1, "NE"];
-      }
-      
-      return [...cardinals, diagonal];
-    };
+    const toSvg = createCairoTransformer(grid.width, grid.height, availableWidth, availableHeight, padding);
     
     // Helper to get color for a cell
     const getCellColor = (row: number, col: number): string => {
@@ -1058,38 +768,10 @@ export const Grid: React.FC<GridProps> = ({
     const cairoWalls: CairoWall[] = [];
     const processedEdges = new Set<string>();
     
-    // Find shared edge between two tiles and add wall if needed
-    const findSharedEdge = (
-      tile1: [number, number][],
-      tile2: [number, number][],
-      epsilon: number = 0.001
-    ): [[number, number], [number, number]] | null => {
-      // Check each edge of tile1 against each edge of tile2
-      for (let i = 0; i < tile1.length; i++) {
-        const a1 = tile1[i];
-        const a2 = tile1[(i + 1) % tile1.length];
-        
-        for (let j = 0; j < tile2.length; j++) {
-          const b1 = tile2[j];
-          const b2 = tile2[(j + 1) % tile2.length];
-          
-          // Check if edges share endpoints (in either order)
-          const dist = (p1: [number, number], p2: [number, number]) => 
-            Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
-          
-          if ((dist(a1, b1) < epsilon && dist(a2, b2) < epsilon) ||
-              (dist(a1, b2) < epsilon && dist(a2, b1) < epsilon)) {
-            return [a1, a2];
-          }
-        }
-      }
-      return null;
-    };
-    
     for (let row = 0; row < grid.height; row++) {
       for (let col = 0; col < grid.width; col++) {
         const tile = getCairoTile(row, col);
-        const neighbors = getCairoNeighbors(row, col);
+        const neighbors = getCairoNeighborsWithDirection(row, col);
         
         for (const [nRow, nCol] of neighbors) {
           if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
@@ -1172,7 +854,7 @@ export const Grid: React.FC<GridProps> = ({
               y1={wall.y1}
               x2={wall.x2}
               y2={wall.y2}
-              stroke="#2c3e50"
+              stroke={WALL_COLOR}
               strokeWidth={wallThickness}
               strokeLinecap="round"
             />
@@ -1215,7 +897,7 @@ export const Grid: React.FC<GridProps> = ({
         position: "relative",
         width: totalWidth,
         height: totalHeight,
-        border: `${wallThickness}px solid #2c3e50`,
+        border: `${wallThickness}px solid ${WALL_COLOR}`,
         boxSizing: "content-box",
         userSelect: "none",
       }}
@@ -1280,11 +962,11 @@ export const Grid: React.FC<GridProps> = ({
                 boxSizing: "border-box",
                 // Right wall
                 borderRight: wallRight
-                  ? `${wallThickness}px solid #2c3e50`
+                  ? `${wallThickness}px solid ${WALL_COLOR}`
                   : "none",
                 // Bottom wall
                 borderBottom: wallBottom
-                  ? `${wallThickness}px solid #2c3e50`
+                  ? `${wallThickness}px solid ${WALL_COLOR}`
                   : "none",
                 // Center text for reachability level
                 display: reachLevel !== null ? "flex" : undefined,
@@ -1788,5 +1470,3 @@ export const Controls: React.FC<ControlsProps> = ({
     </div>
   );
 };
-
-export { COLORS };

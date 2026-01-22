@@ -6,22 +6,24 @@
 
 import type { GridSolution, GridType } from "../solver";
 import { HATCH_COLOR } from "../solver";
-
-// Color palette matching the Grid component
-const COLORS = [
-  "#e74c3c", // red
-  "#3498db", // blue
-  "#2ecc71", // green
-  "#f39c12", // orange
-  "#9b59b6", // purple
-  "#1abc9c", // teal
-  "#e91e63", // pink
-  "#795548", // brown
-  "#607d8b", // gray-blue
-  "#00bcd4", // cyan
-];
-
-const HATCH_BG_COLOR = "#fffde7";
+import {
+  COLORS,
+  HATCH_BG_COLOR,
+  SVG_WALL_THICKNESS,
+  WALL_COLOR,
+  getHexDimensions,
+  getHexNeighbors,
+  createHexPath,
+  getHexCenter,
+  getHexWallSegment,
+  getOctagonDimensions,
+  createOctagonPath,
+  getCairoTile,
+  getCairoNeighbors,
+  findSharedEdge,
+  createCairoTransformer,
+  getSvgHatchPatternDef,
+} from "./gridConstants";
 
 export function downloadSolutionSVG(
   solution: GridSolution,
@@ -30,7 +32,7 @@ export function downloadSolutionSVG(
   gridType: GridType
 ): void {
   const cellSize = 40;
-  const wallThickness = 2;
+  const wallThickness = SVG_WALL_THICKNESS;
 
   // Build wall edge set for quick lookup
   const wallEdgeSet = new Set<string>();
@@ -49,78 +51,24 @@ export function downloadSolutionSVG(
     return isHatch ? HATCH_BG_COLOR : COLORS[color % COLORS.length];
   };
 
+  const hatchPatternDef = getSvgHatchPatternDef();
   let svgContent: string;
 
   if (gridType === "hex") {
     // Hex grid SVG rendering
-    const hexSize = cellSize * 0.5;
-    const hexWidth = Math.sqrt(3) * hexSize;
-    const hexHeight = 2 * hexSize;
-    const hexHorizSpacing = hexWidth;
-    const hexVertSpacing = hexHeight * 0.75;
+    const { hexSize, hexWidth, hexHeight, hexHorizSpacing, hexVertSpacing } = getHexDimensions(cellSize);
     const padding = wallThickness;
 
     const svgWidth = gridWidth * hexHorizSpacing + hexWidth / 2 + padding * 2;
     const svgHeight = (gridHeight - 1) * hexVertSpacing + hexHeight + padding * 2;
 
     svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
-    svgContent += `  <defs>\n`;
-    svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
-    svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
-    svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `    </pattern>\n`;
-    svgContent += `  </defs>\n`;
-
-    const createHexPath = (cx: number, cy: number, size: number): string => {
-      const points: [number, number][] = [];
-      for (let i = 0; i < 6; i++) {
-        const angleDeg = 60 * i - 30;
-        const angleRad = (Math.PI / 180) * angleDeg;
-        points.push([cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)]);
-      }
-      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
-    };
-
-    const getHexNeighbors = (row: number, col: number): [number, number, string][] => {
-      const isOddRow = row % 2 === 1;
-      if (isOddRow) {
-        return [
-          [row - 1, col, "NW"], [row - 1, col + 1, "NE"],
-          [row, col - 1, "W"], [row, col + 1, "E"],
-          [row + 1, col, "SW"], [row + 1, col + 1, "SE"],
-        ];
-      } else {
-        return [
-          [row - 1, col - 1, "NW"], [row - 1, col, "NE"],
-          [row, col - 1, "W"], [row, col + 1, "E"],
-          [row + 1, col - 1, "SW"], [row + 1, col, "SE"],
-        ];
-      }
-    };
-
-    const getHexWallSegment = (direction: string, cx: number, cy: number, size: number) => {
-      const getVertex = (angleDeg: number): [number, number] => {
-        const angleRad = (Math.PI / 180) * angleDeg;
-        return [cx + size * Math.cos(angleRad), cy + size * Math.sin(angleRad)];
-      };
-      switch (direction) {
-        case "NW": { const v1 = getVertex(210), v2 = getVertex(270); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
-        case "NE": { const v1 = getVertex(270), v2 = getVertex(-30); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
-        case "W": { const v1 = getVertex(150), v2 = getVertex(210); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
-        case "E": { const v1 = getVertex(-30), v2 = getVertex(30); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
-        case "SW": { const v1 = getVertex(90), v2 = getVertex(150); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
-        case "SE": { const v1 = getVertex(30), v2 = getVertex(90); return { x1: v1[0], y1: v1[1], x2: v2[0], y2: v2[1] }; }
-        default: return null;
-      }
-    };
+    svgContent += `  <defs>\n${hatchPatternDef}\n  </defs>\n`;
 
     // Render hex cells
     for (let row = 0; row < gridHeight; row++) {
       for (let col = 0; col < gridWidth; col++) {
-        const isOddRow = row % 2 === 1;
-        const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
-        const cy = padding + hexSize + row * hexVertSpacing;
+        const { cx, cy } = getHexCenter(row, col, hexWidth, hexSize, hexHorizSpacing, hexVertSpacing, padding);
         const path = createHexPath(cx, cy, hexSize);
         const color = solution.assignedColors[row][col];
         const isHatch = color === HATCH_COLOR;
@@ -132,15 +80,13 @@ export function downloadSolutionSVG(
     // Render hex walls
     for (let row = 0; row < gridHeight; row++) {
       for (let col = 0; col < gridWidth; col++) {
-        const isOddRow = row % 2 === 1;
-        const cx = padding + hexWidth / 2 + col * hexHorizSpacing + (isOddRow ? hexWidth / 2 : 0);
-        const cy = padding + hexSize + row * hexVertSpacing;
+        const { cx, cy } = getHexCenter(row, col, hexWidth, hexSize, hexHorizSpacing, hexVertSpacing, padding);
         const neighbors = getHexNeighbors(row, col);
         for (const [nRow, nCol, direction] of neighbors) {
           if (nRow >= 0 && nRow < gridHeight && nCol >= 0 && nCol < gridWidth && hasWall(row, col, nRow, nCol)) {
             const segment = getHexWallSegment(direction, cx, cy, hexSize);
             if (segment) {
-              svgContent += `  <line x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}" stroke="#2c3e50" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
+              svgContent += `  <line x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
             }
           }
         }
@@ -152,35 +98,13 @@ export function downloadSolutionSVG(
   } else if (gridType === "octagon") {
     // Octagon grid SVG rendering
     const padding = wallThickness;
-    const octInset = cellSize * 0.3;
-    const octBandWidth = octInset * 0.6;
+    const { octInset, octBandWidth } = getOctagonDimensions(cellSize);
     const svgWidth = gridWidth * cellSize + padding * 2;
     const svgHeight = gridHeight * cellSize + padding * 2;
 
     svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
     svgContent += `  <rect width="${svgWidth}" height="${svgHeight}" fill="#000000" />\n`;
-    svgContent += `  <defs>\n`;
-    svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
-    svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
-    svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `    </pattern>\n`;
-    svgContent += `  </defs>\n`;
-
-    const createOctagonPath = (cx: number, cy: number, size: number, inset: number): string => {
-      const halfSize = size / 2;
-      const points: [number, number][] = [
-        [cx - halfSize + inset, cy - halfSize],
-        [cx + halfSize - inset, cy - halfSize],
-        [cx + halfSize, cy - halfSize + inset],
-        [cx + halfSize, cy + halfSize - inset],
-        [cx + halfSize - inset, cy + halfSize],
-        [cx - halfSize + inset, cy + halfSize],
-        [cx - halfSize, cy + halfSize - inset],
-        [cx - halfSize, cy - halfSize + inset],
-      ];
-      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
-    };
+    svgContent += `  <defs>\n${hatchPatternDef}\n  </defs>\n`;
 
     // Render down-slant diagonal bands (beneath octagons) - no outline
     for (let iRow = 1; iRow < gridHeight; iRow++) {
@@ -249,171 +173,13 @@ export function downloadSolutionSVG(
     const padding = wallThickness;
     const svgWidth = gridWidth * cellSize + padding * 2;
     const svgHeight = gridHeight * cellSize + padding * 2;
-
-    // Cairo pentagon base vertices (from Python reference code)
-    const V = [
-      [-2.0, 0.0],
-      [-3.0, 3.0],
-      [ 0.0, 4.0],
-      [ 3.0, 3.0],
-      [ 2.0, 0.0]
-    ];
-    const hub = V[1];
-    const P0 = V.map(v => [v[0] - hub[0], v[1] - hub[1]]);
     
-    const rotMat = (deg: number): [number, number, number, number] => {
-      const th = deg * Math.PI / 180;
-      return [Math.cos(th), -Math.sin(th), Math.sin(th), Math.cos(th)];
-    };
-    
-    const applyRot = (p: [number, number], rot: [number, number, number, number]): [number, number] => {
-      return [rot[0] * p[0] + rot[1] * p[1], rot[2] * p[0] + rot[3] * p[1]];
-    };
-    
-    const parityRot: { [key: string]: number } = {
-      "0,0": -90.0,
-      "1,0": 0.0,
-      "0,1": 180.0,
-      "1,1": 90.0,
-    };
-    
-    const T1 = [6.0, 6.0];
-    const T2 = [6.0, -6.0];
-    const Q = rotMat(-45.0);
-    const s = 1.0 / (6.0 * Math.sqrt(2.0));
-    
-    const P0g = P0.map(p => {
-      const rotated = applyRot(p as [number, number], Q);
-      return [rotated[0] * s, rotated[1] * s];
-    });
-    
-    const T1g = [
-      (Q[0] * T1[0] + Q[1] * T1[1]) * s,
-      (Q[2] * T1[0] + Q[3] * T1[1]) * s
-    ];
-    const T2g = [
-      -(Q[0] * T2[0] + Q[1] * T2[1]) * s,
-      -(Q[2] * T2[0] + Q[3] * T2[1]) * s
-    ];
-    
-    const getCairoTile = (row: number, col: number): [number, number][] => {
-      const parityCol = col % 2;
-      const parityRow = row % 2;
-      const u = Math.floor(col / 2);
-      const v = Math.floor(row / 2);
-      
-      const rot = parityRot[`${parityCol},${parityRow}`];
-      const rotMatrix = rotMat(rot);
-      
-      const poly = P0g.map(p => applyRot(p as [number, number], rotMatrix));
-      
-      const G = [
-        u * T1g[0] + v * T2g[0],
-        u * T1g[1] + v * T2g[1]
-      ];
-      
-      return poly.map(p => [p[0] + G[0], p[1] + G[1]] as [number, number]);
-    };
-    
-    // Calculate bounding box
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let row = 0; row < gridHeight; row++) {
-      for (let col = 0; col < gridWidth; col++) {
-        const tile = getCairoTile(row, col);
-        for (const [x, y] of tile) {
-          minX = Math.min(minX, x);
-          maxX = Math.max(maxX, x);
-          minY = Math.min(minY, y);
-          maxY = Math.max(maxY, y);
-        }
-      }
-    }
-    
-    const rangeX = maxX - minX;
-    const rangeY = maxY - minY;
     const availableWidth = svgWidth - 2 * padding;
     const availableHeight = svgHeight - 2 * padding;
-    const scale = Math.min(availableWidth / rangeX, availableHeight / rangeY);
-    
-    const toSvg = (p: [number, number]): [number, number] => {
-      return [
-        padding + (p[0] - minX) * scale,
-        padding + (p[1] - minY) * scale
-      ];
-    };
-    
-    // Get Cairo neighbors (must match solver's getCairoNeighbors)
-    // Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
-    // parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
-    // - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
-    // - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
-    // - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
-    // - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
-    const getCairoNeighbors = (row: number, col: number): [number, number][] => {
-      const parityCol = col % 2;
-      const parityRow = row % 2;
-      
-      const cardinals: [number, number][] = [
-        [row - 1, col],
-        [row + 1, col],
-        [row, col - 1],
-        [row, col + 1],
-      ];
-      
-      // Diagonal neighbor depends on parity (col%2, row%2)
-      // Python offsets are (di, dj) where di=col change, dj=row change
-      let diagonal: [number, number];
-      if (parityCol === 0 && parityRow === 0) {
-        // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
-        diagonal = [row + 1, col - 1];
-      } else if (parityCol === 1 && parityRow === 0) {
-        // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
-        diagonal = [row - 1, col - 1];
-      } else if (parityCol === 0 && parityRow === 1) {
-        // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
-        diagonal = [row + 1, col + 1];
-      } else {
-        // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
-        diagonal = [row - 1, col + 1];
-      }
-      
-      return [...cardinals, diagonal];
-    };
-    
-    // Find shared edge between two tiles
-    const findSharedEdge = (
-      tile1: [number, number][],
-      tile2: [number, number][],
-      epsilon: number = 0.001
-    ): [[number, number], [number, number]] | null => {
-      for (let i = 0; i < tile1.length; i++) {
-        const a1 = tile1[i];
-        const a2 = tile1[(i + 1) % tile1.length];
-        
-        for (let j = 0; j < tile2.length; j++) {
-          const b1 = tile2[j];
-          const b2 = tile2[(j + 1) % tile2.length];
-          
-          const dist = (p1: [number, number], p2: [number, number]) => 
-            Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
-          
-          if ((dist(a1, b1) < epsilon && dist(a2, b2) < epsilon) ||
-              (dist(a1, b2) < epsilon && dist(a2, b1) < epsilon)) {
-            return [a1, a2];
-          }
-        }
-      }
-      return null;
-    };
+    const toSvg = createCairoTransformer(gridWidth, gridHeight, availableWidth, availableHeight, padding);
 
     svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
-    svgContent += `  <defs>\n`;
-    svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
-    svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
-    svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `    </pattern>\n`;
-    svgContent += `  </defs>\n`;
+    svgContent += `  <defs>\n${hatchPatternDef}\n  </defs>\n`;
 
     // Render Cairo tiles
     for (let row = 0; row < gridHeight; row++) {
@@ -455,7 +221,7 @@ export function downloadSolutionSVG(
             
             if (sharedEdge) {
               const [p1, p2] = sharedEdge.map(toSvg);
-              svgContent += `  <line x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0]}" y2="${p2[1]}" stroke="#2c3e50" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
+              svgContent += `  <line x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0]}" y2="${p2[1]}" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
             }
           }
         }
@@ -470,13 +236,7 @@ export function downloadSolutionSVG(
     const svgHeight = gridHeight * cellSize + wallThickness;
 
     svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
-    svgContent += `  <defs>\n`;
-    svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
-    svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
-    svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
-    svgContent += `    </pattern>\n`;
-    svgContent += `  </defs>\n`;
+    svgContent += `  <defs>\n${hatchPatternDef}\n  </defs>\n`;
 
     // Render cells
     for (let row = 0; row < gridHeight; row++) {
@@ -501,20 +261,20 @@ export function downloadSolutionSVG(
           const x1 = x + cellSize;
           const y1 = y;
           const y2 = y + cellSize;
-          svgContent += `  <line x1="${x1}" y1="${y1}" x2="${x1}" y2="${y2}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          svgContent += `  <line x1="${x1}" y1="${y1}" x2="${x1}" y2="${y2}" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" />\n`;
         }
         
         // Bottom wall
         if (row < gridHeight - 1 && hasWall(row, col, row + 1, col)) {
           const x1 = x;
           const x2 = x + cellSize;
-          svgContent += `  <line x1="${x1}" y1="${y + cellSize}" x2="${x2}" y2="${y + cellSize}" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+          svgContent += `  <line x1="${x1}" y1="${y + cellSize}" x2="${x2}" y2="${y + cellSize}" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" />\n`;
         }
       }
     }
 
     // Add outer border
-    svgContent += `  <rect x="${wallThickness / 2}" y="${wallThickness / 2}" width="${gridWidth * cellSize}" height="${gridHeight * cellSize}" fill="none" stroke="#2c3e50" stroke-width="${wallThickness}" />\n`;
+    svgContent += `  <rect x="${wallThickness / 2}" y="${wallThickness / 2}" width="${gridWidth * cellSize}" height="${gridHeight * cellSize}" fill="none" stroke="${WALL_COLOR}" stroke-width="${wallThickness}" />\n`;
     svgContent += `</svg>`;
   }
 
