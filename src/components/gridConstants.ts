@@ -32,6 +32,11 @@ export const COLORS = [
 export const HATCH_BG_COLOR = "#fffde7"; // light yellow
 
 /**
+ * Hatch pattern stroke color
+ */
+export const HATCH_STROKE_COLOR = "#ff9800"; // orange
+
+/**
  * Get the display color for a given color index
  */
 export function getDisplayColor(color: number): string {
@@ -126,7 +131,11 @@ export function getHexCenter(
 }
 
 /**
- * Get wall segment coordinates for a hex edge in the specified direction
+ * Get wall segment coordinates for a hex edge in the specified direction.
+ * 
+ * Note: This function does not perform boundary checking. Callers should
+ * verify that neighbor cells are within grid bounds before calling this
+ * function to determine whether to render a wall segment.
  */
 export function getHexWallSegment(
   direction: string,
@@ -491,7 +500,7 @@ export function calculateGridDimensions(
 export function getSvgHatchPatternDef(): string {
   return `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
       <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>
-      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>
-      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>
+      <line x1="0" y1="0" x2="8" y2="8" stroke="${HATCH_STROKE_COLOR}" stroke-width="1.5"/>
+      <line x1="8" y1="0" x2="0" y2="8" stroke="${HATCH_STROKE_COLOR}" stroke-width="1.5"/>
     </pattern>`;
 }

@@ -56,11 +56,11 @@ export function downloadSolutionSVG(
 
   if (gridType === "hex") {
     // Hex grid SVG rendering
-    const { hexSize, hexWidth, hexHorizSpacing, hexVertSpacing } = getHexDimensions(cellSize);
+    const { hexSize, hexWidth, hexHeight, hexHorizSpacing, hexVertSpacing } = getHexDimensions(cellSize);
     const padding = wallThickness;
 
     const svgWidth = gridWidth * hexHorizSpacing + hexWidth / 2 + padding * 2;
-    const svgHeight = (gridHeight - 1) * hexVertSpacing + hexSize * 2 + padding * 2;
+    const svgHeight = (gridHeight - 1) * hexVertSpacing + hexHeight + padding * 2;
 
     svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
     svgContent += `  <defs>\n${hatchPatternDef}\n  </defs>\n`;
