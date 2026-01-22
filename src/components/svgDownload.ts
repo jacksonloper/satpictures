@@ -244,6 +244,214 @@ export function downloadSolutionSVG(
 
     svgContent += `</svg>`;
 
+  } else if (gridType === "cairo") {
+    // Cairo pentagonal tiling SVG rendering
+    const padding = wallThickness;
+    const svgWidth = gridWidth * cellSize + padding * 2;
+    const svgHeight = gridHeight * cellSize + padding * 2;
+
+    // Cairo pentagon base vertices (from Python reference code)
+    const V = [
+      [-2.0, 0.0],
+      [-3.0, 3.0],
+      [ 0.0, 4.0],
+      [ 3.0, 3.0],
+      [ 2.0, 0.0]
+    ];
+    const hub = V[1];
+    const P0 = V.map(v => [v[0] - hub[0], v[1] - hub[1]]);
+    
+    const rotMat = (deg: number): [number, number, number, number] => {
+      const th = deg * Math.PI / 180;
+      return [Math.cos(th), -Math.sin(th), Math.sin(th), Math.cos(th)];
+    };
+    
+    const applyRot = (p: [number, number], rot: [number, number, number, number]): [number, number] => {
+      return [rot[0] * p[0] + rot[1] * p[1], rot[2] * p[0] + rot[3] * p[1]];
+    };
+    
+    const parityRot: { [key: string]: number } = {
+      "0,0": -90.0,
+      "1,0": 0.0,
+      "0,1": 180.0,
+      "1,1": 90.0,
+    };
+    
+    const T1 = [6.0, 6.0];
+    const T2 = [6.0, -6.0];
+    const Q = rotMat(-45.0);
+    const s = 1.0 / (6.0 * Math.sqrt(2.0));
+    
+    const P0g = P0.map(p => {
+      const rotated = applyRot(p as [number, number], Q);
+      return [rotated[0] * s, rotated[1] * s];
+    });
+    
+    const T1g = [
+      (Q[0] * T1[0] + Q[1] * T1[1]) * s,
+      (Q[2] * T1[0] + Q[3] * T1[1]) * s
+    ];
+    const T2g = [
+      -(Q[0] * T2[0] + Q[1] * T2[1]) * s,
+      -(Q[2] * T2[0] + Q[3] * T2[1]) * s
+    ];
+    
+    const getCairoTile = (row: number, col: number): [number, number][] => {
+      const parityCol = col % 2;
+      const parityRow = row % 2;
+      const u = Math.floor(col / 2);
+      const v = Math.floor(row / 2);
+      
+      const rot = parityRot[`${parityCol},${parityRow}`];
+      const rotMatrix = rotMat(rot);
+      
+      const poly = P0g.map(p => applyRot(p as [number, number], rotMatrix));
+      
+      const G = [
+        u * T1g[0] + v * T2g[0],
+        u * T1g[1] + v * T2g[1]
+      ];
+      
+      return poly.map(p => [p[0] + G[0], p[1] + G[1]] as [number, number]);
+    };
+    
+    // Calculate bounding box
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        const tile = getCairoTile(row, col);
+        for (const [x, y] of tile) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    
+    const rangeX = maxX - minX;
+    const rangeY = maxY - minY;
+    const availableWidth = svgWidth - 2 * padding;
+    const availableHeight = svgHeight - 2 * padding;
+    const scale = Math.min(availableWidth / rangeX, availableHeight / rangeY);
+    
+    const toSvg = (p: [number, number]): [number, number] => {
+      return [
+        padding + (p[0] - minX) * scale,
+        padding + (p[1] - minY) * scale
+      ];
+    };
+    
+    // Get Cairo neighbors (must match solver's getCairoNeighbors)
+    const getCairoNeighbors = (row: number, col: number): [number, number][] => {
+      const parityRow = row % 2;
+      const parityCol = col % 2;
+      
+      const cardinals: [number, number][] = [
+        [row - 1, col],
+        [row + 1, col],
+        [row, col - 1],
+        [row, col + 1],
+      ];
+      
+      let diagonal: [number, number];
+      if (parityCol === 0 && parityRow === 0) {
+        diagonal = [row - 1, col + 1];
+      } else if (parityCol === 1 && parityRow === 0) {
+        diagonal = [row - 1, col - 1];
+      } else if (parityCol === 0 && parityRow === 1) {
+        diagonal = [row + 1, col + 1];
+      } else {
+        diagonal = [row + 1, col - 1];
+      }
+      
+      return [...cardinals, diagonal];
+    };
+    
+    // Find shared edge between two tiles
+    const findSharedEdge = (
+      tile1: [number, number][],
+      tile2: [number, number][],
+      epsilon: number = 0.001
+    ): [[number, number], [number, number]] | null => {
+      for (let i = 0; i < tile1.length; i++) {
+        const a1 = tile1[i];
+        const a2 = tile1[(i + 1) % tile1.length];
+        
+        for (let j = 0; j < tile2.length; j++) {
+          const b1 = tile2[j];
+          const b2 = tile2[(j + 1) % tile2.length];
+          
+          const dist = (p1: [number, number], p2: [number, number]) => 
+            Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
+          
+          if ((dist(a1, b1) < epsilon && dist(a2, b2) < epsilon) ||
+              (dist(a1, b2) < epsilon && dist(a2, b1) < epsilon)) {
+            return [a1, a2];
+          }
+        }
+      }
+      return null;
+    };
+
+    svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">\n`;
+    svgContent += `  <defs>\n`;
+    svgContent += `    <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">\n`;
+    svgContent += `      <rect width="8" height="8" fill="${HATCH_BG_COLOR}"/>\n`;
+    svgContent += `      <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+    svgContent += `      <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" stroke-width="1.5"/>\n`;
+    svgContent += `    </pattern>\n`;
+    svgContent += `  </defs>\n`;
+
+    // Render Cairo tiles
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        const tile = getCairoTile(row, col);
+        const svgTile = tile.map(toSvg);
+        const pathData = svgTile.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+        const color = solution.assignedColors[row][col];
+        const isHatch = color === HATCH_COLOR;
+        const fill = isHatch ? "url(#hatchPattern)" : getColor(row, col);
+        svgContent += `  <path d="${pathData}" fill="${fill}" stroke="#2c3e50" stroke-width="0.5" />\n`;
+      }
+    }
+
+    // Render walls
+    const processedEdges = new Set<string>();
+    for (let row = 0; row < gridHeight; row++) {
+      for (let col = 0; col < gridWidth; col++) {
+        const tile = getCairoTile(row, col);
+        const neighbors = getCairoNeighbors(row, col);
+        
+        for (const [nRow, nCol] of neighbors) {
+          if (nRow < 0 || nRow >= gridHeight || nCol < 0 || nCol >= gridWidth) {
+            continue;
+          }
+          
+          const edgeKey = row < nRow || (row === nRow && col < nCol)
+            ? `${row},${col}-${nRow},${nCol}`
+            : `${nRow},${nCol}-${row},${col}`;
+            
+          if (processedEdges.has(edgeKey)) {
+            continue;
+          }
+          processedEdges.add(edgeKey);
+          
+          if (hasWall(row, col, nRow, nCol)) {
+            const neighborTile = getCairoTile(nRow, nCol);
+            const sharedEdge = findSharedEdge(tile, neighborTile);
+            
+            if (sharedEdge) {
+              const [p1, p2] = sharedEdge.map(toSvg);
+              svgContent += `  <line x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0]}" y2="${p2[1]}" stroke="#2c3e50" stroke-width="${wallThickness}" stroke-linecap="round" />\n`;
+            }
+          }
+        }
+      }
+    }
+
+    svgContent += `</svg>`;
+
   } else {
     // Square grid SVG rendering
     const svgWidth = gridWidth * cellSize + wallThickness;

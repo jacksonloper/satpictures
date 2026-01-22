@@ -176,6 +176,11 @@ export const Grid: React.FC<GridProps> = ({
   } else if (gridType === "octagon") {
     totalWidth = grid.width * cellSize + wallThickness * 2;
     totalHeight = grid.height * cellSize + wallThickness * 2;
+  } else if (gridType === "cairo") {
+    // Cairo tiling: each 2x2 block of tiles forms a repeating unit
+    // We use a grid spacing based on the cell size
+    totalWidth = grid.width * cellSize + wallThickness * 2;
+    totalHeight = grid.height * cellSize + wallThickness * 2;
   } else {
     totalWidth = grid.width * cellSize + wallThickness;
     totalHeight = grid.height * cellSize + wallThickness;
@@ -814,6 +819,382 @@ export const Grid: React.FC<GridProps> = ({
     );
   }
 
+  // Cairo pentagonal tiling rendering
+  if (gridType === "cairo") {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+    
+    // Cairo pentagon base vertices (from Python reference code)
+    // Base pentagon vertices (centered at hub vertex for rotation)
+    const V = [
+      [-2.0, 0.0],
+      [-3.0, 3.0],   // hub 90° vertex
+      [ 0.0, 4.0],
+      [ 3.0, 3.0],   // other 90° vertex
+      [ 2.0, 0.0]
+    ];
+    const hub = V[1]; // [-3.0, 3.0]
+    const P0 = V.map(v => [v[0] - hub[0], v[1] - hub[1]]); // hub at origin
+    
+    // Rotation matrix function
+    const rotMat = (deg: number): [number, number, number, number] => {
+      const th = deg * Math.PI / 180;
+      return [Math.cos(th), -Math.sin(th), Math.sin(th), Math.cos(th)];
+    };
+    
+    // Apply rotation matrix to a point
+    const applyRot = (p: [number, number], rot: [number, number, number, number]): [number, number] => {
+      return [rot[0] * p[0] + rot[1] * p[1], rot[2] * p[0] + rot[3] * p[1]];
+    };
+    
+    // Parity-based rotation angles
+    const parityRot: { [key: string]: number } = {
+      "0,0": -90.0,
+      "1,0": 0.0,
+      "0,1": 180.0,
+      "1,1": 90.0,
+    };
+    
+    // Global transformations (from Python code)
+    const T1 = [6.0, 6.0];
+    const T2 = [6.0, -6.0];
+    const Q = rotMat(-45.0);
+    const s = 1.0 / (6.0 * Math.sqrt(2.0));
+    
+    // Pre-transform the base polygon
+    const P0g = P0.map(p => {
+      const rotated = applyRot(p as [number, number], Q);
+      return [rotated[0] * s, rotated[1] * s];
+    });
+    
+    // Transform the translation vectors
+    const T1g = [
+      (Q[0] * T1[0] + Q[1] * T1[1]) * s,
+      (Q[2] * T1[0] + Q[3] * T1[1]) * s
+    ];
+    const T2g = [
+      -(Q[0] * T2[0] + Q[1] * T2[1]) * s,
+      -(Q[2] * T2[0] + Q[3] * T2[1]) * s
+    ];
+    
+    // Get Cairo tile vertices for a given (row, col) position
+    // row corresponds to j, col corresponds to i in Python code
+    const getCairoTile = (row: number, col: number): [number, number][] => {
+      const parityCol = col % 2;  // a = i % 2
+      const parityRow = row % 2;  // b = j % 2
+      const u = Math.floor(col / 2);  // u = i // 2
+      const v = Math.floor(row / 2);  // v = j // 2
+      
+      const rot = parityRot[`${parityCol},${parityRow}`];
+      const rotMatrix = rotMat(rot);
+      
+      // Rotate the base polygon
+      const poly = P0g.map(p => applyRot(p as [number, number], rotMatrix));
+      
+      // Apply group translation
+      const G = [
+        u * T1g[0] + v * T2g[0],
+        u * T1g[1] + v * T2g[1]
+      ];
+      
+      // Translate and return
+      return poly.map(p => [p[0] + G[0], p[1] + G[1]] as [number, number]);
+    };
+    
+    // Calculate bounding box of all tiles to normalize coordinates
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const tile = getCairoTile(row, col);
+        for (const [x, y] of tile) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    
+    // Calculate scale to fit the grid
+    const rangeX = maxX - minX;
+    const rangeY = maxY - minY;
+    const availableWidth = svgWidth - 2 * padding;
+    const availableHeight = svgHeight - 2 * padding;
+    const scale = Math.min(availableWidth / rangeX, availableHeight / rangeY);
+    
+    // Transform normalized coordinates to SVG coordinates
+    const toSvg = (p: [number, number]): [number, number] => {
+      return [
+        padding + (p[0] - minX) * scale,
+        padding + (p[1] - minY) * scale
+      ];
+    };
+    
+    // Polygon centroid calculation
+    const polyCentroid = (poly: [number, number][]): [number, number] => {
+      const x = poly.map(p => p[0]);
+      const y = poly.map(p => p[1]);
+      let A = 0;
+      let Cx = 0;
+      let Cy = 0;
+      for (let i = 0; i < poly.length; i++) {
+        const j = (i + 1) % poly.length;
+        const cross = x[i] * y[j] - x[j] * y[i];
+        A += cross;
+        Cx += (x[i] + x[j]) * cross;
+        Cy += (y[i] + y[j]) * cross;
+      }
+      A /= 2;
+      if (Math.abs(A) < 1e-12) {
+        return [
+          poly.reduce((sum, p) => sum + p[0], 0) / poly.length,
+          poly.reduce((sum, p) => sum + p[1], 0) / poly.length
+        ];
+      }
+      return [Cx / (6 * A), Cy / (6 * A)];
+    };
+    
+    // Get Cairo neighbors (must match solver's getCairoNeighbors)
+    const getCairoNeighbors = (row: number, col: number): [number, number, string][] => {
+      const parityRow = row % 2;
+      const parityCol = col % 2;
+      
+      // Cardinal directions (same for all parities)
+      const cardinals: [number, number, string][] = [
+        [row - 1, col, "N"],
+        [row + 1, col, "S"],
+        [row, col - 1, "W"],
+        [row, col + 1, "E"],
+      ];
+      
+      // Diagonal neighbor depends on parity
+      let diagonal: [number, number, string];
+      if (parityCol === 0 && parityRow === 0) {
+        diagonal = [row - 1, col + 1, "NE"];
+      } else if (parityCol === 1 && parityRow === 0) {
+        diagonal = [row - 1, col - 1, "NW"];
+      } else if (parityCol === 0 && parityRow === 1) {
+        diagonal = [row + 1, col + 1, "SE"];
+      } else {
+        diagonal = [row + 1, col - 1, "SW"];
+      }
+      
+      return [...cardinals, diagonal];
+    };
+    
+    // Helper to get color for a cell
+    const getCellColor = (row: number, col: number): string => {
+      const inputColor = grid.colors[row][col];
+      const displayColor = showSolutionColors
+        ? solution!.assignedColors[row][col]
+        : inputColor;
+      const isBlank = inputColor === null && !showSolutionColors;
+      const isHatch = displayColor === HATCH_COLOR;
+      const isRedDot = displayColor === RED_DOT_COLOR;
+      const isRedHatch = displayColor === RED_HATCH_COLOR;
+      
+      if (isBlank) {
+        return "url(#blankPattern)";
+      } else if (isHatch) {
+        return "url(#hatchPattern)";
+      } else if (isRedDot) {
+        return "url(#redDotPattern)";
+      } else if (isRedHatch) {
+        return "url(#redHatchPattern)";
+      } else {
+        return COLORS[(displayColor ?? 0) % COLORS.length];
+      }
+    };
+    
+    // Pre-compute all Cairo tile data
+    interface CairoData {
+      row: number;
+      col: number;
+      path: string;
+      fill: string;
+      centroid: [number, number];
+      reachLevel: number | null;
+    }
+    
+    const cairoData: CairoData[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const tile = getCairoTile(row, col);
+        const svgTile = tile.map(toSvg);
+        const path = svgTile.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+        const fill = getCellColor(row, col);
+        const centroid = toSvg(polyCentroid(tile));
+        
+        // Get reachability level if available
+        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
+          ? solution.reachabilityLevels[row][col] 
+          : null;
+
+        cairoData.push({ row, col, path, fill, centroid, reachLevel });
+      }
+    }
+    
+    // Pre-compute walls between tiles
+    interface CairoWall {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    }
+    
+    const cairoWalls: CairoWall[] = [];
+    const processedEdges = new Set<string>();
+    
+    // Find shared edge between two tiles and add wall if needed
+    const findSharedEdge = (
+      tile1: [number, number][],
+      tile2: [number, number][],
+      epsilon: number = 0.001
+    ): [[number, number], [number, number]] | null => {
+      // Check each edge of tile1 against each edge of tile2
+      for (let i = 0; i < tile1.length; i++) {
+        const a1 = tile1[i];
+        const a2 = tile1[(i + 1) % tile1.length];
+        
+        for (let j = 0; j < tile2.length; j++) {
+          const b1 = tile2[j];
+          const b2 = tile2[(j + 1) % tile2.length];
+          
+          // Check if edges share endpoints (in either order)
+          const dist = (p1: [number, number], p2: [number, number]) => 
+            Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
+          
+          if ((dist(a1, b1) < epsilon && dist(a2, b2) < epsilon) ||
+              (dist(a1, b2) < epsilon && dist(a2, b1) < epsilon)) {
+            return [a1, a2];
+          }
+        }
+      }
+      return null;
+    };
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const tile = getCairoTile(row, col);
+        const neighbors = getCairoNeighbors(row, col);
+        
+        for (const [nRow, nCol] of neighbors) {
+          if (nRow < 0 || nRow >= grid.height || nCol < 0 || nCol >= grid.width) {
+            continue;
+          }
+          
+          // Create unique edge key
+          const edgeKey = row < nRow || (row === nRow && col < nCol)
+            ? `${row},${col}-${nRow},${nCol}`
+            : `${nRow},${nCol}-${row},${col}`;
+            
+          if (processedEdges.has(edgeKey)) {
+            continue;
+          }
+          processedEdges.add(edgeKey);
+          
+          if (hasWall(row, col, nRow, nCol)) {
+            const neighborTile = getCairoTile(nRow, nCol);
+            const sharedEdge = findSharedEdge(tile, neighborTile);
+            
+            if (sharedEdge) {
+              const [p1, p2] = sharedEdge.map(toSvg);
+              cairoWalls.push({ x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] });
+            }
+          }
+        }
+      }
+    }
+
+    return (
+      <div
+        className="grid-container"
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block" }}>
+          {/* Define patterns for blank and hatch fills */}
+          <defs>
+            <pattern id="blankPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect width="10" height="10" fill="#f5f5f5"/>
+              <line x1="0" y1="0" x2="10" y2="10" stroke="#e0e0e0" strokeWidth="2"/>
+            </pattern>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#fffde7"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
+            </pattern>
+            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
+              <rect width="20" height="20" fill="#e74c3c"/>
+              <circle cx="10" cy="10" r="4" fill="white"/>
+            </pattern>
+            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
+              <rect width="8" height="8" fill="#e74c3c"/>
+              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
+            </pattern>
+          </defs>
+          
+          {/* First pass: render all Cairo tile fills */}
+          {cairoData.map(({ row, col, path, fill }) => (
+            <path
+              key={`fill-${row}-${col}`}
+              d={path}
+              fill={fill}
+              stroke="#2c3e50"
+              strokeWidth={0.5}
+              style={{ cursor: viewMode === "solution" ? "default" : "pointer" }}
+              onMouseDown={() => handleMouseDown(row, col)}
+              onMouseEnter={() => handleMouseEnter(row, col)}
+            />
+          ))}
+          
+          {/* Second pass: render all walls on top */}
+          {cairoWalls.map((wall, i) => (
+            <line
+              key={`wall-${i}`}
+              x1={wall.x1}
+              y1={wall.y1}
+              x2={wall.x2}
+              y2={wall.y2}
+              stroke="#2c3e50"
+              strokeWidth={wallThickness}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Third pass: render reachability levels on top of everything */}
+          {cairoData.map(({ row, col, centroid, reachLevel }) =>
+            reachLevel !== null && (
+              <text
+                key={`level-${row}-${col}`}
+                x={centroid[0]}
+                y={centroid[1]}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontWeight="bold"
+                fontSize={cellSize > 30 ? "14px" : "10px"}
+                style={{
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {reachLevel === -1 ? "∞" : reachLevel}
+              </text>
+            )
+          )}
+        </svg>
+      </div>
+    );
+  }
+
   // Square grid rendering (original code)
 
   return (
@@ -1223,6 +1604,7 @@ export const Controls: React.FC<ControlsProps> = ({
               <option value="square">Square</option>
               <option value="hex">Hex</option>
               <option value="octagon">Octagon</option>
+              <option value="cairo">Cairo</option>
             </select>
           </label>
         )}
