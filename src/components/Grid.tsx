@@ -1673,7 +1673,9 @@ export const Controls: React.FC<ControlsProps> = ({
   selectedConstraintId: _selectedConstraintId,
   onSelectedConstraintIdChange: _onSelectedConstraintIdChange,
 }) => {
-  // Mark unused props to avoid compiler warnings
+  // Note: Pathlength constraint props are passed through but not used in Controls.
+  // The pathlength constraint management UI is in App.tsx using PathlengthConstraintEditor.
+  // These props are kept for API consistency.
   void _solution;
   void _pathlengthConstraints;
   void _onPathlengthConstraintsChange;

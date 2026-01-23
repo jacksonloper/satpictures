@@ -231,9 +231,9 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
             Minimum distance for cell ({pendingCell.row}, {pendingCell.col}):
           </span>
           <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
+            type="number"
+            min="0"
+            step="1"
             value={distanceInput}
             onChange={(e) => setDistanceInput(e.target.value)}
             onKeyDown={handleDistanceKeyDown}

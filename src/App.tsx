@@ -496,12 +496,11 @@ function App() {
                     {selectedConstraintId && (
                       <button
                         onClick={() => {
-                          setPathlengthConstraints(
-                            pathlengthConstraints.filter(c => c.id !== selectedConstraintId)
-                          );
+                          const remainingConstraints = pathlengthConstraints.filter(c => c.id !== selectedConstraintId);
+                          setPathlengthConstraints(remainingConstraints);
                           setSelectedConstraintId(
-                            pathlengthConstraints.length > 1
-                              ? pathlengthConstraints.find(c => c.id !== selectedConstraintId)?.id ?? null
+                            remainingConstraints.length > 0
+                              ? remainingConstraints[0].id
                               : null
                           );
                         }}
