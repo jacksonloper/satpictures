@@ -86,6 +86,7 @@ interface GridProps {
   gridType?: GridType;
   viewMode?: "sketchpad" | "solution";
   showReachabilityLevels?: boolean;
+  graphMode?: boolean;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -98,6 +99,7 @@ export const Grid: React.FC<GridProps> = ({
   gridType = "square",
   viewMode = "sketchpad",
   showReachabilityLevels = false,
+  graphMode = false,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -171,6 +173,149 @@ export const Grid: React.FC<GridProps> = ({
     gridType,
     wallThickness
   );
+
+  // Graph mode rendering - shows edges as lines and nodes as small dots
+  if (graphMode && solution) {
+    const svgWidth = totalWidth;
+    const svgHeight = totalHeight;
+    const padding = wallThickness;
+    const nodeRadius = cellSize * 0.08; // Small dots for nodes
+    const edgeWidth = cellSize * 0.06; // Thin lines for edges
+    
+    // Helper to get display color for a cell
+    const getNodeColor = (row: number, col: number): string => {
+      const displayColor = solution.assignedColors[row][col];
+      const isHatch = displayColor === HATCH_COLOR;
+      const isRedDot = displayColor === RED_DOT_COLOR;
+      const isRedHatch = displayColor === RED_HATCH_COLOR;
+      
+      if (isHatch) {
+        return "#ff9800"; // Orange for hatch
+      } else if (isRedDot || isRedHatch) {
+        return "#e74c3c"; // Red
+      } else {
+        return COLORS[(displayColor ?? 0) % COLORS.length];
+      }
+    };
+    
+    // Compute node centroids based on grid type
+    interface NodeData {
+      row: number;
+      col: number;
+      cx: number;
+      cy: number;
+      color: string;
+    }
+    
+    const nodes: NodeData[] = [];
+    
+    if (gridType === "square") {
+      for (let row = 0; row < grid.height; row++) {
+        for (let col = 0; col < grid.width; col++) {
+          const cx = col * cellSize + cellSize / 2;
+          const cy = row * cellSize + cellSize / 2;
+          nodes.push({ row, col, cx, cy, color: getNodeColor(row, col) });
+        }
+      }
+    } else if (gridType === "hex") {
+      for (let row = 0; row < grid.height; row++) {
+        for (let col = 0; col < grid.width; col++) {
+          const { cx, cy } = getHexCenter(row, col, hexWidth, hexSize, hexHorizSpacing, hexVertSpacing, padding);
+          nodes.push({ row, col, cx, cy, color: getNodeColor(row, col) });
+        }
+      }
+    } else if (gridType === "octagon") {
+      for (let row = 0; row < grid.height; row++) {
+        for (let col = 0; col < grid.width; col++) {
+          const cx = padding + cellSize / 2 + col * cellSize;
+          const cy = padding + cellSize / 2 + row * cellSize;
+          nodes.push({ row, col, cx, cy, color: getNodeColor(row, col) });
+        }
+      }
+    } else if (gridType === "cairo" || gridType === "cairobridge") {
+      const availableWidth = svgWidth - 2 * padding;
+      const availableHeight = svgHeight - 2 * padding;
+      const toSvg = createCairoTransformer(grid.width, grid.height, availableWidth, availableHeight, padding);
+      
+      for (let row = 0; row < grid.height; row++) {
+        for (let col = 0; col < grid.width; col++) {
+          const tile = getCairoTile(row, col);
+          const centroid = toSvg(polyCentroid(tile));
+          nodes.push({ row, col, cx: centroid[0], cy: centroid[1], color: getNodeColor(row, col) });
+        }
+      }
+    }
+    
+    // Create a lookup map for node positions
+    const nodeMap = new Map<string, NodeData>();
+    for (const node of nodes) {
+      nodeMap.set(`${node.row},${node.col}`, node);
+    }
+    
+    // Compute edges from kept edges
+    interface EdgeData {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color: string;
+    }
+    
+    const edges: EdgeData[] = [];
+    
+    for (const edge of solution.keptEdges) {
+      const node1 = nodeMap.get(`${edge.u.row},${edge.u.col}`);
+      const node2 = nodeMap.get(`${edge.v.row},${edge.v.col}`);
+      
+      if (node1 && node2) {
+        // Use the color of the first node for the edge
+        edges.push({
+          x1: node1.cx,
+          y1: node1.cy,
+          x2: node2.cx,
+          y2: node2.cy,
+          color: node1.color,
+        });
+      }
+    }
+    
+    return (
+      <div
+        className="grid-container"
+        style={{
+          position: "relative",
+          userSelect: "none",
+        }}
+      >
+        <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#f5f5f5" }}>
+          {/* Render edges first (beneath nodes) */}
+          {edges.map((edge, i) => (
+            <line
+              key={`edge-${i}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke={edge.color}
+              strokeWidth={edgeWidth}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Render nodes as small dots on top */}
+          {nodes.map(({ row, col, cx, cy, color }) => (
+            <circle
+              key={`node-${row}-${col}`}
+              cx={cx}
+              cy={cy}
+              r={nodeRadius}
+              fill={color}
+            />
+          ))}
+        </svg>
+      </div>
+    );
+  }
 
   // For hex grid, we use SVG
   if (gridType === "hex") {
