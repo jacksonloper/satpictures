@@ -179,8 +179,11 @@ export const Grid: React.FC<GridProps> = ({
     const svgWidth = totalWidth;
     const svgHeight = totalHeight;
     const padding = wallThickness;
-    const nodeRadius = cellSize * 0.08; // Small dots for nodes
-    const edgeWidth = cellSize * 0.06; // Thin lines for edges
+    // Graph mode sizing constants (as fractions of cellSize)
+    const GRAPH_NODE_RADIUS_RATIO = 0.08; // Small dots for nodes
+    const GRAPH_EDGE_WIDTH_RATIO = 0.06; // Thin lines for edges
+    const nodeRadius = cellSize * GRAPH_NODE_RADIUS_RATIO;
+    const edgeWidth = cellSize * GRAPH_EDGE_WIDTH_RATIO;
     
     // Helper to get display color for a cell
     const getNodeColor = (row: number, col: number): string => {
