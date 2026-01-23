@@ -1,6 +1,15 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridType, PathlengthConstraint } from "../solver";
 import { Grid } from "./Grid";
+import {
+  getHexDimensions,
+  getHexCenter,
+  getCairoTile,
+  polyCentroid,
+  createCairoTransformer,
+  calculateGridDimensions,
+  DEFAULT_WALL_THICKNESS,
+} from "./gridConstants";
 
 type EditorTool = "root" | "distance";
 
@@ -15,6 +24,61 @@ interface PathlengthConstraintEditorProps {
   onConstraintChange: (constraint: PathlengthConstraint) => void;
   /** Cell size for rendering */
   cellSize?: number;
+}
+
+/**
+ * Get the centroid position for a cell based on grid type.
+ * Returns { x, y } in pixels relative to the grid container.
+ */
+function getCellCentroid(
+  row: number,
+  col: number,
+  cellSize: number,
+  gridType: GridType,
+  gridWidth: number,
+  gridHeight: number
+): { x: number; y: number } {
+  const wallThickness = DEFAULT_WALL_THICKNESS;
+  const padding = wallThickness / 2;
+
+  if (gridType === "square") {
+    return {
+      x: col * cellSize + cellSize / 2,
+      y: row * cellSize + cellSize / 2,
+    };
+  }
+
+  if (gridType === "hex") {
+    const { hexSize, hexWidth, hexHorizSpacing, hexVertSpacing } = getHexDimensions(cellSize);
+    const { cx, cy } = getHexCenter(row, col, hexWidth, hexSize, hexHorizSpacing, hexVertSpacing, padding);
+    return { x: cx, y: cy };
+  }
+
+  if (gridType === "octagon") {
+    // Octagon grid uses same layout as square
+    return {
+      x: col * cellSize + cellSize / 2,
+      y: row * cellSize + cellSize / 2,
+    };
+  }
+
+  if (gridType === "cairo" || gridType === "cairobridge") {
+    // Cairo tiles need special handling with the transformer
+    const { totalWidth, totalHeight } = calculateGridDimensions(gridWidth, gridHeight, cellSize, gridType, wallThickness);
+    const availableWidth = totalWidth - 2 * padding;
+    const availableHeight = totalHeight - 2 * padding;
+    const tile = getCairoTile(row, col);
+    const toSvg = createCairoTransformer(gridWidth, gridHeight, availableWidth, availableHeight, padding);
+    const centroid = polyCentroid(tile);
+    const [x, y] = toSvg(centroid);
+    return { x, y };
+  }
+
+  // Fallback to square-like
+  return {
+    x: col * cellSize + cellSize / 2,
+    y: row * cellSize + cellSize / 2,
+  };
 }
 
 /**
@@ -97,19 +161,20 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
 
   // Create a modified grid showing root and distances
   // We'll overlay this information on top of the regular grid
-  const renderOverlay = () => {
+  const renderOverlay = useMemo(() => {
     const overlays: React.ReactNode[] = [];
     
     // Root marker
     if (constraint.root) {
       const { row, col } = constraint.root;
+      const centroid = getCellCentroid(row, col, cellSize, gridType, grid.width, grid.height);
       overlays.push(
         <div
           key="root"
           style={{
             position: "absolute",
-            left: col * cellSize + cellSize / 2,
-            top: row * cellSize + cellSize / 2,
+            left: centroid.x,
+            top: centroid.y,
             transform: "translate(-50%, -50%)",
             width: cellSize * 0.6,
             height: cellSize * 0.6,
@@ -141,13 +206,14 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
         continue;
       }
 
+      const centroid = getCellCentroid(row, col, cellSize, gridType, grid.width, grid.height);
       overlays.push(
         <div
           key={cellKey}
           style={{
             position: "absolute",
-            left: col * cellSize + cellSize / 2,
-            top: row * cellSize + cellSize / 2,
+            left: centroid.x,
+            top: centroid.y,
             transform: "translate(-50%, -50%)",
             minWidth: cellSize * 0.5,
             height: cellSize * 0.4,
@@ -170,7 +236,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
     }
 
     return overlays;
-  };
+  }, [constraint, cellSize, gridType, grid.width, grid.height]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -309,7 +375,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
             pointerEvents: "none",
           }}
         >
-          {renderOverlay()}
+          {renderOverlay}
         </div>
       </div>
 
