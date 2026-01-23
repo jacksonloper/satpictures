@@ -265,8 +265,6 @@ export const Grid: React.FC<GridProps> = ({
       // For octagon/cairobridge: track if this is a diagonal edge and its type
       isDiagonal?: boolean;
       isDownSlant?: boolean; // true = down-slant (NW-SE), false = up-slant (NE-SW)
-      // For identifying crossing pairs in octagon
-      intersectionKey?: string;
     }
     
     const edges: EdgeData[] = [];
@@ -285,15 +283,6 @@ export const Grid: React.FC<GridProps> = ({
       return (dRow > 0 && dCol > 0) || (dRow < 0 && dCol < 0);
     };
     
-    // Helper to get intersection key for octagon diagonal edges
-    // The intersection is at the corner where 4 cells meet
-    const getOctagonIntersectionKey = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
-      const minRow = Math.min(e.u.row, e.v.row);
-      const minCol = Math.min(e.u.col, e.v.col);
-      // Intersection is at (minRow + 1, minCol + 1) in cell coordinates
-      return `${minRow + 1},${minCol + 1}`;
-    };
-    
     for (const edge of solution.keptEdges) {
       const node1 = nodeMap.get(`${edge.u.row},${edge.u.col}`);
       const node2 = nodeMap.get(`${edge.v.row},${edge.v.col}`);
@@ -301,7 +290,6 @@ export const Grid: React.FC<GridProps> = ({
       if (node1 && node2) {
         const diagonal = isDiagonalEdge(edge);
         const downSlant = diagonal ? isDownSlantDiagonal(edge) : undefined;
-        const intKey = (gridType === "octagon" && diagonal) ? getOctagonIntersectionKey(edge) : undefined;
         
         edges.push({
           x1: node1.cx,
@@ -311,7 +299,6 @@ export const Grid: React.FC<GridProps> = ({
           color: node1.color,
           isDiagonal: diagonal,
           isDownSlant: downSlant,
-          intersectionKey: intKey,
         });
       }
     }
@@ -361,21 +348,26 @@ export const Grid: React.FC<GridProps> = ({
     }
     
     const bridges: BridgeData[] = [];
-    const BRIDGE_WIDTH_RATIO = 0.12; // Width of the white bridge
-    const BRIDGE_LENGTH_RATIO = 0.25; // Length of the bridge section
+    // Bridge sizing ratios - chosen for visual clarity at typical cell sizes
+    const BRIDGE_WIDTH_RATIO = 0.12; // Width of the white bridge perpendicular to edge
+    const BRIDGE_LENGTH_RATIO = 0.25; // Length of the bridge section along the edge
     const bridgeWidth = cellSize * BRIDGE_WIDTH_RATIO;
     
     // For up-slant edges (which go "over"), create bridges at crossing points
     if (gridType === "octagon" || gridType === "cairobridge") {
       for (const upEdge of upSlantEdges) {
-        // Find the midpoint of this edge (where it crosses)
-        const midX = (upEdge.x1 + upEdge.x2) / 2;
-        const midY = (upEdge.y1 + upEdge.y2) / 2;
-        
         // Direction vector of the edge
         const dx = upEdge.x2 - upEdge.x1;
         const dy = upEdge.y2 - upEdge.y1;
         const len = Math.sqrt(dx * dx + dy * dy);
+        
+        // Skip zero-length edges to avoid division by zero
+        if (len < 0.001) continue;
+        
+        // Find the midpoint of this edge (where it crosses)
+        const midX = (upEdge.x1 + upEdge.x2) / 2;
+        const midY = (upEdge.y1 + upEdge.y2) / 2;
+        
         const unitX = dx / len;
         const unitY = dy / len;
         
