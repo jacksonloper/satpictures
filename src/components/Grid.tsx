@@ -262,23 +262,144 @@ export const Grid: React.FC<GridProps> = ({
       x2: number;
       y2: number;
       color: string;
+      // For octagon/cairobridge: track if this is a diagonal edge and its type
+      isDiagonal?: boolean;
+      isDownSlant?: boolean; // true = down-slant (NW-SE), false = up-slant (NE-SW)
+      // For identifying crossing pairs in octagon
+      intersectionKey?: string;
     }
     
     const edges: EdgeData[] = [];
+    
+    // Helper to check if an edge is diagonal (different row AND different col)
+    const isDiagonalEdge = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
+      return e.u.row !== e.v.row && e.u.col !== e.v.col;
+    };
+    
+    // Helper to determine if a diagonal is down-slant (NW-SE) or up-slant (NE-SW)
+    const isDownSlantDiagonal = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
+      // Down-slant: when going from smaller row to larger row, col also increases
+      // (row increases, col increases) OR (row decreases, col decreases)
+      const dRow = e.v.row - e.u.row;
+      const dCol = e.v.col - e.u.col;
+      return (dRow > 0 && dCol > 0) || (dRow < 0 && dCol < 0);
+    };
+    
+    // Helper to get intersection key for octagon diagonal edges
+    // The intersection is at the corner where 4 cells meet
+    const getOctagonIntersectionKey = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
+      const minRow = Math.min(e.u.row, e.v.row);
+      const minCol = Math.min(e.u.col, e.v.col);
+      // Intersection is at (minRow + 1, minCol + 1) in cell coordinates
+      return `${minRow + 1},${minCol + 1}`;
+    };
     
     for (const edge of solution.keptEdges) {
       const node1 = nodeMap.get(`${edge.u.row},${edge.u.col}`);
       const node2 = nodeMap.get(`${edge.v.row},${edge.v.col}`);
       
       if (node1 && node2) {
-        // Use the color of the first node for the edge
+        const diagonal = isDiagonalEdge(edge);
+        const downSlant = diagonal ? isDownSlantDiagonal(edge) : undefined;
+        const intKey = (gridType === "octagon" && diagonal) ? getOctagonIntersectionKey(edge) : undefined;
+        
         edges.push({
           x1: node1.cx,
           y1: node1.cy,
           x2: node2.cx,
           y2: node2.cy,
           color: node1.color,
+          isDiagonal: diagonal,
+          isDownSlant: downSlant,
+          intersectionKey: intKey,
         });
+      }
+    }
+    
+    // For octagon and cairobridge, we need to handle crossing edges with bridges
+    // Separate edges into regular edges and crossing diagonal pairs
+    const regularEdges: EdgeData[] = [];
+    const downSlantEdges: EdgeData[] = [];
+    const upSlantEdges: EdgeData[] = [];
+    
+    if (gridType === "octagon") {
+      for (const edge of edges) {
+        if (edge.isDiagonal) {
+          if (edge.isDownSlant) {
+            downSlantEdges.push(edge);
+          } else {
+            upSlantEdges.push(edge);
+          }
+        } else {
+          regularEdges.push(edge);
+        }
+      }
+    } else if (gridType === "cairobridge") {
+      // For cairobridge, identify bridge diagonals (non-Cairo diagonals)
+      for (const edge of edges) {
+        if (edge.isDiagonal) {
+          // Treat all diagonals as potential crossing edges
+          // Down-slant vs up-slant determines layer
+          if (edge.isDownSlant) {
+            downSlantEdges.push(edge);
+          } else {
+            upSlantEdges.push(edge);
+          }
+        } else {
+          regularEdges.push(edge);
+        }
+      }
+    } else {
+      // For other grid types, all edges are regular
+      regularEdges.push(...edges);
+    }
+    
+    // Compute bridge rectangles for crossing edges
+    // The bridge is a white-filled rectangle that the "over" edge passes through
+    interface BridgeData {
+      path: string;
+    }
+    
+    const bridges: BridgeData[] = [];
+    const BRIDGE_WIDTH_RATIO = 0.12; // Width of the white bridge
+    const BRIDGE_LENGTH_RATIO = 0.25; // Length of the bridge section
+    const bridgeWidth = cellSize * BRIDGE_WIDTH_RATIO;
+    
+    // For up-slant edges (which go "over"), create bridges at crossing points
+    if (gridType === "octagon" || gridType === "cairobridge") {
+      for (const upEdge of upSlantEdges) {
+        // Find the midpoint of this edge (where it crosses)
+        const midX = (upEdge.x1 + upEdge.x2) / 2;
+        const midY = (upEdge.y1 + upEdge.y2) / 2;
+        
+        // Direction vector of the edge
+        const dx = upEdge.x2 - upEdge.x1;
+        const dy = upEdge.y2 - upEdge.y1;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const unitX = dx / len;
+        const unitY = dy / len;
+        
+        // Perpendicular vector
+        const perpX = -unitY;
+        const perpY = unitX;
+        
+        // Bridge extends bridgeWidth/2 perpendicular on each side
+        // and BRIDGE_LENGTH_RATIO * len along the edge direction
+        const halfLen = len * BRIDGE_LENGTH_RATIO / 2;
+        const halfWidth = bridgeWidth / 2;
+        
+        // Four corners of the bridge
+        const c1x = midX - unitX * halfLen + perpX * halfWidth;
+        const c1y = midY - unitY * halfLen + perpY * halfWidth;
+        const c2x = midX - unitX * halfLen - perpX * halfWidth;
+        const c2y = midY - unitY * halfLen - perpY * halfWidth;
+        const c3x = midX + unitX * halfLen - perpX * halfWidth;
+        const c3y = midY + unitY * halfLen - perpY * halfWidth;
+        const c4x = midX + unitX * halfLen + perpX * halfWidth;
+        const c4y = midY + unitY * halfLen + perpY * halfWidth;
+        
+        const bridgePath = `M ${c1x} ${c1y} L ${c2x} ${c2y} L ${c3x} ${c3y} L ${c4x} ${c4y} Z`;
+        bridges.push({ path: bridgePath });
       }
     }
     
@@ -291,10 +412,10 @@ export const Grid: React.FC<GridProps> = ({
         }}
       >
         <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#f5f5f5" }}>
-          {/* Render edges first (beneath nodes) */}
-          {edges.map((edge, i) => (
+          {/* Layer 1: Regular edges (non-diagonal) */}
+          {regularEdges.map((edge, i) => (
             <line
-              key={`edge-${i}`}
+              key={`regular-edge-${i}`}
               x1={edge.x1}
               y1={edge.y1}
               x2={edge.x2}
@@ -305,7 +426,45 @@ export const Grid: React.FC<GridProps> = ({
             />
           ))}
           
-          {/* Render nodes as small dots on top */}
+          {/* Layer 2: Down-slant diagonal edges (go "under") */}
+          {downSlantEdges.map((edge, i) => (
+            <line
+              key={`down-edge-${i}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke={edge.color}
+              strokeWidth={edgeWidth}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Layer 3: White bridges for up-slant edges */}
+          {bridges.map((bridge, i) => (
+            <path
+              key={`bridge-${i}`}
+              d={bridge.path}
+              fill="white"
+              stroke="none"
+            />
+          ))}
+          
+          {/* Layer 4: Up-slant diagonal edges (go "over") */}
+          {upSlantEdges.map((edge, i) => (
+            <line
+              key={`up-edge-${i}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke={edge.color}
+              strokeWidth={edgeWidth}
+              strokeLinecap="round"
+            />
+          ))}
+          
+          {/* Layer 5: Render nodes as small dots on top */}
           {nodes.map(({ row, col, cx, cy, color }) => (
             <circle
               key={`node-${row}-${col}`}
