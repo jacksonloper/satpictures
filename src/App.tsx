@@ -71,13 +71,14 @@ function App() {
   const [solverType, setSolverType] = useState<SolverType>("minisat");
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [gridType, setGridType] = useState<GridType>("square");
-  const [showDistanceLevels, setShowDistanceLevels] = useState(false);
   const [graphMode, setGraphMode] = useState(false);
   // Pathlength constraints state
   const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
   const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
   // Sketchpad view mode - colors (normal) or pathlength (constraint editor)
   const [sketchpadViewMode, setSketchpadViewMode] = useState<SketchpadViewMode>("colors");
+  // Selected constraint for showing distance levels in solution viewer (null = don't show levels)
+  const [selectedLevelConstraintId, setSelectedLevelConstraintId] = useState<string | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -632,12 +633,13 @@ function App() {
                   >
                     Download CSV
                   </button>
-                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && (
-                    <button
-                      onClick={() => setShowDistanceLevels(!showDistanceLevels)}
+                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && !graphMode && (
+                    <select
+                      value={selectedLevelConstraintId ?? ""}
+                      onChange={(e) => setSelectedLevelConstraintId(e.target.value || null)}
                       style={{
                         padding: "6px 12px",
-                        backgroundColor: showDistanceLevels ? "#27ae60" : "#95a5a6",
+                        backgroundColor: selectedLevelConstraintId ? "#27ae60" : "#95a5a6",
                         color: "white",
                         border: "none",
                         borderRadius: "4px",
@@ -645,8 +647,18 @@ function App() {
                         fontSize: "13px",
                       }}
                     >
-                      {showDistanceLevels ? "Hide Levels" : "Show Levels"}
-                    </button>
+                      <option value="">Hide Levels</option>
+                      {Object.keys(solution.distanceLevels).map((constraintId, idx) => {
+                        // Try to find a matching constraint to show root info
+                        const constraint = pathlengthConstraints.find(c => c.id === constraintId);
+                        const rootInfo = constraint?.root ? ` (${constraint.root.row},${constraint.root.col})` : "";
+                        return (
+                          <option key={constraintId} value={constraintId}>
+                            Root #{idx + 1}{rootInfo}
+                          </option>
+                        );
+                      })}
+                    </select>
                   )}
                   <button
                     onClick={() => setGraphMode(!graphMode)}
@@ -671,8 +683,8 @@ function App() {
                     solution={solution}
                     cellSize={40}
                     gridType={solutionMetadata.gridType}
-                    showDistanceLevels={showDistanceLevels}
-                    selectedConstraintId={selectedConstraintId}
+                    showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
+                    selectedConstraintId={selectedLevelConstraintId}
                     graphMode={graphMode}
                   />
                 </div>
