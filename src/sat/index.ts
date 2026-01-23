@@ -15,3 +15,4 @@ export {
 } from "./minisat-solver";
 export { CadicalSolver, CadicalFormulaBuilder } from "./cadical-solver";
 export type { CadicalClass, CadicalConstructor, CadicalModule } from "./cadical-types";
+export { DimacsSolver } from "./dimacs-solver";
