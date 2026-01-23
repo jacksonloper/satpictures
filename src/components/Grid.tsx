@@ -88,6 +88,17 @@ export const Grid: React.FC<GridProps> = ({
   // Determine if we should show solution colors (when viewing solution mode and solution exists)
   const showSolutionColors = viewMode === "solution" && solution !== null;
 
+  // Helper to get distance level for a cell
+  const getDistanceLevel = useCallback(
+    (row: number, col: number): number | null => {
+      if (!showDistanceLevels || !selectedConstraintId || !solution?.distanceLevels?.[selectedConstraintId]) {
+        return null;
+      }
+      return solution.distanceLevels[selectedConstraintId][row][col];
+    },
+    [showDistanceLevels, selectedConstraintId, solution]
+  );
+
   // Create a set of kept edge keys for quick lookup
   const keptEdgeSet = useMemo(() => {
     const set = new Set<string>();
@@ -510,9 +521,7 @@ export const Grid: React.FC<GridProps> = ({
         }
         
         // Get distance level if available
-        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
-          ? solution.distanceLevels[selectedConstraintId][row][col] 
-          : null;
+        const reachLevel = getDistanceLevel(row, col);
         
         hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls, reachLevel });
       }
@@ -644,9 +653,7 @@ export const Grid: React.FC<GridProps> = ({
         const fill = getCellColor(row, col);
         
         // Get distance level if available
-        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
-          ? solution.distanceLevels[selectedConstraintId][row][col] 
-          : null;
+        const reachLevel = getDistanceLevel(row, col);
 
         octData.push({ row, col, cx, cy, path, fill, reachLevel });
       }
@@ -989,9 +996,7 @@ export const Grid: React.FC<GridProps> = ({
         const centroid = toSvg(polyCentroid(tile));
         
         // Get distance level if available
-        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
-          ? solution.distanceLevels[selectedConstraintId][row][col] 
-          : null;
+        const reachLevel = getDistanceLevel(row, col);
 
         cairoData.push({ row, col, path, fill, centroid, reachLevel });
       }
@@ -1167,9 +1172,7 @@ export const Grid: React.FC<GridProps> = ({
         const centroid = toSvg(polyCentroid(tile));
         
         // Get distance level if available
-        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
-          ? solution.distanceLevels[selectedConstraintId][row][col] 
-          : null;
+        const reachLevel = getDistanceLevel(row, col);
 
         cairoData.push({ row, col, path, fill, centroid, reachLevel });
       }
@@ -1477,9 +1480,7 @@ export const Grid: React.FC<GridProps> = ({
           const wallBottom = row < grid.height - 1 && hasWall(row, col, row + 1, col);
           
           // Get distance level if available
-          const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
-            ? solution.distanceLevels[selectedConstraintId][row][col] 
-            : null;
+          const reachLevel = getDistanceLevel(row, col);
 
           return (
             <div
