@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution, GridType } from "../solver";
-import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "../solver";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "../solver";
+import { HATCH_COLOR } from "../solver";
 import {
   COLORS,
   HATCH_BG_COLOR,
@@ -24,7 +24,7 @@ import {
 } from "./gridConstants";
 
 // Re-export color constants for convenience
-export { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR };
+export { HATCH_COLOR };
 // Re-export COLORS for components that need it
 export { COLORS };
 
@@ -54,28 +54,6 @@ repeating-linear-gradient(
 ),
 ${HATCH_BG_COLOR}`;
 
-// Red with dot appearance - red background with a white dot (origin for bounded reachability)
-const RED_DOT_BG_COLOR = "#e74c3c"; // red
-const RED_DOT_PATTERN = `radial-gradient(circle at center, white 4px, transparent 4px), #e74c3c`;
-
-// Red with hatch appearance - red background with crosshatch pattern
-const RED_HATCH_BG_COLOR = "#e74c3c"; // red
-const RED_HATCH_PATTERN = `repeating-linear-gradient(
-  45deg,
-  rgba(255, 255, 255, 0.5),
-  rgba(255, 255, 255, 0.5) 2px,
-  transparent 2px,
-  transparent 8px
-),
-repeating-linear-gradient(
-  -45deg,
-  rgba(255, 255, 255, 0.5),
-  rgba(255, 255, 255, 0.5) 2px,
-  transparent 2px,
-  transparent 8px
-),
-#e74c3c`;
-
 interface GridProps {
   grid: ColorGrid;
   solution: GridSolution | null;
@@ -85,7 +63,8 @@ interface GridProps {
   cellSize?: number;
   gridType?: GridType;
   viewMode?: "sketchpad" | "solution";
-  showReachabilityLevels?: boolean;
+  showDistanceLevels?: boolean;
+  selectedConstraintId?: string | null;
   graphMode?: boolean;
 }
 
@@ -98,7 +77,8 @@ export const Grid: React.FC<GridProps> = ({
   cellSize = 40,
   gridType = "square",
   viewMode = "sketchpad",
-  showReachabilityLevels = false,
+  showDistanceLevels = false,
+  selectedConstraintId = null,
   graphMode = false,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
@@ -189,13 +169,9 @@ export const Grid: React.FC<GridProps> = ({
     const getNodeColor = (row: number, col: number): string => {
       const displayColor = solution.assignedColors[row][col];
       const isHatch = displayColor === HATCH_COLOR;
-      const isRedDot = displayColor === RED_DOT_COLOR;
-      const isRedHatch = displayColor === RED_HATCH_COLOR;
       
       if (isHatch) {
         return "#ff9800"; // Orange for hatch
-      } else if (isRedDot || isRedHatch) {
-        return "#e74c3c"; // Red
       } else {
         return COLORS[(displayColor ?? 0) % COLORS.length];
       }
@@ -501,18 +477,12 @@ export const Grid: React.FC<GridProps> = ({
           : inputColor;
         const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
-        const isRedDot = displayColor === RED_DOT_COLOR;
-        const isRedHatch = displayColor === RED_HATCH_COLOR;
         
         let fill: string;
         if (isBlank) {
           fill = "url(#blankPattern)";
         } else if (isHatch) {
           fill = "url(#hatchPattern)";
-        } else if (isRedDot) {
-          fill = "url(#redDotPattern)";
-        } else if (isRedHatch) {
-          fill = "url(#redHatchPattern)";
         } else {
           fill = COLORS[(displayColor ?? 0) % COLORS.length];
         }
@@ -539,9 +509,9 @@ export const Grid: React.FC<GridProps> = ({
           }
         }
         
-        // Get reachability level if available
-        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
-          ? solution.reachabilityLevels[row][col] 
+        // Get distance level if available
+        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
+          ? solution.distanceLevels[selectedConstraintId][row][col] 
           : null;
         
         hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls, reachLevel });
@@ -569,15 +539,6 @@ export const Grid: React.FC<GridProps> = ({
               <rect width="8" height="8" fill="#fffde7"/>
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
-            </pattern>
-            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
-              <rect width="20" height="20" fill="#e74c3c"/>
-              <circle cx="10" cy="10" r="4" fill="white"/>
-            </pattern>
-            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
-              <rect width="8" height="8" fill="#e74c3c"/>
-              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
             </pattern>
           </defs>
           
@@ -652,17 +613,11 @@ export const Grid: React.FC<GridProps> = ({
         : inputColor;
       const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
-      const isRedDot = displayColor === RED_DOT_COLOR;
-      const isRedHatch = displayColor === RED_HATCH_COLOR;
       
       if (isBlank) {
         return "url(#blankPattern)";
       } else if (isHatch) {
         return "url(#hatchPattern)";
-      } else if (isRedDot) {
-        return "url(#redDotPattern)";
-      } else if (isRedHatch) {
-        return "url(#redHatchPattern)";
       } else {
         return COLORS[(displayColor ?? 0) % COLORS.length];
       }
@@ -688,9 +643,9 @@ export const Grid: React.FC<GridProps> = ({
         const path = createOctagonPath(cx, cy, cellSize, octInset);
         const fill = getCellColor(row, col);
         
-        // Get reachability level if available
-        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
-          ? solution.reachabilityLevels[row][col] 
+        // Get distance level if available
+        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
+          ? solution.distanceLevels[selectedConstraintId][row][col] 
           : null;
 
         octData.push({ row, col, cx, cy, path, fill, reachLevel });
@@ -876,15 +831,6 @@ export const Grid: React.FC<GridProps> = ({
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
             </pattern>
-            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
-              <rect width="20" height="20" fill="#e74c3c"/>
-              <circle cx="10" cy="10" r="4" fill="white"/>
-            </pattern>
-            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
-              <rect width="8" height="8" fill="#e74c3c"/>
-              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-            </pattern>
           </defs>
           
           {/* Layer 1: Down-slanting diagonal bands (beneath) - no outline */}
@@ -1012,17 +958,11 @@ export const Grid: React.FC<GridProps> = ({
         : inputColor;
       const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
-      const isRedDot = displayColor === RED_DOT_COLOR;
-      const isRedHatch = displayColor === RED_HATCH_COLOR;
       
       if (isBlank) {
         return "url(#blankPattern)";
       } else if (isHatch) {
         return "url(#hatchPattern)";
-      } else if (isRedDot) {
-        return "url(#redDotPattern)";
-      } else if (isRedHatch) {
-        return "url(#redHatchPattern)";
       } else {
         return COLORS[(displayColor ?? 0) % COLORS.length];
       }
@@ -1048,9 +988,9 @@ export const Grid: React.FC<GridProps> = ({
         const fill = getCellColor(row, col);
         const centroid = toSvg(polyCentroid(tile));
         
-        // Get reachability level if available
-        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
-          ? solution.reachabilityLevels[row][col] 
+        // Get distance level if available
+        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
+          ? solution.distanceLevels[selectedConstraintId][row][col] 
           : null;
 
         cairoData.push({ row, col, path, fill, centroid, reachLevel });
@@ -1123,15 +1063,6 @@ export const Grid: React.FC<GridProps> = ({
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
             </pattern>
-            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
-              <rect width="20" height="20" fill="#e74c3c"/>
-              <circle cx="10" cy="10" r="4" fill="white"/>
-            </pattern>
-            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
-              <rect width="8" height="8" fill="#e74c3c"/>
-              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-            </pattern>
           </defs>
           
           {/* First pass: render all Cairo tile fills */}
@@ -1160,7 +1091,7 @@ export const Grid: React.FC<GridProps> = ({
             />
           ))}
           
-          {/* Third pass: render reachability levels on top of everything */}
+          {/* Third pass: render distance levels on top of everything */}
           {cairoData.map(({ row, col, centroid, reachLevel }) =>
             reachLevel !== null && (
               <text
@@ -1205,17 +1136,11 @@ export const Grid: React.FC<GridProps> = ({
         : inputColor;
       const isBlank = inputColor === null && !showSolutionColors;
       const isHatch = displayColor === HATCH_COLOR;
-      const isRedDot = displayColor === RED_DOT_COLOR;
-      const isRedHatch = displayColor === RED_HATCH_COLOR;
       
       if (isBlank) {
         return "url(#blankPattern)";
       } else if (isHatch) {
         return "url(#hatchPattern)";
-      } else if (isRedDot) {
-        return "url(#redDotPattern)";
-      } else if (isRedHatch) {
-        return "url(#redHatchPattern)";
       } else {
         return COLORS[(displayColor ?? 0) % COLORS.length];
       }
@@ -1241,9 +1166,9 @@ export const Grid: React.FC<GridProps> = ({
         const fill = getCellColor(row, col);
         const centroid = toSvg(polyCentroid(tile));
         
-        // Get reachability level if available
-        const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
-          ? solution.reachabilityLevels[row][col] 
+        // Get distance level if available
+        const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
+          ? solution.distanceLevels[selectedConstraintId][row][col] 
           : null;
 
         cairoData.push({ row, col, path, fill, centroid, reachLevel });
@@ -1423,15 +1348,6 @@ export const Grid: React.FC<GridProps> = ({
               <line x1="0" y1="0" x2="8" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
               <line x1="8" y1="0" x2="0" y2="8" stroke="#ff9800" strokeWidth="1.5"/>
             </pattern>
-            <pattern id="redDotPattern" patternUnits="userSpaceOnUse" width="20" height="20">
-              <rect width="20" height="20" fill="#e74c3c"/>
-              <circle cx="10" cy="10" r="4" fill="white"/>
-            </pattern>
-            <pattern id="redHatchPattern" patternUnits="userSpaceOnUse" width="8" height="8">
-              <rect width="8" height="8" fill="#e74c3c"/>
-              <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-              <line x1="8" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"/>
-            </pattern>
           </defs>
           
           {/* First pass: render all Cairo tile fills */}
@@ -1541,8 +1457,6 @@ export const Grid: React.FC<GridProps> = ({
             : inputColor;
           const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
-          const isRedDot = displayColor === RED_DOT_COLOR;
-          const isRedHatch = displayColor === RED_HATCH_COLOR;
           
           // Determine background
           let bgColor: string;
@@ -1553,12 +1467,6 @@ export const Grid: React.FC<GridProps> = ({
           } else if (isHatch) {
             bgColor = HATCH_BG_COLOR;
             bgPattern = HATCH_PATTERN;
-          } else if (isRedDot) {
-            bgColor = RED_DOT_BG_COLOR;
-            bgPattern = RED_DOT_PATTERN;
-          } else if (isRedHatch) {
-            bgColor = RED_HATCH_BG_COLOR;
-            bgPattern = RED_HATCH_PATTERN;
           } else {
             bgColor = COLORS[(displayColor ?? 0) % COLORS.length];
             bgPattern = bgColor;
@@ -1568,9 +1476,9 @@ export const Grid: React.FC<GridProps> = ({
           const wallRight = col < grid.width - 1 && hasWall(row, col, row, col + 1);
           const wallBottom = row < grid.height - 1 && hasWall(row, col, row + 1, col);
           
-          // Get reachability level if available
-          const reachLevel = showReachabilityLevels && solution?.reachabilityLevels 
-            ? solution.reachabilityLevels[row][col] 
+          // Get distance level if available
+          const reachLevel = showDistanceLevels && selectedConstraintId && solution?.distanceLevels?.[selectedConstraintId]
+            ? solution.distanceLevels[selectedConstraintId][row][col] 
             : null;
 
           return (
@@ -1706,48 +1614,6 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
         }}
         title="Hatch (doesn't need to be connected)"
       />
-      {/* Red with Dot - origin for bounded reachability (at most one) */}
-      <button
-        onClick={() => onColorSelect(RED_DOT_COLOR)}
-        style={{
-          width: "36px",
-          height: "36px",
-          background: RED_DOT_PATTERN,
-          border:
-            selectedColor === RED_DOT_COLOR
-              ? "3px solid #2c3e50"
-              : "2px solid #bdc3c7",
-          borderRadius: "4px",
-          cursor: "pointer",
-          outline: "none",
-          boxShadow:
-            selectedColor === RED_DOT_COLOR
-              ? "0 0 0 2px #3498db"
-              : "none",
-        }}
-        title="Red with Dot (origin - at most one allowed)"
-      />
-      {/* Red with Hatch - must be at reachability > K from origin */}
-      <button
-        onClick={() => onColorSelect(RED_HATCH_COLOR)}
-        style={{
-          width: "36px",
-          height: "36px",
-          background: RED_HATCH_PATTERN,
-          border:
-            selectedColor === RED_HATCH_COLOR
-              ? "3px solid #2c3e50"
-              : "2px solid #bdc3c7",
-          borderRadius: "4px",
-          cursor: "pointer",
-          outline: "none",
-          boxShadow:
-            selectedColor === RED_HATCH_COLOR
-              ? "0 0 0 2px #3498db"
-              : "none",
-        }}
-        title="Red with Hatch (reachability > K from origin)"
-      />
     </div>
   );
 };
@@ -1767,16 +1633,16 @@ interface ControlsProps {
   solverType?: "minisat" | "cadical";
   onSolverTypeChange?: (solverType: "minisat" | "cadical") => void;
   solveTime?: number | null;
-  minWallsProportion?: number;
-  onMinWallsProportionChange?: (proportion: number) => void;
   solution?: GridSolution | null;
   gridType?: GridType;
   onGridTypeChange?: (gridType: GridType) => void;
   onDownloadColors?: () => void;
   onUploadColors?: (file: File) => void;
   grid?: { colors: (number | null)[][] };
-  reachabilityK?: number;
-  onReachabilityKChange?: (k: number) => void;
+  pathlengthConstraints?: PathlengthConstraint[];
+  onPathlengthConstraintsChange?: (constraints: PathlengthConstraint[]) => void;
+  selectedConstraintId?: string | null;
+  onSelectedConstraintIdChange?: (id: string | null) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -1794,30 +1660,27 @@ export const Controls: React.FC<ControlsProps> = ({
   solverType = "minisat",
   onSolverTypeChange,
   solveTime,
-  minWallsProportion = 0,
-  onMinWallsProportionChange,
   solution: _solution,
   gridType = "square",
   onGridTypeChange,
   onDownloadColors,
   onUploadColors,
   grid,
-  reachabilityK = 0,
-  onReachabilityKChange,
+  // Unused props (will be used later for pathlength constraints UI)
+  pathlengthConstraints: _pathlengthConstraints,
+  onPathlengthConstraintsChange: _onPathlengthConstraintsChange,
+  selectedConstraintId: _selectedConstraintId,
+  onSelectedConstraintIdChange: _onSelectedConstraintIdChange,
 }) => {
-  // solution is received but not used in Controls (SVG download moved to solution panel)
+  // Mark unused props to avoid compiler warnings
   void _solution;
+  void _pathlengthConstraints;
+  void _onPathlengthConstraintsChange;
+  void _selectedConstraintId;
+  void _onSelectedConstraintIdChange;
   
   // File input ref for upload
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  
-  // Local state for K value input to allow empty while typing
-  const [localKValue, setLocalKValue] = useState<string>(reachabilityK.toString());
-  
-  // Sync local state when prop changes (e.g., from parent)
-  React.useEffect(() => {
-    setLocalKValue(reachabilityK.toString());
-  }, [reachabilityK]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1829,29 +1692,6 @@ export const Controls: React.FC<ControlsProps> = ({
       fileInputRef.current.value = "";
     }
   }, [onUploadColors]);
-  
-  const handleKValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setLocalKValue(value);
-    // Update parent immediately with parsed value (allows real-time updates)
-    // but allow empty string temporarily during editing
-    if (value !== '' && onReachabilityKChange) {
-      const parsed = parseInt(value);
-      if (!isNaN(parsed)) {
-        onReachabilityKChange(Math.max(0, parsed));
-      }
-    }
-  }, [onReachabilityKChange]);
-  
-  const handleKValueBlur = useCallback(() => {
-    // On blur, normalize empty to 0
-    const parsed = parseInt(localKValue);
-    const validValue = isNaN(parsed) ? 0 : Math.max(0, parsed);
-    setLocalKValue(validValue.toString());
-    if (onReachabilityKChange) {
-      onReachabilityKChange(validValue);
-    }
-  }, [localKValue, onReachabilityKChange]);
 
   return (
     <div style={{ marginBottom: "16px" }}>
@@ -1926,41 +1766,6 @@ export const Controls: React.FC<ControlsProps> = ({
               <option value="cairo">Cairo</option>
               <option value="cairobridge">Cairo Bridge</option>
             </select>
-          </label>
-        )}
-        {onMinWallsProportionChange && (
-          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <span style={{ minWidth: "50px" }}>Min Walls:</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={Math.round(minWallsProportion * 100)}
-              onChange={(e) => onMinWallsProportionChange(parseInt(e.target.value) / 100)}
-              style={{ flex: 1, cursor: "pointer" }}
-            />
-            <span style={{ minWidth: "36px", textAlign: "right" }}>{Math.round(minWallsProportion * 100)}%</span>
-          </label>
-        )}
-        {onReachabilityKChange && (
-          <label style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <span style={{ minWidth: "50px" }}>K Value:</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={localKValue}
-              onChange={handleKValueChange}
-              onBlur={handleKValueBlur}
-              style={{
-                width: "60px",
-                padding: "4px 8px",
-                borderRadius: "4px",
-                border: "1px solid #bdc3c7",
-                fontSize: "14px",
-              }}
-            />
-            <span style={{ fontSize: "12px", color: "#7f8c8d" }}>(Red+Hatch must have reachability &gt; K)</span>
           </label>
         )}
       </div>

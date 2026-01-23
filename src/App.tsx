@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
-import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
-import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "./solver";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType } from "./solver";
+import { HATCH_COLOR } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
@@ -11,7 +11,6 @@ interface SolutionMetadata {
   gridType: GridType;
   width: number;
   height: number;
-  reachabilityK: number; // K value that was used for the solve
 }
 
 function createEmptyGrid(width: number, height: number): ColorGrid {
@@ -28,24 +27,15 @@ function createMazeSetupGrid(
   width: number,
   height: number
 ): ColorGrid {
-  // Maze setup for bounded reachability problem:
+  // Maze setup: 
   // - Orange hatch (HATCH_COLOR) all the way around the border (walls)
-  // - Red dot (RED_DOT_COLOR) at position (1, 0) - second row, first column (origin)
-  // - Red hatch (RED_HATCH_COLOR) at position (height-2, width-1) - penultimate row, last column (target)
   // - All other interior cells: red (color 0)
-  // 
-  // This creates a maze where the solver must find a path from origin to target
-  // with distance > K through the red interior.
   return {
     width,
     height,
     colors: Array.from({ length: height }, (_, row) =>
       Array.from({ length: width }, (_, col) => {
-        // Origin: second row, first column - red dot
-        if (row === 1 && col === 0) return RED_DOT_COLOR;
-        // Target: penultimate row, last column - red hatch
-        if (row === height - 2 && col === width - 1) return RED_HATCH_COLOR;
-        // Border cells (except origin and target): orange hatch (walls)
+        // Border cells: orange hatch (walls)
         if (row === 0 || row === height - 1 || col === 0 || col === width - 1) {
           return HATCH_COLOR;
         }
@@ -72,11 +62,12 @@ function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [solverType, setSolverType] = useState<SolverType>("minisat");
   const [solveTime, setSolveTime] = useState<number | null>(null);
-  const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
-  const [reachabilityK, setReachabilityK] = useState(0);
-  const [showReachabilityLevels, setShowReachabilityLevels] = useState(false);
+  const [showDistanceLevels, setShowDistanceLevels] = useState(false);
   const [graphMode, setGraphMode] = useState(false);
+  // Pathlength constraints state
+  const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
+  const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -158,7 +149,6 @@ function App() {
     const currentGridType = gridType;
     const currentWidth = grid.width;
     const currentHeight = grid.height;
-    const currentK = reachabilityK;
 
     // Create a new worker based on solver type
     const worker = solverType === "cadical" ? new CadicalWorker() : new SolverWorker();
@@ -175,7 +165,6 @@ function App() {
           gridType: currentGridType,
           width: currentWidth,
           height: currentHeight,
-          reachabilityK: currentK,
         });
         setSolutionStatus("found");
         setErrorMessage(null);
@@ -205,10 +194,16 @@ function App() {
       workerRef.current = null;
     };
 
-    // Send the solve request
-    const request: SolverRequest = { grid, numColors, minWallsProportion, gridType, reachabilityK };
+    // Send the solve request with clear JSON interface
+    const request: SolverRequest = { 
+      gridType, 
+      width: grid.width, 
+      height: grid.height, 
+      colors: grid.colors, 
+      pathlengthConstraints 
+    };
     worker.postMessage(request);
-  }, [grid, numColors, solverType, minWallsProportion, gridType, reachabilityK]);
+  }, [grid, solverType, gridType, pathlengthConstraints]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -390,16 +385,16 @@ function App() {
               solverType={solverType}
               onSolverTypeChange={setSolverType}
               solveTime={solveTime}
-              minWallsProportion={minWallsProportion}
-              onMinWallsProportionChange={setMinWallsProportion}
               solution={solution}
               gridType={gridType}
               onGridTypeChange={handleGridTypeChange}
               onDownloadColors={handleDownloadSketchpadColors}
               onUploadColors={handleUploadColors}
               grid={grid}
-              reachabilityK={reachabilityK}
-              onReachabilityKChange={setReachabilityK}
+              pathlengthConstraints={pathlengthConstraints}
+              onPathlengthConstraintsChange={setPathlengthConstraints}
+              selectedConstraintId={selectedConstraintId}
+              onSelectedConstraintIdChange={setSelectedConstraintId}
             />
 
             <h3 style={{ marginTop: "16px" }}>Colors</h3>
@@ -441,7 +436,6 @@ function App() {
                 <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
                   Most recent solver output ({solutionMetadata.width}×{solutionMetadata.height} {solutionMetadata.gridType} grid).
                   {solveTime && ` Solved in ${solveTime.toFixed(0)}ms.`}
-                  {solutionMetadata.reachabilityK > 0 && ` K=${solutionMetadata.reachabilityK}.`}
                 </p>
                 
                 {/* Solution action buttons */}
@@ -488,12 +482,12 @@ function App() {
                   >
                     Download CSV
                   </button>
-                  {solution.reachabilityLevels && (
+                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && (
                     <button
-                      onClick={() => setShowReachabilityLevels(!showReachabilityLevels)}
+                      onClick={() => setShowDistanceLevels(!showDistanceLevels)}
                       style={{
                         padding: "6px 12px",
-                        backgroundColor: showReachabilityLevels ? "#27ae60" : "#95a5a6",
+                        backgroundColor: showDistanceLevels ? "#27ae60" : "#95a5a6",
                         color: "white",
                         border: "none",
                         borderRadius: "4px",
@@ -501,7 +495,7 @@ function App() {
                         fontSize: "13px",
                       }}
                     >
-                      {showReachabilityLevels ? "Hide Levels" : "Show Levels"}
+                      {showDistanceLevels ? "Hide Levels" : "Show Levels"}
                     </button>
                   )}
                   <button
@@ -527,7 +521,8 @@ function App() {
                     solution={solution}
                     cellSize={40}
                     gridType={solutionMetadata.gridType}
-                    showReachabilityLevels={showReachabilityLevels}
+                    showDistanceLevels={showDistanceLevels}
+                    selectedConstraintId={selectedConstraintId}
                     graphMode={graphMode}
                   />
                 </div>
