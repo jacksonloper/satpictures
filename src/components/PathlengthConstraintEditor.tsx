@@ -214,43 +214,77 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
           : "Click on a cell to specify a minimum distance from the root."}
       </p>
 
-      {/* Distance input modal */}
+      {/* Distance input modal - prominent dialog for mobile compatibility */}
       {pendingCell && (
         <div
           style={{
-            padding: "12px",
+            padding: "16px",
             backgroundColor: "#fff3cd",
-            borderRadius: "4px",
-            border: "1px solid #ffc107",
+            borderRadius: "8px",
+            border: "2px solid #ffc107",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
             display: "flex",
-            alignItems: "center",
-            gap: "8px",
+            flexDirection: "column",
+            gap: "12px",
           }}
         >
-          <span>
-            Minimum distance for cell ({pendingCell.row}, {pendingCell.col}):
-          </span>
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={distanceInput}
-            onChange={(e) => setDistanceInput(e.target.value)}
-            onKeyDown={handleDistanceKeyDown}
-            onBlur={handleDistanceSubmit}
-            autoFocus
-            style={{
-              width: "60px",
-              padding: "4px 8px",
-              borderRadius: "4px",
-              border: "1px solid #bdc3c7",
-              fontSize: "14px",
-            }}
-            placeholder="e.g. 5"
-          />
-          <span style={{ fontSize: "12px", color: "#7f8c8d" }}>
-            (Enter positive integer, empty/0 to remove)
-          </span>
+          <div style={{ fontWeight: "bold", fontSize: "14px" }}>
+            Set minimum distance for cell ({pendingCell.row}, {pendingCell.col})
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={distanceInput}
+              onChange={(e) => setDistanceInput(e.target.value)}
+              onKeyDown={handleDistanceKeyDown}
+              autoFocus
+              style={{
+                width: "80px",
+                padding: "8px 12px",
+                borderRadius: "4px",
+                border: "2px solid #3498db",
+                fontSize: "16px",
+              }}
+              placeholder="e.g. 5"
+            />
+            <button
+              onClick={handleDistanceSubmit}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#27ae60",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontWeight: "bold",
+                fontSize: "14px",
+              }}
+            >
+              Save
+            </button>
+            <button
+              onClick={() => {
+                setPendingCell(null);
+                setDistanceInput("");
+              }}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#95a5a6",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+          <div style={{ fontSize: "12px", color: "#7f8c8d" }}>
+            Enter a positive integer for minimum distance, or 0/empty to remove constraint.
+          </div>
         </div>
       )}
 
