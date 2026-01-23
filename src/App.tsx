@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
+import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType } from "./solver";
 import { HATCH_COLOR } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
+
+// View modes for the sketchpad panel
+type SketchpadViewMode = "colors" | "pathlength";
 
 // Solution metadata - stored separately because solution may have different dimensions/type than current sketchpad
 interface SolutionMetadata {
@@ -46,6 +49,11 @@ function createMazeSetupGrid(
   };
 }
 
+/** Generate a unique ID for a new pathlength constraint */
+function generateConstraintId(): string {
+  return `plc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
 function App() {
   const [gridWidth, setGridWidth] = useState(6);
   const [gridHeight, setGridHeight] = useState(6);
@@ -68,6 +76,8 @@ function App() {
   // Pathlength constraints state
   const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
   const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
+  // Sketchpad view mode - colors (normal) or pathlength (constraint editor)
+  const [sketchpadViewMode, setSketchpadViewMode] = useState<SketchpadViewMode>("colors");
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -365,8 +375,43 @@ function App() {
             <h2 style={{ margin: "0 0 16px 0", color: "#2c3e50", fontSize: "1.3em" }}>
               📝 Sketchpad
             </h2>
+            
+            {/* View Mode Toggle */}
+            <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+              <button
+                onClick={() => setSketchpadViewMode("colors")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: sketchpadViewMode === "colors" ? "#3498db" : "#bdc3c7",
+                  color: sketchpadViewMode === "colors" ? "white" : "#2c3e50",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontWeight: sketchpadViewMode === "colors" ? "bold" : "normal",
+                }}
+              >
+                🎨 Colors
+              </button>
+              <button
+                onClick={() => setSketchpadViewMode("pathlength")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: sketchpadViewMode === "pathlength" ? "#3498db" : "#bdc3c7",
+                  color: sketchpadViewMode === "pathlength" ? "white" : "#2c3e50",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontWeight: sketchpadViewMode === "pathlength" ? "bold" : "normal",
+                }}
+              >
+                📏 Pathlength Constraints ({pathlengthConstraints.length})
+              </button>
+            </div>
+
             <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
-              Click cells to paint colors. Click Solve to generate a solution.
+              {sketchpadViewMode === "colors" 
+                ? "Click cells to paint colors. Click Solve to generate a solution."
+                : "Add pathlength lower bound constraints. Each constraint specifies minimum distances from a root cell."}
             </p>
             
             {/* Sketchpad Controls */}
@@ -397,25 +442,131 @@ function App() {
               onSelectedConstraintIdChange={setSelectedConstraintId}
             />
 
-            <h3 style={{ marginTop: "16px" }}>Colors</h3>
-            <ColorPalette
-              selectedColor={selectedColor}
-              onColorSelect={setSelectedColor}
-              numColors={numColors}
-            />
+            {sketchpadViewMode === "colors" ? (
+              <>
+                <h3 style={{ marginTop: "16px" }}>Colors</h3>
+                <ColorPalette
+                  selectedColor={selectedColor}
+                  onColorSelect={setSelectedColor}
+                  numColors={numColors}
+                />
 
-            {/* Sketchpad Grid */}
-            <div style={{ marginTop: "16px" }}>
-              <SketchpadGrid
-                grid={grid}
-                solution={null}
-                selectedColor={selectedColor}
-                onCellClick={handleCellClick}
-                onCellDrag={handleCellDrag}
-                cellSize={40}
-                gridType={gridType}
-              />
-            </div>
+                {/* Sketchpad Grid */}
+                <div style={{ marginTop: "16px" }}>
+                  <SketchpadGrid
+                    grid={grid}
+                    solution={null}
+                    selectedColor={selectedColor}
+                    onCellClick={handleCellClick}
+                    onCellDrag={handleCellDrag}
+                    cellSize={40}
+                    gridType={gridType}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 style={{ marginTop: "16px" }}>Pathlength Constraints</h3>
+                
+                {/* Constraint List and Management */}
+                <div style={{ marginBottom: "12px" }}>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+                    <button
+                      onClick={() => {
+                        const newConstraint: PathlengthConstraint = {
+                          id: generateConstraintId(),
+                          root: null,
+                          minDistances: {},
+                        };
+                        setPathlengthConstraints([...pathlengthConstraints, newConstraint]);
+                        setSelectedConstraintId(newConstraint.id);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: "#27ae60",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      + Add Constraint
+                    </button>
+                    {selectedConstraintId && (
+                      <button
+                        onClick={() => {
+                          setPathlengthConstraints(
+                            pathlengthConstraints.filter(c => c.id !== selectedConstraintId)
+                          );
+                          setSelectedConstraintId(
+                            pathlengthConstraints.length > 1
+                              ? pathlengthConstraints.find(c => c.id !== selectedConstraintId)?.id ?? null
+                              : null
+                          );
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#e74c3c",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "13px",
+                        }}
+                      >
+                        Delete Selected
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Constraint selector */}
+                  {pathlengthConstraints.length > 0 && (
+                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                      {pathlengthConstraints.map((c, idx) => (
+                        <button
+                          key={c.id}
+                          onClick={() => setSelectedConstraintId(c.id)}
+                          style={{
+                            padding: "4px 10px",
+                            backgroundColor: selectedConstraintId === c.id ? "#3498db" : "#ecf0f1",
+                            color: selectedConstraintId === c.id ? "white" : "#2c3e50",
+                            border: "1px solid #bdc3c7",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                          }}
+                        >
+                          #{idx + 1}
+                          {c.root && ` (${c.root.row},${c.root.col})`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Constraint Editor */}
+                {selectedConstraintId && pathlengthConstraints.find(c => c.id === selectedConstraintId) && (
+                  <PathlengthConstraintEditor
+                    grid={grid}
+                    gridType={gridType}
+                    constraint={pathlengthConstraints.find(c => c.id === selectedConstraintId)!}
+                    onConstraintChange={(updated) => {
+                      setPathlengthConstraints(
+                        pathlengthConstraints.map(c => c.id === updated.id ? updated : c)
+                      );
+                    }}
+                    cellSize={40}
+                  />
+                )}
+
+                {pathlengthConstraints.length === 0 && (
+                  <p style={{ color: "#7f8c8d", fontStyle: "italic" }}>
+                    No pathlength constraints yet. Click "Add Constraint" to create one.
+                  </p>
+                )}
+              </>
+            )}
           </div>
         </div>
 
