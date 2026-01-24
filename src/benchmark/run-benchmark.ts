@@ -345,12 +345,20 @@ function runBenchmarkAvg(
     results.push(runBenchmark(grid, pathlengthConstraints, cadicalModule));
   }
   
-  // Calculate average time
-  const avgTime = results.reduce((sum, r) => sum + r.totalTimeMs, 0) / iterations;
+  // Filter to only successful results
+  const successfulResults = results.filter(r => r.success);
   
-  // Return first result with averaged time
+  // If no successful results, return the first failed result
+  if (successfulResults.length === 0) {
+    return results[0];
+  }
+  
+  // Calculate average time from successful runs
+  const avgTime = successfulResults.reduce((sum, r) => sum + r.totalTimeMs, 0) / successfulResults.length;
+  
+  // Return first successful result with averaged time
   return {
-    ...results[0],
+    ...successfulResults[0],
     totalTimeMs: avgTime,
   };
 }
