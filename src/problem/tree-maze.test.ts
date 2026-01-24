@@ -11,15 +11,9 @@ import type { ColorGrid, PathlengthConstraint } from "./graph-types";
 import { HATCH_COLOR } from "./graph-types";
 
 /**
- * Creates the same grid and constraint as the "Maze Setup" button in App.tsx
- * but adjusted for tree maze mode with a specified target distance.
+ * Creates the maze grid (same as "Maze Setup" button in App.tsx)
  */
-function createTreeMazeSetup(
-  width: number,
-  height: number,
-  targetDistance: number
-): { grid: ColorGrid; constraint: PathlengthConstraint } {
-  // Position the entrance and exit at the middle row of left/right borders
+function createMazeGrid(width: number, height: number): ColorGrid {
   const middleRow = Math.floor(height / 2);
   const entranceCol = 0;
   const exitCol = width - 1;
@@ -43,7 +37,23 @@ function createTreeMazeSetup(
     })
   );
 
-  const grid: ColorGrid = { width, height, colors };
+  return { width, height, colors };
+}
+
+/**
+ * Creates the same grid and constraint as the "Maze Setup" button in App.tsx
+ * but adjusted for tree maze mode with a specified target distance.
+ */
+function createTreeMazeSetup(
+  width: number,
+  height: number,
+  targetDistance: number
+): { grid: ColorGrid; constraint: PathlengthConstraint } {
+  const middleRow = Math.floor(height / 2);
+  const entranceCol = 0;
+  const exitCol = width - 1;
+
+  const grid = createMazeGrid(width, height);
 
   // Create pathlength constraint with tree maze mode enabled
   const constraint: PathlengthConstraint = {
@@ -63,21 +73,10 @@ describe("Tree Maze Pathlength Constraints", () => {
     const width = 11;
     const height = 11;
     
-    // Create the maze setup
     const middleRow = Math.floor(height / 2);
     const entranceCol = 0;
-    const exitCol = width - 1;
-
-    const colors = Array.from({ length: height }, (_, row) =>
-      Array.from({ length: width }, (_, col) => {
-        if (row === middleRow && col === entranceCol) return 0;
-        if (row === middleRow && col === exitCol) return 0;
-        if (row === 0 || row === height - 1 || col === 0 || col === width - 1) return HATCH_COLOR;
-        return 0;
-      })
-    );
-
-    const grid: ColorGrid = { width, height, colors };
+    
+    const grid = createMazeGrid(width, height);
 
     // Create constraint with tree maze but NO distance requirements
     const constraint: PathlengthConstraint = {

@@ -567,12 +567,14 @@ export function solveGridColoring(
         }
       }
       
-      // Root has level 0
+      // Root has level 0 - this must exist since root should not be HATCH
       const rootKey = `${root.row},${root.col}`;
       const rootBits = treeLevelVars.get(rootKey);
-      if (rootBits) {
-        constrainBinaryEqual(builder, rootBits, 0);
+      if (!rootBits) {
+        // Root is HATCH or otherwise invalid - tree maze cannot work
+        throw new Error(`Tree maze root at (${root.row}, ${root.col}) is a HATCH cell and cannot be used as root`);
       }
+      constrainBinaryEqual(builder, rootBits, 0);
       
       // Create tree parent variables: treeParent[v][u] = "u is the parent of v in the tree"
       const treeParentVars = new Map<string, number>();
@@ -612,42 +614,11 @@ export function solveGridColoring(
         }
       }
       
-      // KEY CONSTRAINT FOR TREE STRUCTURE (TEMPORARILY DISABLED):
-      // This constraint forces all kept edges to be part of the tree structure,
-      // but it conflicts with the connectivity spanning tree constraints.
-      // TODO: Need to integrate tree maze with the connectivity encoding properly.
-      /*
-      for (let row = 0; row < height; row++) {
-        for (let col = 0; col < width; col++) {
-          // Skip HATCH cells
-          if (isHatchCell(row, col)) continue;
-          
-          const v: GridPoint = { row, col };
-          const neighbors = getNeighbors(v, width, height, gridType);
-          
-          for (const u of neighbors) {
-            // Skip edges to HATCH cells
-            if (isHatchCell(u.row, u.col)) continue;
-            
-            // Only process each edge once (when u < v lexicographically)
-            if (u.row > v.row || (u.row === v.row && u.col >= v.col)) continue;
-            
-            const eKey = edgeKey(u, v);
-            const edgeVar = edgeVars.get(eKey);
-            if (edgeVar === undefined) continue;
-            
-            const pUV = treeParentVars.get(treeParentKey(v, u)); // u is parent of v
-            const pVU = treeParentVars.get(treeParentKey(u, v)); // v is parent of u
-            
-            if (pUV !== undefined && pVU !== undefined) {
-              // edge(u,v) → (parent(u,v) ∨ parent(v,u))
-              // -edge ∨ parent(u,v) ∨ parent(v,u)
-              builder.solver.addClause([-edgeVar, pUV, pVU]);
-            }
-          }
-        }
-      }
-      */
+      // TODO: The tree edge constraint (edge → parent_relationship) that would enforce
+      // exact distances on kept edges has been removed because it conflicts with the
+      // connectivity encoding's spanning trees. To properly implement tree maze mode,
+      // this needs to be integrated with the connectivity encoding itself.
+      // See: https://github.com/jacksonloper/satpictures/issues/XX (tree maze bug)
       
       // Each non-root, non-HATCH cell: at most one parent (allows cells to not be in tree)
       for (let row = 0; row < height; row++) {
