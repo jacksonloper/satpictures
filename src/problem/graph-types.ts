@@ -56,6 +56,12 @@ export interface PathlengthConstraint {
 }
 
 /**
+ * Map from color index to root cell for that color.
+ * Key is string representation of the color number.
+ */
+export type ColorRoots = Record<string, GridPoint>;
+
+/**
  * Solution: which edges to keep (no wall) and assigned colors for blank cells
  */
 export interface GridSolution {

@@ -9,6 +9,7 @@
 export { HATCH_COLOR } from "./graph-types";
 export type {
   ColorGrid,
+  ColorRoots,
   Edge,
   GridPoint,
   GridSolution,

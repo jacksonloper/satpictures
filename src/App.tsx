@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType } from "./problem";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType, ColorRoots } from "./problem";
 import { HATCH_COLOR } from "./problem";
 import SolverWorker from "./problem/solver.worker?worker";
 import CadicalWorker from "./problem/cadical.worker?worker";
 import "./App.css";
 
 // View modes for the sketchpad panel
-type SketchpadViewMode = "colors" | "pathlength";
+type SketchpadViewMode = "colors" | "pathlength" | "roots";
 
 // Solution metadata - stored separately because solution may have different dimensions/type than current sketchpad
 interface SolutionMetadata {
@@ -108,10 +108,12 @@ function App() {
   // Pathlength constraints state
   const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
   const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
-  // Sketchpad view mode - colors (normal) or pathlength (constraint editor)
+  // Sketchpad view mode - colors (normal), pathlength (constraint editor), or roots (set tree roots)
   const [sketchpadViewMode, setSketchpadViewMode] = useState<SketchpadViewMode>("colors");
   // Selected constraint for showing distance levels in solution viewer (null = don't show levels)
   const [selectedLevelConstraintId, setSelectedLevelConstraintId] = useState<string | null>(null);
+  // Color roots - maps color index (as string) to the root cell for that color's tree
+  const [colorRoots, setColorRoots] = useState<ColorRoots>({});
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -147,6 +149,30 @@ function App() {
     },
     [selectedColor]
   );
+
+  // Handle clicking a cell in "roots" mode to set it as the root for its color
+  const handleRootCellClick = useCallback(
+    (row: number, col: number) => {
+      const cellColor = grid.colors[row][col];
+      // Only allow setting roots for non-null, non-hatch colors
+      if (cellColor !== null && cellColor !== HATCH_COLOR && cellColor >= 0) {
+        setColorRoots((prev) => ({
+          ...prev,
+          [String(cellColor)]: { row, col },
+        }));
+      }
+    },
+    [grid.colors]
+  );
+
+  // Clear root for a specific color
+  const handleClearRoot = useCallback((color: number) => {
+    setColorRoots((prev) => {
+      const newRoots = { ...prev };
+      delete newRoots[String(color)];
+      return newRoots;
+    });
+  }, []);
 
   const handleWidthChange = useCallback((width: number) => {
     const clampedWidth = Math.min(Math.max(width, 2), 20);
@@ -244,13 +270,15 @@ function App() {
       width: grid.width, 
       height: grid.height, 
       colors: grid.colors, 
-      pathlengthConstraints 
+      pathlengthConstraints,
+      colorRoots,
     };
     worker.postMessage(request);
-  }, [grid, solverType, gridType, pathlengthConstraints]);
+  }, [grid, solverType, gridType, pathlengthConstraints, colorRoots]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
+    setColorRoots({});
   }, [gridWidth, gridHeight]);
 
   const handleMazeSetup = useCallback(() => {
@@ -258,6 +286,9 @@ function App() {
     setGrid(grid);
     setPathlengthConstraints([constraint]);
     setSelectedConstraintId(constraint.id);
+    // Set root for the red color (0) at the entrance position
+    const middleRow = Math.floor(gridHeight / 2);
+    setColorRoots({ "0": { row: middleRow, col: 0 } });
   }, [gridWidth, gridHeight]);
 
   const handleCancel = useCallback(() => {
@@ -414,7 +445,7 @@ function App() {
             </h2>
             
             {/* View Mode Toggle */}
-            <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
               <button
                 onClick={() => setSketchpadViewMode("colors")}
                 style={{
@@ -428,6 +459,20 @@ function App() {
                 }}
               >
                 🎨 Colors
+              </button>
+              <button
+                onClick={() => setSketchpadViewMode("roots")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: sketchpadViewMode === "roots" ? "#e74c3c" : "#bdc3c7",
+                  color: sketchpadViewMode === "roots" ? "white" : "#2c3e50",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontWeight: sketchpadViewMode === "roots" ? "bold" : "normal",
+                }}
+              >
+                🌳 Set Roots ({Object.keys(colorRoots).length})
               </button>
               <button
                 onClick={() => setSketchpadViewMode("pathlength")}
@@ -448,6 +493,8 @@ function App() {
             <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
               {sketchpadViewMode === "colors" 
                 ? "Click cells to paint colors. Click Solve to generate a solution."
+                : sketchpadViewMode === "roots"
+                ? "Click a colored cell to set it as the root for that color's tree. Each color needs exactly one root."
                 : "Add pathlength lower bound constraints. Each constraint specifies minimum distances from a root cell."}
             </p>
             
@@ -498,6 +545,113 @@ function App() {
                     onCellDrag={handleCellDrag}
                     cellSize={40}
                     gridType={gridType}
+                    colorRoots={colorRoots}
+                  />
+                </div>
+              </>
+            ) : sketchpadViewMode === "roots" ? (
+              <>
+                <h3 style={{ marginTop: "16px" }}>Tree Roots</h3>
+                <p style={{ fontSize: "13px", color: "#666", marginBottom: "12px" }}>
+                  Each non-hatch color must have exactly one root cell marked. 
+                  Click on a colored cell to set it as that color's root.
+                </p>
+                
+                {/* Show current roots status */}
+                {(() => {
+                  // Get all used colors (non-null, non-hatch) from grid
+                  const usedColors = new Set<number>();
+                  for (const row of grid.colors) {
+                    for (const cell of row) {
+                      if (cell !== null && cell !== HATCH_COLOR && cell >= 0) {
+                        usedColors.add(cell);
+                      }
+                    }
+                  }
+                  const usedColorsArr = [...usedColors].sort((a, b) => a - b);
+                  
+                  if (usedColorsArr.length === 0) {
+                    return (
+                      <p style={{ color: "#7f8c8d", fontStyle: "italic" }}>
+                        No colors have been painted yet. Go to Colors mode to paint some cells first.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <div style={{ marginBottom: "12px" }}>
+                      {usedColorsArr.map(color => {
+                        const root = colorRoots[String(color)];
+                        const hasRoot = !!root;
+                        return (
+                          <div
+                            key={color}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              marginBottom: "6px",
+                              padding: "6px 8px",
+                              backgroundColor: hasRoot ? "#d4edda" : "#f8d7da",
+                              borderRadius: "4px",
+                              border: `1px solid ${hasRoot ? "#c3e6cb" : "#f5c6cb"}`,
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "20px",
+                                height: "20px",
+                                backgroundColor: ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"][color % 6],
+                                borderRadius: "4px",
+                              }}
+                            />
+                            <span style={{ fontSize: "13px" }}>
+                              Color {color + 1}:
+                            </span>
+                            {hasRoot ? (
+                              <>
+                                <span style={{ fontSize: "13px", color: "#155724" }}>
+                                  Root at ({root.row}, {root.col}) ✓
+                                </span>
+                                <button
+                                  onClick={() => handleClearRoot(color)}
+                                  style={{
+                                    marginLeft: "auto",
+                                    padding: "2px 6px",
+                                    backgroundColor: "#e74c3c",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "3px",
+                                    cursor: "pointer",
+                                    fontSize: "11px",
+                                  }}
+                                >
+                                  Clear
+                                </button>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: "13px", color: "#721c24" }}>
+                                No root set ✗
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                
+                {/* Grid for setting roots */}
+                <div style={{ marginTop: "16px" }}>
+                  <SketchpadGrid
+                    grid={grid}
+                    solution={null}
+                    selectedColor={null}
+                    onCellClick={handleRootCellClick}
+                    onCellDrag={() => {}}
+                    cellSize={40}
+                    gridType={gridType}
+                    colorRoots={colorRoots}
                   />
                 </div>
               </>

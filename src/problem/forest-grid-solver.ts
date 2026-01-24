@@ -7,7 +7,7 @@
  * back to the GridSolution format.
  */
 
-import type { ColorGrid, Edge, GridPoint, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
+import type { ColorGrid, Edge, GridPoint, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "./graph-types";
 import { HATCH_COLOR } from "./graph-types";
 import { edgeKey, getNeighbors } from "./grid-neighbors";
 import { buildColoredForestSatCNF } from "./colored-forest-sat";
@@ -24,6 +24,8 @@ export interface ForestSolveOptions {
   gridType?: GridType;
   /** List of pathlength lower bound constraints */
   pathlengthConstraints?: PathlengthConstraint[];
+  /** User-specified roots for each color (key is color number as string) */
+  colorRoots?: ColorRoots;
 }
 
 /**
@@ -50,6 +52,7 @@ export function solveForestGridColoring(
   const { width, height, colors } = grid;
   const gridType = options?.gridType ?? "square";
   const pathlengthConstraints = options?.pathlengthConstraints ?? [];
+  const userColorRoots = options?.colorRoots ?? {};
 
   // Validation: At least one color must be selected
   const isAllBlank = colors.every((row) => row.every((c) => c === null));
@@ -114,21 +117,21 @@ export function solveForestGridColoring(
   }
 
   // Build rootOfColor map
-  // For each color, find the lexicographically smallest fixed cell as the root
+  // Use user-specified roots if provided, otherwise require roots to be specified
   const rootOfColor: Record<string, string> = {};
   for (const color of usedColors) {
-    let minRoot: GridPoint | null = null;
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        if (colors[row][col] === color) {
-          if (minRoot === null || row < minRoot.row || (row === minRoot.row && col < minRoot.col)) {
-            minRoot = { row, col };
-          }
-        }
+    const colorKey = String(color);
+    if (userColorRoots[colorKey]) {
+      // Use user-specified root
+      const root = userColorRoots[colorKey];
+      // Validate that the root cell has the correct color
+      if (colors[root.row]?.[root.col] !== color) {
+        throw new Error(`Root for color ${color} at (${root.row},${root.col}) does not have color ${color}`);
       }
-    }
-    if (minRoot) {
-      rootOfColor[String(color)] = pointKey(minRoot.row, minRoot.col);
+      rootOfColor[colorKey] = pointKey(root.row, root.col);
+    } else {
+      // No root specified - throw error
+      throw new Error(`No root specified for color ${color}. Each color must have exactly one root cell marked.`);
     }
   }
 

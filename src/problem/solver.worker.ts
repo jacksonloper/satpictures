@@ -3,7 +3,7 @@
  */
 
 import { solveForestGridColoring } from "./forest-grid-solver";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "./graph-types";
 
 export type SolverType = "minisat" | "cadical";
 
@@ -30,6 +30,11 @@ export interface SolverRequest {
    * Each constraint specifies a root cell and minimum distances from that root.
    */
   pathlengthConstraints: PathlengthConstraint[];
+  /**
+   * Map from color index to root cell for that color.
+   * Each non-hatch color used in the grid must have exactly one root specified.
+   */
+  colorRoots: ColorRoots;
   // Legacy fields (kept for compatibility, will be removed)
   grid?: ColorGrid;
   numColors?: number;
@@ -70,13 +75,13 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, colorRoots, grid: legacyGrid } = event.data;
 
   // Support both new and legacy request formats
   const grid: ColorGrid = legacyGrid ?? { width, height, colors };
 
   try {
-    const solution = solveForestGridColoring(grid, { gridType, pathlengthConstraints });
+    const solution = solveForestGridColoring(grid, { gridType, pathlengthConstraints, colorRoots });
     const response: SolverResponse = {
       success: true,
       solution,

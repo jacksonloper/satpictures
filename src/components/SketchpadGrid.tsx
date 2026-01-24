@@ -1,5 +1,5 @@
 import React from "react";
-import type { ColorGrid, GridSolution, GridType } from "../problem";
+import type { ColorGrid, GridSolution, GridType, ColorRoots } from "../problem";
 import { Grid } from "./Grid";
 
 interface SketchpadGridProps {
@@ -10,6 +10,7 @@ interface SketchpadGridProps {
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
   gridType?: GridType;
+  colorRoots?: ColorRoots;
 }
 
 /**
@@ -24,6 +25,7 @@ export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
   onCellDrag,
   cellSize = 40,
   gridType = "square",
+  colorRoots,
 }) => {
   return (
     <Grid
@@ -35,6 +37,7 @@ export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
       cellSize={cellSize}
       gridType={gridType}
       viewMode="sketchpad"
+      colorRoots={colorRoots}
     />
   );
 };

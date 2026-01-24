@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "../problem";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "../problem";
 import { HATCH_COLOR } from "../problem";
 import {
   COLORS,
@@ -66,6 +66,7 @@ interface GridProps {
   showDistanceLevels?: boolean;
   selectedConstraintId?: string | null;
   graphMode?: boolean;
+  colorRoots?: ColorRoots;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -80,6 +81,7 @@ export const Grid: React.FC<GridProps> = ({
   showDistanceLevels = false,
   selectedConstraintId = null,
   graphMode = false,
+  colorRoots = {},
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -87,6 +89,19 @@ export const Grid: React.FC<GridProps> = ({
 
   // Determine if we should show solution colors (when viewing solution mode and solution exists)
   const showSolutionColors = viewMode === "solution" && solution !== null;
+
+  // Helper to check if a cell is a root for its color
+  const isRootCell = useCallback(
+    (row: number, col: number): boolean => {
+      const cellColor = grid.colors[row][col];
+      if (cellColor === null || cellColor === HATCH_COLOR || cellColor < 0) {
+        return false;
+      }
+      const root = colorRoots[String(cellColor)];
+      return root !== undefined && root.row === row && root.col === col;
+    },
+    [grid.colors, colorRoots]
+  );
 
   // Helper to get distance level for a cell
   const getDistanceLevel = useCallback(
@@ -474,6 +489,7 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       isBlank: boolean;
       isHatch: boolean;
+      isRoot: boolean;
       walls: { x1: number; y1: number; x2: number; y2: number }[];
       reachLevel: number | null;
     }[] = [];
@@ -488,6 +504,7 @@ export const Grid: React.FC<GridProps> = ({
           : inputColor;
         const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
+        const isRoot = isRootCell(row, col);
         
         let fill: string;
         if (isBlank) {
@@ -523,7 +540,7 @@ export const Grid: React.FC<GridProps> = ({
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
         
-        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls, reachLevel });
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, isRoot, walls, reachLevel });
       }
     }
     
@@ -599,6 +616,35 @@ export const Grid: React.FC<GridProps> = ({
               >
                 {reachLevel === -1 ? "∞" : reachLevel}
               </text>
+            )
+          )}
+          
+          {/* Fourth pass: render root indicators */}
+          {hexData.map(({ row, col, cx, cy, isRoot }) =>
+            isRoot && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
             )
           )}
         </svg>
@@ -1460,6 +1506,7 @@ export const Grid: React.FC<GridProps> = ({
             : inputColor;
           const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
+          const isRoot = isRootCell(row, col);
           
           // Determine background
           let bgColor: string;
@@ -1505,10 +1552,10 @@ export const Grid: React.FC<GridProps> = ({
                 borderBottom: wallBottom
                   ? `${wallThickness}px solid ${WALL_COLOR}`
                   : "none",
-                // Center text for reachability level
-                display: reachLevel !== null ? "flex" : undefined,
-                alignItems: reachLevel !== null ? "center" : undefined,
-                justifyContent: reachLevel !== null ? "center" : undefined,
+                // Center content for reachability level or root indicator
+                display: (reachLevel !== null || isRoot) ? "flex" : undefined,
+                alignItems: (reachLevel !== null || isRoot) ? "center" : undefined,
+                justifyContent: (reachLevel !== null || isRoot) ? "center" : undefined,
               }}
             >
               {reachLevel !== null && (
@@ -1520,6 +1567,23 @@ export const Grid: React.FC<GridProps> = ({
                 }}>
                   {reachLevel === -1 ? "∞" : reachLevel}
                 </span>
+              )}
+              {isRoot && reachLevel === null && (
+                <div style={{
+                  width: cellSize * 0.5,
+                  height: cellSize * 0.5,
+                  borderRadius: "50%",
+                  backgroundColor: "white",
+                  border: "2px solid #2c3e50",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: cellSize > 30 ? "12px" : "8px",
+                  fontWeight: "bold",
+                  color: "#2c3e50",
+                }}>
+                  R
+                </div>
               )}
             </div>
           );

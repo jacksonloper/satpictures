@@ -7,7 +7,7 @@
 /// <reference lib="webworker" />
 
 import { solveForestGridColoring } from "./forest-grid-solver";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "./graph-types";
 import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
@@ -17,6 +17,7 @@ export interface CadicalSolverRequest {
   height: number;
   colors: (number | null)[][];
   pathlengthConstraints: PathlengthConstraint[];
+  colorRoots: ColorRoots;
   // Legacy fields
   grid?: ColorGrid;
 }
@@ -243,7 +244,7 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
-  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, colorRoots, grid: legacyGrid } = event.data;
 
   // Support both new and legacy request formats
   const grid: ColorGrid = legacyGrid ?? { width, height, colors };
@@ -259,7 +260,7 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
     const solver = new CadicalSolver(cadical);
     
     // Solve using CaDiCaL with the forest encoding
-    const solution = solveForestGridColoring(grid, { solver, gridType, pathlengthConstraints });
+    const solution = solveForestGridColoring(grid, { solver, gridType, pathlengthConstraints, colorRoots });
     
     // Clean up
     cadical.release();
