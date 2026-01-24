@@ -1,18 +1,17 @@
 /**
  * Colored Forest SAT CNF Builder
  *
- * Updated again with the two changes:
+ * Uses UNARY distance encoding for better SAT solver performance.
+ * Instead of binary bit-vectors, each node has N boolean variables:
+ *   dist_d(u) = "distance of u is at least d"
  *
- * A) Add anti-parallel-parent constraint for each undirected edge:
- *      ¬par(u->v) ∨ ¬par(v->u)
+ * These form a decreasing chain: dist_d(u) → dist_(d-1)(u)
+ * The constraint dist(child) = dist(parent) + 1 becomes simple implications.
  *
- * B) Add a global distance cap to eliminate modulo-wrap artifacts:
- *      dist(u) <= N-1   for every node u
- *
- *     Implemented via addBitsLeConst(bits, K) built as ¬(bits > K).
- *     We build gt = (bits > K) with witnesses, then enforce ¬gt.
- *
- * Everything else stays the same structure as the prior revision.
+ * Key constraints:
+ * A) Anti-parallel-parent: ¬par(u→v) ∨ ¬par(v→u)
+ * B) Distance ordering: par(u,v) ∧ dist_d(v) → dist_(d+1)(u)
+ * C) Each non-root picks exactly one parent
  */
 
 /**
@@ -89,11 +88,6 @@ class CNF {
     this.addClause([-a, b]);
   }
 
-  addEquiv(a: number, b: number): void {
-    this.addClause([-a, b]);
-    this.addClause([a, -b]);
-  }
-
   addAtMostOnePairwise(lits: number[]): void {
     for (let i = 0; i < lits.length; i++)
       for (let j = i + 1; j < lits.length; j++)
@@ -103,178 +97,6 @@ class CNF {
   addExactlyOne(lits: number[]): void {
     this.addClause(lits);
     this.addAtMostOnePairwise(lits);
-  }
-
-  addXor(x: number, a: number, b: number): void {
-    this.addClause([-a, -b, -x]);
-    this.addClause([a, b, -x]);
-    this.addClause([a, -b, x]);
-    this.addClause([-a, b, x]);
-  }
-
-  addAnd(x: number, a: number, b: number): void {
-    this.addClause([-x, a]);
-    this.addClause([-x, b]);
-    this.addClause([-a, -b, x]);
-  }
-
-  addBitsEqualConst(bits: number[], value: number): void {
-    for (let i = 0; i < bits.length; i++) {
-      const bit = (value >> i) & 1;
-      this.addUnit(bit ? bits[i] : -bits[i]);
-    }
-  }
-
-  /**
-   * Enforce bits >= c by building lt(bits,c) and requiring ¬lt.
-   * tag must be unique per call.
-   */
-  addBitsGeConst(bits: number[], c: number, tag: string): void {
-    if (c < 0) return;
-    const w = bits.length;
-    const maxVal = (1 << w) - 1;
-    if (!Number.isInteger(c) || c < 0)
-      throw new Error("Constant must be a nonnegative integer.");
-    if (c > maxVal) {
-      this.addClause([]);
-      return;
-    }
-
-    const msb = w - 1;
-
-    // eqAbove[i] = (bits[msb..i+1] == c[msb..i+1]); eqAbove[msb]=true
-    const eqAbove = new Array<number>(w);
-    eqAbove[msb] = this.v(`eqAbove_ge_${tag}_${msb}`);
-    this.addUnit(eqAbove[msb]);
-
-    for (let i = msb - 1; i >= 0; i--) {
-      const eq = this.v(`eqAbove_ge_${tag}_${i}`);
-      eqAbove[i] = eq;
-      const next = eqAbove[i + 1];
-      const bNext = bits[i + 1];
-      const cNext = (c >> (i + 1)) & 1;
-
-      // eq -> next
-      this.addClause([-eq, next]);
-      // eq -> (bNext == cNext)
-      if (cNext === 1) this.addClause([-eq, bNext]);
-      else this.addClause([-eq, -bNext]);
-      // (next AND (bNext == cNext)) -> eq
-      if (cNext === 1) this.addClause([-next, -bNext, eq]);
-      else this.addClause([-next, bNext, eq]);
-    }
-
-    // ltTerm_i <-> (eqAbove[i] AND (c_i=1) AND (bits_i=0))
-    const ltTerms: number[] = [];
-    for (let i = msb; i >= 0; i--) {
-      const ci = (c >> i) & 1;
-      if (ci === 1) {
-        const t = this.v(`ltTerm_${tag}_${i}`);
-        ltTerms.push(t);
-        // t -> eqAbove[i], t -> ¬bits[i]
-        this.addClause([-t, eqAbove[i]]);
-        this.addClause([-t, -bits[i]]);
-        // (eqAbove[i] AND ¬bits[i]) -> t   (ci==1 baked in by construction)
-        this.addClause([-eqAbove[i], bits[i], t]);
-      }
-    }
-
-    const lt = this.v(`lt_${tag}`);
-    if (ltTerms.length === 0) {
-      this.addUnit(-lt);
-    } else {
-      for (const t of ltTerms) this.addClause([-t, lt]);
-      this.addClause([-lt, ...ltTerms]);
-    }
-    this.addUnit(-lt); // enforce not less-than
-  }
-
-  /**
-   * Enforce bits <= K by building gt(bits,K) and requiring ¬gt.
-   * gt witness:
-   *   gt := OR_i (eqAbove(i) AND (K_i=0) AND (bits_i=1))
-   * where eqAbove(i) is equality on bits above i (msb..i+1).
-   * tag must be unique per call.
-   */
-  addBitsLeConst(bits: number[], K: number, tag: string): void {
-    const w = bits.length;
-    const maxVal = (1 << w) - 1;
-    if (!Number.isInteger(K) || K < 0)
-      throw new Error("K must be a nonnegative integer.");
-    if (K >= maxVal) return; // always true (since bits are width w)
-    if (K < 0) {
-      this.addClause([]);
-      return;
-    }
-
-    const msb = w - 1;
-
-    // eqAbove[i] = (bits[msb..i+1] == K[msb..i+1]); eqAbove[msb]=true
-    const eqAbove = new Array<number>(w);
-    eqAbove[msb] = this.v(`eqAbove_le_${tag}_${msb}`);
-    this.addUnit(eqAbove[msb]);
-
-    for (let i = msb - 1; i >= 0; i--) {
-      const eq = this.v(`eqAbove_le_${tag}_${i}`);
-      eqAbove[i] = eq;
-      const next = eqAbove[i + 1];
-      const bNext = bits[i + 1];
-      const kNext = (K >> (i + 1)) & 1;
-
-      this.addClause([-eq, next]);
-      if (kNext === 1) this.addClause([-eq, bNext]);
-      else this.addClause([-eq, -bNext]);
-
-      if (kNext === 1) this.addClause([-next, -bNext, eq]);
-      else this.addClause([-next, bNext, eq]);
-    }
-
-    // gtTerm_i <-> (eqAbove[i] AND (K_i=0) AND (bits_i=1))
-    const gtTerms: number[] = [];
-    for (let i = msb; i >= 0; i--) {
-      const ki = (K >> i) & 1;
-      if (ki === 0) {
-        const t = this.v(`gtTerm_${tag}_${i}`);
-        gtTerms.push(t);
-        // t -> eqAbove[i], t -> bits[i]
-        this.addClause([-t, eqAbove[i]]);
-        this.addClause([-t, bits[i]]);
-        // (eqAbove[i] AND bits[i]) -> t   (ki==0 baked in by construction)
-        this.addClause([-eqAbove[i], -bits[i], t]);
-      }
-    }
-
-    const gt = this.v(`gt_${tag}`);
-    if (gtTerms.length === 0) {
-      this.addUnit(-gt);
-    } else {
-      for (const t of gtTerms) this.addClause([-t, gt]);
-      this.addClause([-gt, ...gtTerms]);
-    }
-
-    this.addUnit(-gt); // enforce not greater-than => <=
-  }
-
-  /**
-   * outBits = inBits + 1 (ripple carry), collision-safe via tag.
-   */
-  addPlusOne(outBits: number[], inBits: number[], tag: string): void {
-    if (outBits.length !== inBits.length)
-      throw new Error("Bitvector length mismatch in addPlusOne.");
-    const w = inBits.length;
-
-    const carry = new Array<number>(w + 1);
-    carry[0] = this.v(`carry_${tag}_0`);
-    this.addUnit(carry[0]); // +1
-
-    for (let i = 0; i < w; i++) {
-      const sum = this.v(`sum_${tag}_${i}`);
-      this.addXor(sum, inBits[i], carry[i]);
-      this.addEquiv(outBits[i], sum);
-
-      carry[i + 1] = this.v(`carry_${tag}_${i + 1}`);
-      this.addAnd(carry[i + 1], inBits[i], carry[i]);
-    }
   }
 
   toDimacs(): string {
@@ -287,13 +109,9 @@ class CNF {
 /**
  * Build a SAT CNF formula for the colored forest problem.
  *
- * This encoding enforces that each color forms a tree rooted at the specified
- * root node. It includes:
- * - Color assignment constraints (each node exactly one color)
- * - Anti-parallel-parent constraints (an edge can't be a parent in both directions)
- * - Global distance cap (dist(u) <= N-1 for all nodes)
- * - Parent-child distance relationship (dist(child) = dist(parent) + 1)
- * - Per-node distance lower bounds
+ * This encoding uses UNARY distance representation for better propagation:
+ * - dist_d(u) means "distance of u from root is at least d"
+ * - Simple implication chains instead of binary arithmetic
  *
  * @param input - Configuration specifying nodes, edges, colors, roots, and constraints
  * @returns The CNF formula and metadata
@@ -354,10 +172,8 @@ export function buildColoredForestSatCNF(
     adj.get(v)!.add(u);
   }
 
-  // distance bits k where 2^k > N
-  let kBits = 0;
-  while ((1 << kBits) <= N) kBits++;
-  const MAXD = 1 << kBits;
+  // Max distance is N-1 (longest possible path in a tree)
+  const maxDist = N - 1;
 
   const cnf = new CNF();
 
@@ -366,12 +182,9 @@ export function buildColoredForestSatCNF(
   const parentVar = (u: string, v: string) => cnf.v(`par(${u})->(${v})`);
   const keepVar = (u: string, v: string) => cnf.v(`keep(${edgeKey(u, v)})`);
 
-  const distBits = new Map<string, number[]>();
-  for (const u of nodeList) {
-    const bits: number[] = [];
-    for (let i = 0; i < kBits; i++) bits.push(cnf.v(`dist(${u})_b${i}`));
-    distBits.set(u, bits);
-  }
+  // UNARY distance encoding: dist_d(u) means "distance of u is >= d"
+  // We only need dist_1, dist_2, ..., dist_maxDist (dist_0 is always true)
+  const distVar = (u: string, d: number) => cnf.v(`dist(${u})>=${d}`);
 
   // ---------- each node exactly one color ----------
   for (const u of nodeList) {
@@ -395,17 +208,20 @@ export function buildColoredForestSatCNF(
     }
   }
 
+  // ---------- unary distance chain constraints ----------
+  // dist_d(u) → dist_(d-1)(u) for all d >= 2
+  for (const u of nodeList) {
+    for (let d = 2; d <= maxDist; d++) {
+      cnf.addImp(distVar(u, d), distVar(u, d - 1));
+    }
+  }
+
   // ---------- roots per color ----------
   for (const c of colors) {
     const r = String(rootOfColor[String(c)]);
     cnf.addUnit(colVar(r, c));
-    cnf.addBitsEqualConst(distBits.get(r)!, 0);
-  }
-
-  // ---------- global distance cap: dist(u) <= N-1 for all nodes ----------
-  // This fully rules out modulo-wrap artifacts.
-  for (const u of nodeList) {
-    cnf.addBitsLeConst(distBits.get(u)!, N - 1, `cap_${u}_le_${N - 1}`);
+    // Root has distance 0, so dist_d(root) is false for all d >= 1
+    cnf.addUnit(-distVar(r, 1));
   }
 
   // ---------- keep/parent linkage + same-color gating + anti-parallel-parent ----------
@@ -433,7 +249,10 @@ export function buildColoredForestSatCNF(
     }
   }
 
-  // ---------- parent implies same color + dist(child)=dist(parent)+1 ----------
+  // ---------- parent implies dist(child) = dist(parent) + 1 ----------
+  // Using unary encoding: par(u,v) means v is parent of u
+  // If par(u,v) and dist(v) >= d, then dist(u) >= d+1
+  // If par(u,v) and dist(u) >= d+1, then dist(v) >= d
   for (const u of nodeList) {
     for (const v of adj.get(u)!) {
       const p = parentVar(u, v);
@@ -446,15 +265,27 @@ export function buildColoredForestSatCNF(
         cnf.addClause([-p, -cv, cu]);
       }
 
-      // p -> dist(u) = dist(v) + 1
-      const dv = distBits.get(v)!;
-      const du = distBits.get(u)!;
-      const plus = dv.map((_, i) => cnf.v(`distPlus1(${v})_b${i}_for_${u}`));
-      cnf.addPlusOne(plus, dv, `plus1_${v}_to_${u}`);
+      // Distance increment constraints:
+      // par(u,v) ∧ dist(v)>=d → dist(u)>=(d+1)
+      for (let d = 0; d < maxDist; d++) {
+        if (d === 0) {
+          // dist(v) >= 0 is always true, so: par(u,v) → dist(u) >= 1
+          cnf.addImp(p, distVar(u, 1));
+        } else {
+          // par(u,v) ∧ dist(v)>=d → dist(u)>=(d+1)
+          cnf.addClause([-p, -distVar(v, d), distVar(u, d + 1)]);
+        }
+      }
 
-      for (let i = 0; i < kBits; i++) {
-        cnf.addClause([-p, du[i], -plus[i]]);
-        cnf.addClause([-p, -du[i], plus[i]]);
+      // Also enforce the reverse: par(u,v) ∧ ¬dist(v)>=d → ¬dist(u)>=(d+1)
+      // Equivalently: par(u,v) ∧ dist(u)>=(d+1) → dist(v)>=d
+      for (let d = 1; d <= maxDist; d++) {
+        if (d === 1) {
+          // par(u,v) ∧ dist(u)>=1 → dist(v)>=0 (always true, skip)
+        } else {
+          // par(u,v) ∧ dist(u)>=d → dist(v)>=(d-1)
+          cnf.addClause([-p, -distVar(u, d), distVar(v, d - 1)]);
+        }
       }
     }
   }
@@ -483,8 +314,8 @@ export function buildColoredForestSatCNF(
               cnf.addClause([-cu, -pLits[i], -pLits[j]]);
             }
           }
-          // cu -> dist(u) >= 1 (forbid all-zero); roots already fixed to 0
-          cnf.addClause([-cu, ...distBits.get(u)!]);
+          // cu -> dist(u) >= 1 (non-root must have positive distance)
+          cnf.addClause([-cu, distVar(u, 1)]);
         }
       }
     }
@@ -498,12 +329,18 @@ export function buildColoredForestSatCNF(
       throw new Error(`distLowerBounds references unknown node ${n0}`);
     if (!Number.isInteger(minD) || minD < 0)
       throw new Error(`minDist must be a nonnegative integer for node ${n0}`);
-    if (minD >= MAXD) {
-      cnf.addClause([]);
+    if (minD > maxDist) {
+      cnf.addClause([]); // unsatisfiable
       continue;
     }
-    cnf.addBitsGeConst(distBits.get(n)!, minD, `ge_${n}_ge_${minD}`);
+    if (minD > 0) {
+      cnf.addUnit(distVar(n, minD));
+    }
   }
+
+  // For compatibility with existing code, compute kBits
+  let kBits = 0;
+  while ((1 << kBits) <= N) kBits++;
 
   return {
     numVars: cnf.numVars,
@@ -514,7 +351,7 @@ export function buildColoredForestSatCNF(
     meta: {
       colors,
       kBits,
-      maxDistance: MAXD - 1,
+      maxDistance: maxDist,
       nodes: nodeList,
       edges: undirectedEdges,
     },
