@@ -69,9 +69,10 @@ function createMazeSetupGrid(
   const grid: ColorGrid = { width, height, colors };
   
   // Create pathlength constraint with root at entrance and minimum distance at exit
+  // Use max(width, height) as minimum distance to ensure a sufficiently long maze path
   const minDistance = Math.max(width, height);
   const constraint: PathlengthConstraint = {
-    id: `maze_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    id: `maze_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
     root: { row: middleRow, col: entranceCol },
     minDistances: {
       [`${middleRow},${exitCol}`]: minDistance,
