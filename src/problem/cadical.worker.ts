@@ -6,9 +6,9 @@
 
 /// <reference lib="webworker" />
 
-import { solveGridColoring } from "./grid-coloring";
+import { solveForestGridColoring } from "./forest-grid-solver";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
-import { CadicalSolver, CadicalFormulaBuilder } from "../solvers";
+import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 export interface CadicalSolverRequest {
@@ -19,7 +19,6 @@ export interface CadicalSolverRequest {
   pathlengthConstraints: PathlengthConstraint[];
   // Legacy fields
   grid?: ColorGrid;
-  numColors?: number;
 }
 
 export interface CadicalSolverResponse {
@@ -244,11 +243,10 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
-  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid, numColors } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid } = event.data;
 
   // Support both new and legacy request formats
   const grid: ColorGrid = legacyGrid ?? { width, height, colors };
-  const effectiveNumColors = numColors ?? 6;
 
   try {
     // Load the module (cached after first load)
@@ -257,12 +255,11 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
     // Create a new CaDiCaL instance
     const cadical = new Cadical(module);
     
-    // Create solver and builder
+    // Create solver
     const solver = new CadicalSolver(cadical);
-    const builder = new CadicalFormulaBuilder(solver);
     
-    // Solve using CaDiCaL
-    const solution = solveGridColoring(grid, effectiveNumColors, { solver, builder, gridType, pathlengthConstraints });
+    // Solve using CaDiCaL with the forest encoding
+    const solution = solveForestGridColoring(grid, { solver, gridType, pathlengthConstraints });
     
     // Clean up
     cadical.release();

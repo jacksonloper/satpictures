@@ -2,7 +2,7 @@
  * Web Worker for running the SAT solver in a background thread
  */
 
-import { solveGridColoring } from "./grid-coloring";
+import { solveForestGridColoring } from "./forest-grid-solver";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
 
 export type SolverType = "minisat" | "cadical";
@@ -70,14 +70,13 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid, numColors } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid } = event.data;
 
   // Support both new and legacy request formats
   const grid: ColorGrid = legacyGrid ?? { width, height, colors };
-  const effectiveNumColors = numColors ?? 6;
 
   try {
-    const solution = solveGridColoring(grid, effectiveNumColors, { gridType, pathlengthConstraints });
+    const solution = solveForestGridColoring(grid, { gridType, pathlengthConstraints });
     const response: SolverResponse = {
       success: true,
       solution,

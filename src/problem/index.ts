@@ -22,10 +22,13 @@ export { edgeKey, getNeighbors } from "./grid-neighbors";
 // Trivial solution utilities  
 export { createTestGrid, createTrivialSolution } from "./trivial-solution";
 
-// Main solver
+// Main solver (legacy - uses connected component encoding)
 export { solveGridColoring, type SolveOptions } from "./grid-coloring";
 
-// Colored forest SAT encoder
+// Forest grid solver (new - uses tree-based encoding)
+export { solveForestGridColoring, type ForestSolveOptions } from "./forest-grid-solver";
+
+// Colored forest SAT encoder (low-level CNF builder)
 export { buildColoredForestSatCNF } from "./colored-forest-sat";
 export type { ColoredForestInput, ColoredForestCNFResult } from "./colored-forest-sat";
 
