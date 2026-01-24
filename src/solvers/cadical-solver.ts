@@ -33,11 +33,13 @@ export class CadicalSolver implements SATSolver {
 
   addClause(clause: Clause): void {
     if (clause.length === 0) {
-      // Empty clause means UNSAT - add a conflicting unit clause
-      this.cadical.add(1);  // Add literal 1
-      this.cadical.add(0);  // Terminate clause
-      this.cadical.add(-1); // Add literal -1
-      this.cadical.add(0);  // Terminate clause
+      // Empty clause means UNSAT - create a fresh variable and add conflicting unit clauses
+      // This is safer than assuming variable 1 exists
+      const conflictVar = this.newVariable();
+      this.cadical.add(conflictVar);   // Add literal n
+      this.cadical.add(0);             // Terminate clause
+      this.cadical.add(-conflictVar);  // Add literal -n
+      this.cadical.add(0);             // Terminate clause
       this.clauseCount += 2;
       return;
     }

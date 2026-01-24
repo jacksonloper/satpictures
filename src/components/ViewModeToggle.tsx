@@ -1,5 +1,5 @@
 import React from "react";
-import type { GridSolution } from "../solver";
+import type { GridSolution } from "../problem";
 
 type ViewMode = "sketchpad" | "solution";
 

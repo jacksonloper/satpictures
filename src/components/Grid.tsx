@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "../solver";
-import { HATCH_COLOR } from "../solver";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "../problem";
+import { HATCH_COLOR } from "../problem";
 import {
   COLORS,
   HATCH_BG_COLOR,

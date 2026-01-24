@@ -7,9 +7,9 @@
 /// <reference lib="webworker" />
 
 import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./grid-coloring";
-import { CadicalSolver, CadicalFormulaBuilder } from "../sat";
-import type { CadicalClass } from "../sat";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
+import { CadicalSolver, CadicalFormulaBuilder } from "../solvers";
+import type { CadicalClass } from "../solvers";
 
 export interface CadicalSolverRequest {
   gridType: GridType;
@@ -183,10 +183,22 @@ function formatErrorMessage(error: unknown): string {
 
 /**
  * Load the CaDiCaL WASM module by fetching and evaluating the script
+ * 
+ * SECURITY NOTE: This function uses eval() to load the Emscripten-generated JavaScript.
+ * This is necessary because:
+ * 1. Vite bundles workers as ES modules by default
+ * 2. ES module workers don't support importScripts()
+ * 3. The Emscripten-generated script expects to run in global scope
+ * 4. The script is loaded from a controlled, same-origin source (/cadical/cadical-emscripten.js)
+ * 
+ * This is a known limitation when integrating Emscripten modules with modern ES module bundlers.
+ * The security risk is mitigated by:
+ * - Only evaluating scripts from our own server (same-origin)
+ * - The script content is fetched from a static asset, not user input
  */
 function loadCadicalModule(): Promise<CadicalModule> {
   return new Promise((resolve, reject) => {
-    // Fetch the Emscripten-generated JS file
+    // Fetch the Emscripten-generated JS file from our own server (same-origin)
     fetch("/cadical/cadical-emscripten.js")
       .then(response => {
         if (!response.ok) {
@@ -203,11 +215,8 @@ function loadCadicalModule(): Promise<CadicalModule> {
         };
         
         // Execute the script using indirect eval to get global scope.
-        // Note: We use eval() here because:
-        // 1. Vite bundles workers as ES modules by default
-        // 2. ES module workers don't support importScripts()
-        // 3. The Emscripten-generated script expects to run in global scope
-        // 4. Indirect eval (0, eval)() runs in global scope rather than local scope
+        // Indirect eval (0, eval)() runs in global scope rather than local scope.
+        // This is required because Emscripten scripts expect global scope access.
         (0, eval)(scriptText);
         
         // Module should now be available on self

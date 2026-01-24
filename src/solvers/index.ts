@@ -1,7 +1,8 @@
 /**
- * SAT Solver Module
+ * SAT Solvers Module
  *
  * Clean abstraction for SAT solving that allows swapping backends.
+ * This module contains the actual SAT solver implementations.
  */
 
 export type { Clause, FormulaBuilder, Literal, SATSolver, SolveResult } from "./types";

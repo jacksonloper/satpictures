@@ -145,7 +145,13 @@ export class MiniSatFormulaBuilder implements FormulaBuilder {
 
 /**
  * Utility: Create integer variables encoded in binary
- * Returns array of variable numbers representing bits (LSB first)
+ * 
+ * Returns array of variable numbers representing bits in LSB-first ordering:
+ * - bits[0] is the least significant bit (value 2^0 = 1)
+ * - bits[1] is the next bit (value 2^1 = 2)
+ * - bits[i] has value 2^i
+ * 
+ * The integer value is: sum(bits[i] * 2^i) for i in 0..numBits-1
  */
 export function createBinaryIntVariables(
   builder: FormulaBuilder,

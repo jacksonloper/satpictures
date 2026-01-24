@@ -3,7 +3,7 @@
  */
 
 import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./grid-coloring";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
 
 export type SolverType = "minisat" | "cadical";
 

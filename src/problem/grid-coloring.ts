@@ -13,336 +13,35 @@ import {
   createBinaryIntVariables,
   MiniSatFormulaBuilder,
   MiniSatSolver,
-} from "../sat";
-import type { FormulaBuilder, SATSolver, SolveResult } from "../sat";
+} from "../solvers";
+import type { FormulaBuilder, SATSolver, SolveResult } from "../solvers";
 
-/**
- * Special hatch color index - cells with this color don't need to form 
- * a connected component, but must still be disconnected from other colors
- */
-export const HATCH_COLOR = -2;
+// Re-export types from graph-types for backwards compatibility
+export { HATCH_COLOR } from "./graph-types";
+export type {
+  ColorGrid,
+  Edge,
+  GridPoint,
+  GridSolution,
+  GridType,
+  PathlengthConstraint,
+} from "./graph-types";
 
-/**
- * Grid type - square, hex, octagon, cairo, or cairobridge
- */
-export type GridType = "square" | "hex" | "octagon" | "cairo" | "cairobridge";
+// Re-export helper functions and test utilities
+export { createTestGrid } from "./trivial-solution";
 
-/**
- * Represents a point in the grid
- */
-export interface GridPoint {
-  row: number;
-  col: number;
-}
-
-/**
- * Grid with colors assigned to each point
- * null means the cell is blank and the solver should determine its color
- */
-export interface ColorGrid {
-  width: number;
-  height: number;
-  colors: (number | null)[][]; // colors[row][col], null = blank
-}
-
-/**
- * An edge between two adjacent grid points
- */
-export interface Edge {
-  u: GridPoint;
-  v: GridPoint;
-}
-
-/**
- * A pathlength lower bound constraint.
- * Specifies that certain cells must be at least a minimum distance from a root cell.
- * Distance is measured via kept edges (passages, not walls).
- */
-export interface PathlengthConstraint {
-  /** Unique identifier for this constraint */
-  id: string;
-  /** Root cell position - distance is measured from here */
-  root: GridPoint | null;
-  /** Map from cell position key ("row,col") to minimum distance from root */
-  minDistances: Record<string, number>;
-}
-
-/**
- * Solution: which edges to keep (no wall) and assigned colors for blank cells
- */
-export interface GridSolution {
-  /** Edges that are kept (passages, not walls) */
-  keptEdges: Edge[];
-  /** Edges that are blocked (walls) */
-  wallEdges: Edge[];
-  /** Full grid with all colors determined */
-  assignedColors: number[][];
-  /** 
-   * Distance levels from each pathlength constraint's root.
-   * Key is constraint ID, value is 2D array of distances (-1 if unreachable).
-   */
-  distanceLevels?: Record<string, number[][]> | null;
-}
-
-/**
- * Get the 4-neighbors of a point for square grid within bounds
- */
-function getSquareNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
-  const neighbors: GridPoint[] = [];
-  const deltas = [
-    [-1, 0],
-    [1, 0],
-    [0, -1],
-    [0, 1],
-  ];
-
-  for (const [dr, dc] of deltas) {
-    const nr = p.row + dr;
-    const nc = p.col + dc;
-    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
-      neighbors.push({ row: nr, col: nc });
-    }
-  }
-
-  return neighbors;
-}
-
-/**
- * Get the 6-neighbors of a point for hex grid (offset coordinates) within bounds
- * Uses "odd-r" offset coordinates where odd rows are shifted right
- */
-function getHexNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
-  const neighbors: GridPoint[] = [];
-  
-  // For hex grids with odd-r offset coordinates:
-  // Even rows: NW, NE, W, E, SW, SE offsets
-  // Odd rows: different offsets due to stagger
-  const isOddRow = p.row % 2 === 1;
-  
-  const deltas = isOddRow
-    ? [
-        [-1, 0],  // NW
-        [-1, 1],  // NE
-        [0, -1],  // W
-        [0, 1],   // E
-        [1, 0],   // SW
-        [1, 1],   // SE
-      ]
-    : [
-        [-1, -1], // NW
-        [-1, 0],  // NE
-        [0, -1],  // W
-        [0, 1],   // E
-        [1, -1],  // SW
-        [1, 0],   // SE
-      ];
-
-  for (const [dr, dc] of deltas) {
-    const nr = p.row + dr;
-    const nc = p.col + dc;
-    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
-      neighbors.push({ row: nr, col: nc });
-    }
-  }
-
-  return neighbors;
-}
-
-/**
- * Get the 8-neighbors of a point for octagon grid (like square but with 8 directions)
- * Each octagon can connect to 4 cardinal + 4 diagonal neighbors
- */
-function getOctagonNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
-  const neighbors: GridPoint[] = [];
-  const deltas = [
-    [-1, -1], // NW (diagonal)
-    [-1, 0],  // N
-    [-1, 1],  // NE (diagonal)
-    [0, -1],  // W
-    [0, 1],   // E
-    [1, -1],  // SW (diagonal)
-    [1, 0],   // S
-    [1, 1],   // SE (diagonal)
-  ];
-
-  for (const [dr, dc] of deltas) {
-    const nr = p.row + dr;
-    const nc = p.col + dc;
-    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
-      neighbors.push({ row: nr, col: nc });
-    }
-  }
-
-  return neighbors;
-}
-
-/**
- * Get the neighbors of a point for Cairo pentagonal tiling.
- * Cairo tiling uses pentagonal tiles with parity-dependent adjacencies.
- * Each tile has 4 cardinal neighbors plus 1 diagonal neighbor depending on parity.
- * 
- * Python reference uses (i, j) where i=col, j=row, and offsets are (di, dj).
- * parity_adjacency keyed by (i%2, j%2) = (col%2, row%2):
- * - (0,0): diagonal (di=-1, dj=+1) → (dc=-1, dr=+1) → SW
- * - (1,0): diagonal (di=-1, dj=-1) → (dc=-1, dr=-1) → NW
- * - (0,1): diagonal (di=+1, dj=+1) → (dc=+1, dr=+1) → SE
- * - (1,1): diagonal (di=+1, dj=-1) → (dc=+1, dr=-1) → NE
- */
-function getCairoNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
-  const neighbors: GridPoint[] = [];
-  
-  // Parity of the cell: (col%2, row%2) matches Python's (i%2, j%2)
-  const parityCol = p.col % 2;
-  const parityRow = p.row % 2;
-  
-  // Cardinal directions (same for all parities)
-  const cardinalDeltas = [
-    [-1, 0],  // N
-    [1, 0],   // S
-    [0, -1],  // W
-    [0, 1],   // E
-  ];
-  
-  // Diagonal neighbor depends on parity (col%2, row%2)
-  // Python offsets are (di, dj) where di=col change, dj=row change
-  // We need [dr, dc] = [dj, di]
-  let diagonalDelta: [number, number];  // [dr, dc]
-  if (parityCol === 0 && parityRow === 0) {
-    // (0,0): Python (-1,1) means di=-1, dj=+1 → dr=+1, dc=-1 (SW)
-    diagonalDelta = [1, -1];
-  } else if (parityCol === 1 && parityRow === 0) {
-    // (1,0): Python (-1,-1) means di=-1, dj=-1 → dr=-1, dc=-1 (NW)
-    diagonalDelta = [-1, -1];
-  } else if (parityCol === 0 && parityRow === 1) {
-    // (0,1): Python (1,1) means di=+1, dj=+1 → dr=+1, dc=+1 (SE)
-    diagonalDelta = [1, 1];
-  } else {
-    // (1,1): Python (1,-1) means di=+1, dj=-1 → dr=-1, dc=+1 (NE)
-    diagonalDelta = [-1, 1];
-  }
-  
-  // Add cardinal neighbors
-  for (const [dr, dc] of cardinalDeltas) {
-    const nr = p.row + dr;
-    const nc = p.col + dc;
-    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
-      neighbors.push({ row: nr, col: nc });
-    }
-  }
-  
-  // Add diagonal neighbor
-  const [ddr, ddc] = diagonalDelta;
-  const dnr = p.row + ddr;
-  const dnc = p.col + ddc;
-  if (dnr >= 0 && dnr < height && dnc >= 0 && dnc < width) {
-    neighbors.push({ row: dnr, col: dnc });
-  }
-  
-  return neighbors;
-}
-
-/**
- * Get the neighbors of a point for Cairo Bridge tiling.
- * Cairo Bridge is like Cairo tiling but with 7 neighbors instead of 5:
- * - 4 cardinal neighbors (N, S, E, W)
- * - 3 diagonal neighbors (all except the one diametrically opposed to Cairo's diagonal)
- * 
- * For Cairo, the diagonal neighbor depends on parity (col%2, row%2):
- * - (0,0): diagonal is SW → excluded is NE
- * - (1,0): diagonal is NW → excluded is SE  
- * - (0,1): diagonal is SE → excluded is NW
- * - (1,1): diagonal is NE → excluded is SW
- */
-function getCairoBridgeNeighbors(p: GridPoint, width: number, height: number): GridPoint[] {
-  const neighbors: GridPoint[] = [];
-  
-  const parityCol = p.col % 2;
-  const parityRow = p.row % 2;
-  
-  // Cardinal directions (same for all parities)
-  const cardinalDeltas = [
-    [-1, 0],  // N
-    [1, 0],   // S
-    [0, -1],  // W
-    [0, 1],   // E
-  ];
-  
-  // All diagonal directions
-  const allDiagonals: [number, number, string][] = [
-    [-1, -1, "NW"],
-    [-1, 1, "NE"],
-    [1, -1, "SW"],
-    [1, 1, "SE"],
-  ];
-  
-  // Determine which diagonal to exclude based on parity (diametrically opposed to Cairo's diagonal)
-  let excludedDiagonal: string;
-  if (parityCol === 0 && parityRow === 0) {
-    // Cairo diagonal is SW, so exclude NE
-    excludedDiagonal = "NE";
-  } else if (parityCol === 1 && parityRow === 0) {
-    // Cairo diagonal is NW, so exclude SE
-    excludedDiagonal = "SE";
-  } else if (parityCol === 0 && parityRow === 1) {
-    // Cairo diagonal is SE, so exclude NW
-    excludedDiagonal = "NW";
-  } else {
-    // (1,1): Cairo diagonal is NE, so exclude SW
-    excludedDiagonal = "SW";
-  }
-  
-  // Add cardinal neighbors
-  for (const [dr, dc] of cardinalDeltas) {
-    const nr = p.row + dr;
-    const nc = p.col + dc;
-    if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
-      neighbors.push({ row: nr, col: nc });
-    }
-  }
-  
-  // Add diagonal neighbors (excluding the diametrically opposed one)
-  for (const [dr, dc, name] of allDiagonals) {
-    if (name !== excludedDiagonal) {
-      const nr = p.row + dr;
-      const nc = p.col + dc;
-      if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
-        neighbors.push({ row: nr, col: nc });
-      }
-    }
-  }
-  
-  return neighbors;
-}
-
-/**
- * Get neighbors based on grid type
- */
-function getNeighbors(p: GridPoint, width: number, height: number, gridType: GridType = "square"): GridPoint[] {
-  if (gridType === "hex") {
-    return getHexNeighbors(p, width, height);
-  }
-  if (gridType === "octagon") {
-    return getOctagonNeighbors(p, width, height);
-  }
-  if (gridType === "cairo") {
-    return getCairoNeighbors(p, width, height);
-  }
-  if (gridType === "cairobridge") {
-    return getCairoBridgeNeighbors(p, width, height);
-  }
-  return getSquareNeighbors(p, width, height);
-}
-
-/**
- * Create a canonical key for an edge (unordered pair)
- */
-function edgeKey(u: GridPoint, v: GridPoint): string {
-  // Normalize order: smaller row first, or if same row, smaller col first
-  if (u.row < v.row || (u.row === v.row && u.col < v.col)) {
-    return `${u.row},${u.col}-${v.row},${v.col}`;
-  }
-  return `${v.row},${v.col}-${u.row},${u.col}`;
-}
+// Import the types we need for this module
+import type {
+  ColorGrid,
+  Edge,
+  GridPoint,
+  GridType,
+  PathlengthConstraint,
+  GridSolution,
+} from "./graph-types";
+import { HATCH_COLOR } from "./graph-types";
+import { edgeKey, getNeighbors } from "./grid-neighbors";
+import { createTrivialSolution } from "./trivial-solution";
 
 /**
  * Create a key for a directed parent relation
@@ -374,42 +73,6 @@ function colorVarKey(row: number, col: number, color: number): string {
 }
 
 /**
- * Create a trivial solution for an all-blank grid.
- * Assigns all cells to color 0 and keeps all edges (fully connected).
- * This satisfies the connectivity constraint trivially since all cells
- * are the same color and form one connected component.
- */
-function createTrivialSolution(width: number, height: number, gridType: GridType = "square"): GridSolution {
-  const keptEdges: Edge[] = [];
-  const wallEdges: Edge[] = [];
-  const addedEdges = new Set<string>();
-
-  // Keep all internal edges (no walls within the grid)
-  for (let row = 0; row < height; row++) {
-    for (let col = 0; col < width; col++) {
-      const neighbors = getNeighbors({ row, col }, width, height, gridType);
-      for (const n of neighbors) {
-        const key = edgeKey({ row, col }, n);
-        if (!addedEdges.has(key)) {
-          addedEdges.add(key);
-          keptEdges.push({
-            u: { row, col },
-            v: n,
-          });
-        }
-      }
-    }
-  }
-
-  // Assign all cells to color 0
-  const assignedColors: number[][] = Array.from({ length: height }, () =>
-    Array.from({ length: width }, () => 0)
-  );
-
-  return { keptEdges, wallEdges, assignedColors, distanceLevels: null };
-}
-
-/**
  * Options for the grid coloring solver
  */
 export interface SolveOptions {
@@ -427,14 +90,14 @@ export interface SolveOptions {
  * Encode and solve the grid coloring problem
  * 
  * @param grid The grid with colors assigned to cells (null = blank, solver decides)
- * @param _numColors Number of available colors (parameter kept for API compatibility,
- *                   but blank cells are now only assigned colors that already have fixed cells)
+ * @param _numColors DEPRECATED: This parameter is no longer used internally but kept for
+ *                   backward compatibility with existing worker APIs. Blank cells are now
+ *                   only assigned colors that already have fixed cells.
  * @param options Optional solver configuration
  */
 export function solveGridColoring(
   grid: ColorGrid,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _numColors: number = 6,
+  _numColors: number = 6,  // eslint-disable-line @typescript-eslint/no-unused-vars -- kept for API compatibility
   options?: SolveOptions
 ): GridSolution | null {
   const { width, height, colors } = grid;
@@ -637,76 +300,21 @@ export function solveGridColoring(
     }
 
     // =============================================
-    // DYNAMIC ROOT SELECTION
+    // ROOT SELECTION
     // =============================================
-    // For colors with no fixed vertices, the root is the lex-smallest member.
-    // Create "isRoot" variable for each potential vertex.
-    // isRoot[v] = true iff v is a member AND all lex-smaller vertices are not members
-    const hasFixedRoot = fixedVertices.length > 0;
-    const fixedRoot = hasFixedRoot
-      ? fixedVertices.reduce((min, v) => {
-          if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
-            return v;
-          }
-          return min;
-        }, fixedVertices[0])
-      : null;
-
-    // For dynamic roots, create isRoot variables
-    const isRootVars = new Map<string, number>();
-    if (!hasFixedRoot) {
-      // For each vertex, isRoot[v] means v is the root for this color
-      // isRoot[v] ↔ member[v] ∧ ∀u<v: ¬member[u]
-      for (let i = 0; i < potentialVertices.length; i++) {
-        const v = potentialVertices[i];
-        const vKey = `${v.row},${v.col}`;
-        const isRootVar = builder.createNamedVariable(
-          `isRoot_${color}_${v.row},${v.col}`
-        );
-        isRootVars.set(vKey, isRootVar);
-
-        const vMember = getMemberVar(v)!; // All potential vertices are blank here
-
-        if (i === 0) {
-          // First vertex: isRoot ↔ member
-          // isRoot → member
-          builder.addImplies(isRootVar, vMember);
-          // member → isRoot
-          builder.addImplies(vMember, isRootVar);
-        } else {
-          // isRoot[v] ↔ member[v] ∧ ¬member[u0] ∧ ¬member[u1] ∧ ...
-          // where u0, u1, ... are all vertices before v
-
-          // Collect all previous member variables
-          const prevMembers: number[] = [];
-          for (let j = 0; j < i; j++) {
-            const u = potentialVertices[j];
-            const uMember = getMemberVar(u)!;
-            prevMembers.push(uMember);
-          }
-
-          // isRoot → member[v]
-          builder.addImplies(isRootVar, vMember);
-
-          // isRoot → ¬member[u] for all previous u
-          for (const uMember of prevMembers) {
-            builder.solver.addClause([-isRootVar, -uMember]);
-          }
-
-          // (member[v] ∧ ¬member[u0] ∧ ...) → isRoot
-          // Contrapositive: ¬isRoot → (¬member[v] ∨ member[u0] ∨ ...)
-          builder.solver.addClause([isRootVar, -vMember, ...prevMembers]);
-        }
+    // The root is the lexicographically smallest fixed vertex for this color.
+    // Since we only process activeColors (colors with at least one fixed cell),
+    // there is always at least one fixed vertex to serve as root.
+    const fixedRoot = fixedVertices.reduce((min, v) => {
+      if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
+        return v;
       }
-    }
+      return min;
+    }, fixedVertices[0]);
 
     // Helper to check if a vertex is the root
-    function isRoot(v: GridPoint): boolean | number {
-      if (hasFixedRoot) {
-        return v.row === fixedRoot!.row && v.col === fixedRoot!.col;
-      }
-      // Return the isRoot variable
-      return isRootVars.get(`${v.row},${v.col}`)!;
+    function isRoot(v: GridPoint): boolean {
+      return v.row === fixedRoot.row && v.col === fixedRoot.col;
     }
 
     // 2b) Parent (tree) variables
@@ -752,63 +360,34 @@ export function solveGridColoring(
         }
       }
 
-      if (typeof vIsRoot === "boolean" && vIsRoot) {
-        // Fixed root - has no parent
+      if (vIsRoot) {
+        // Root - has no parent
         for (const pVar of parentVarsForV) {
           builder.addUnit(-pVar);
         }
-      } else if (typeof vIsRoot === "boolean" && !vIsRoot) {
-        // Fixed non-root with fixed color - must have exactly one parent
+      } else {
+        // Non-root - must have exactly one parent (if it has this color)
         // At-most-one parent
         if (parentVarsForV.length > 1) {
           builder.addAtMostOne(parentVarsForV);
         }
 
-        // At-least-one parent (since it's fixed to this color)
+        // At-least-one parent (conditional on having this color)
         if (parentVarsForV.length > 0) {
           if (vMember !== null) {
+            // If this vertex has this color, it needs a parent
             builder.solver.addClause([-vMember, ...parentVarsForV]);
           } else {
+            // Fixed to this color - must have a parent
             builder.addOr(parentVarsForV);
           }
         } else {
+          // No potential parents available
           if (vMember === null) {
-            return null; // Fixed vertex isolated
+            return null; // Fixed vertex isolated - impossible to connect
           }
+          // If blank, forbid this color (can't have a parent)
           builder.addUnit(-vMember);
-        }
-      } else {
-        // Dynamic root case - vIsRoot is a variable
-        const isRootVar = vIsRoot as number;
-
-        // At-most-one parent (always applies)
-        if (parentVarsForV.length > 1) {
-          builder.addAtMostOne(parentVarsForV);
-        }
-
-        // If root, no parent: isRoot → ¬p for all p
-        for (const pVar of parentVarsForV) {
-          builder.solver.addClause([-isRootVar, -pVar]);
-        }
-
-        // If member and not root, must have parent: (member ∧ ¬isRoot) → OR(parents)
-        // i.e., ¬member ∨ isRoot ∨ OR(parents)
-        if (parentVarsForV.length > 0) {
-          if (vMember !== null) {
-            builder.solver.addClause([-vMember, isRootVar, ...parentVarsForV]);
-          } else {
-            // Fixed member, must be root or have parent
-            builder.solver.addClause([isRootVar, ...parentVarsForV]);
-          }
-        } else {
-          // No potential parents - must be root if member
-          if (vMember !== null) {
-            // member → isRoot
-            builder.addImplies(vMember, isRootVar);
-          } else {
-            // Fixed member with no parents - must be root
-            builder.addUnit(isRootVar);
-          }
         }
       }
     }
@@ -823,22 +402,10 @@ export function solveGridColoring(
       levelVars.set(`${v.row},${v.col}`, bits);
     }
 
-    // Root has level 0: for fixed root, set directly; for dynamic root, conditional
-    if (hasFixedRoot) {
-      const rootBits = levelVars.get(`${fixedRoot!.row},${fixedRoot!.col}`)!;
-      for (const bit of rootBits) {
-        builder.addUnit(-bit);
-      }
-    } else {
-      // For dynamic roots: isRoot[v] → level[v] = 0
-      for (const v of potentialVertices) {
-        const vKey = `${v.row},${v.col}`;
-        const isRootVar = isRootVars.get(vKey)!;
-        const vBits = levelVars.get(vKey)!;
-        for (const bit of vBits) {
-          builder.solver.addClause([-isRootVar, -bit]); // isRoot → bit = 0
-        }
-      }
+    // Root has level 0
+    const rootBits = levelVars.get(`${fixedRoot.row},${fixedRoot.col}`)!;
+    for (const bit of rootBits) {
+      builder.addUnit(-bit);
     }
 
     // Level ordering constraints
@@ -1174,20 +741,4 @@ export function solveGridColoring(
   }
 
   return { keptEdges, wallEdges, assignedColors, distanceLevels };
-}
-
-/**
- * Create a simple test grid for verification
- */
-export function createTestGrid(): ColorGrid {
-  return {
-    width: 4,
-    height: 4,
-    colors: [
-      [0, 0, 1, 1],
-      [0, 0, 1, 1],
-      [2, 2, 3, 3],
-      [2, 2, 3, 3],
-    ],
-  };
 }
