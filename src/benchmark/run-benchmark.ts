@@ -1,12 +1,12 @@
 /**
  * Benchmark script for SAT encoding optimizations
  * 
- * Tests a 10x10 maze with pathlength constraint minimum 40 using CaDiCaL solver.
+ * Tests maze generation with pathlength constraints using CaDiCaL solver.
  * Run with: npx tsx src/benchmark/run-benchmark.ts
  */
 
 import { solveGridColoring } from "../problem/grid-coloring";
-import type { ColorGrid, PathlengthConstraint } from "../problem/graph-types";
+import type { ColorGrid, PathlengthConstraint, GridSolution } from "../problem/graph-types";
 import { CadicalSolver, CadicalFormulaBuilder } from "../solvers";
 import type { CadicalClass } from "../solvers";
 import * as path from "path";
@@ -255,6 +255,24 @@ function createSimpleTestGrid(width: number, height: number): ColorGrid {
   return { width, height, colors };
 }
 
+/**
+ * Create a single-color grid (all cells are color 0)
+ * This allows the pathlength constraint to work across the whole grid.
+ */
+function createSingleColorGrid(width: number, height: number): ColorGrid {
+  const colors: (number | null)[][] = [];
+  
+  for (let row = 0; row < height; row++) {
+    const rowColors: (number | null)[] = [];
+    for (let col = 0; col < width; col++) {
+      rowColors.push(0); // All cells are color 0
+    }
+    colors.push(rowColors);
+  }
+  
+  return { width, height, colors };
+}
+
 interface BenchmarkResult {
   success: boolean;
   variableCount: number;
@@ -263,6 +281,7 @@ interface BenchmarkResult {
   solveTimeMs: number;
   totalTimeMs: number;
   satisfiable: boolean;
+  solution?: GridSolution | null;
   error?: string;
 }
 
@@ -314,6 +333,7 @@ function runBenchmark(
       solveTimeMs: 0, // We can't separate encode from solve with current API
       totalTimeMs: endTime - startTime,
       satisfiable: solution !== null,
+      solution,
     };
   } catch (error) {
     const endTime = performance.now();
@@ -478,9 +498,65 @@ async function main() {
   if (result6.error) console.log(`  Error: ${result6.error}`);
   console.log("");
   
+  // Test 7: 15x15 SINGLE COLOR grid with pathlength constraint minimum 60 (larger scale test)
+  // Using single color so the pathlength constraint creates a winding path across the whole grid
+  console.log("=".repeat(80));
+  console.log("LARGE SCALE TEST: 15x15 SINGLE COLOR grid with pathlength (min 60)");
+  console.log("=".repeat(80));
+  console.log("");
+  
+  const largeGridSize = 15;
+  const largeSingleColorGrid = createSingleColorGrid(largeGridSize, largeGridSize);
+  const largePathConstraint: PathlengthConstraint[] = [{
+    id: "path1",
+    root: { row: 0, col: 0 },
+    minDistances: {
+      [`${largeGridSize - 1},${largeGridSize - 1}`]: 60, // Opposite corner
+    },
+  }];
+  
+  console.log("Running 15x15 single-color grid with pathlength min 60 (single run)...");
+  const result7 = runBenchmark(largeSingleColorGrid, largePathConstraint, cadicalModule);
+  
+  console.log(`  Variables: ${result7.variableCount}`);
+  console.log(`  Clauses: ${result7.clauseCount}`);
+  console.log(`  Total time: ${result7.totalTimeMs.toFixed(2)}ms (${(result7.totalTimeMs / 1000).toFixed(2)}s)`);
+  console.log(`  Satisfiable: ${result7.satisfiable}`);
+  if (result7.error) console.log(`  Error: ${result7.error}`);
+  
+  // Debug: print solution details
+  if (result7.solution) {
+    console.log(`  Kept edges: ${result7.solution.keptEdges.length}`);
+    console.log(`  Wall edges: ${result7.solution.wallEdges.length}`);
+    console.log(`  Has distanceLevels: ${result7.solution.distanceLevels !== null}`);
+  }
+  
+  // Verify the solution actually has the correct path distance
+  if (result7.solution && result7.solution.distanceLevels) {
+    const levels = result7.solution.distanceLevels["path1"];
+    if (levels) {
+      const targetDistance = levels[largeGridSize - 1][largeGridSize - 1];
+      console.log(`  Actual path distance from (0,0) to (${largeGridSize-1},${largeGridSize-1}): ${targetDistance}`);
+      console.log(`  Path constraint satisfied: ${targetDistance >= 60 ? "YES ✓" : "NO ✗"}`);
+      
+      // Print some sample distances
+      console.log(`  Sample distances: (0,0)=${levels[0][0]}, (7,7)=${levels[7][7]}, (14,0)=${levels[14][0]}, (0,14)=${levels[0][14]}`);
+    } else {
+      console.log("  Warning: distanceLevels['path1'] is undefined");
+    }
+  } else {
+    console.log("  Warning: No distanceLevels in solution");
+  }
+  console.log("");
+  
+  // Note: Test with pathlength min 100 omitted as it takes > 10 minutes to solve
+  // The min 60 test demonstrates that:
+  // 1. The pathlength constraint is working correctly (finds a path of exactly length 60)
+  // 2. The solve time scales significantly with the constraint (51s for this problem)
+  
   // Summary with baseline comparison
   console.log("=".repeat(80));
-  console.log("Summary with Baseline Comparison");
+  console.log("Summary with Baseline Comparison (10x10 grids)");
   console.log("=".repeat(80));
   console.log("");
   console.log("Baseline values (before optimization) - measured:");
