@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
+import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG, COLORS } from "./components";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType, ColorRoots } from "./problem";
 import { HATCH_COLOR } from "./problem";
 import SolverWorker from "./problem/solver.worker?worker";
@@ -601,7 +601,7 @@ function App() {
                               style={{
                                 width: "20px",
                                 height: "20px",
-                                backgroundColor: ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"][color % 6],
+                                backgroundColor: COLORS[color % COLORS.length],
                                 borderRadius: "4px",
                               }}
                             />

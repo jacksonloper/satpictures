@@ -1568,6 +1568,9 @@ export const Grid: React.FC<GridProps> = ({
                   {reachLevel === -1 ? "∞" : reachLevel}
                 </span>
               )}
+              {/* Show root indicator only when not displaying reachability levels.
+                  When levels are shown, the root is implicitly at level 0, so the "R"
+                  marker would be redundant. */}
               {isRoot && reachLevel === null && (
                 <div style={{
                   width: cellSize * 0.5,

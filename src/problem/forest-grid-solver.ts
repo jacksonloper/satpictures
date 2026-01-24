@@ -124,8 +124,12 @@ export function solveForestGridColoring(
     if (userColorRoots[colorKey]) {
       // Use user-specified root
       const root = userColorRoots[colorKey];
+      // Validate that the root cell is within grid bounds
+      if (root.row < 0 || root.row >= height || root.col < 0 || root.col >= width) {
+        throw new Error(`Root for color ${color} at (${root.row},${root.col}) is out of grid bounds`);
+      }
       // Validate that the root cell has the correct color
-      if (colors[root.row]?.[root.col] !== color) {
+      if (colors[root.row][root.col] !== color) {
         throw new Error(`Root for color ${color} at (${root.row},${root.col}) does not have color ${color}`);
       }
       rootOfColor[colorKey] = pointKey(root.row, root.col);
