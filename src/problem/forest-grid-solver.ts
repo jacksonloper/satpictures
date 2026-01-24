@@ -104,10 +104,9 @@ export function solveForestGridColoring(
       if (cellColor === null) {
         nodeColorHint[key] = -1; // any color
       } else if (cellColor === HATCH_COLOR) {
-        // Hatch cells don't participate in tree structure
-        // They should be excluded from the forest encoding
-        // For now, we skip hatch cells in the forest encoding
-        nodeColorHint[key] = -1; // treat as free for now
+        // Hatch cells don't participate in tree structure and aren't assigned a forest color.
+        // We exclude them from the forest encoding by not adding a color hint.
+        // They will keep their HATCH_COLOR in the output.
       } else {
         nodeColorHint[key] = cellColor;
       }
@@ -152,20 +151,13 @@ export function solveForestGridColoring(
   }
 
   // Build the CNF
-  let cnfResult;
-  try {
-    cnfResult = buildColoredForestSatCNF({
-      nodes,
-      edges,
-      nodeColorHint,
-      rootOfColor,
-      distLowerBounds,
-    });
-  } catch (e) {
-    // If CNF building fails (e.g., invalid configuration), return null
-    console.error("Failed to build CNF:", e);
-    throw e;
-  }
+  const cnfResult = buildColoredForestSatCNF({
+    nodes,
+    edges,
+    nodeColorHint,
+    rootOfColor,
+    distLowerBounds,
+  });
 
   // Use provided solver or create a new MiniSat solver
   const solver = options?.solver ?? new MiniSatSolver();
@@ -220,7 +212,8 @@ export function solveForestGridColoring(
             break;
           }
         }
-        // If no color found, use first active color
+        // Fallback: if SAT solver didn't explicitly set a color (can happen with
+        // don't-care variables), use the first active color as a default
         if (!foundColor && activeColors.length > 0) {
           assignedColors[row][col] = activeColors[0];
         }
