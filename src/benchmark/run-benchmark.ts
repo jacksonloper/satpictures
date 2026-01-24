@@ -331,11 +331,36 @@ function runBenchmark(
 }
 
 /**
+ * Run benchmark multiple times and return average
+ */
+function runBenchmarkAvg(
+  grid: ColorGrid,
+  pathlengthConstraints: PathlengthConstraint[],
+  cadicalModule: CadicalModule,
+  iterations: number = 3
+): BenchmarkResult {
+  const results: BenchmarkResult[] = [];
+  
+  for (let i = 0; i < iterations; i++) {
+    results.push(runBenchmark(grid, pathlengthConstraints, cadicalModule));
+  }
+  
+  // Calculate average time
+  const avgTime = results.reduce((sum, r) => sum + r.totalTimeMs, 0) / iterations;
+  
+  // Return first result with averaged time
+  return {
+    ...results[0],
+    totalTimeMs: avgTime,
+  };
+}
+
+/**
  * Main benchmark function
  */
 async function main() {
   console.log("=".repeat(60));
-  console.log("SAT Encoding Benchmark");
+  console.log("SAT Encoding Benchmark (3 iterations per test)");
   console.log("=".repeat(60));
   console.log("");
   
@@ -351,11 +376,11 @@ async function main() {
   console.log("-".repeat(60));
   
   const simpleGrid = createSimpleTestGrid(10, 10);
-  const result1 = runBenchmark(simpleGrid, [], cadicalModule);
+  const result1 = runBenchmarkAvg(simpleGrid, [], cadicalModule, 3);
   
   console.log(`  Variables: ${result1.variableCount}`);
   console.log(`  Clauses: ${result1.clauseCount}`);
-  console.log(`  Total time: ${result1.totalTimeMs.toFixed(2)}ms`);
+  console.log(`  Avg time (3 runs): ${result1.totalTimeMs.toFixed(2)}ms`);
   console.log(`  Satisfiable: ${result1.satisfiable}`);
   if (result1.error) console.log(`  Error: ${result1.error}`);
   console.log("");
@@ -366,59 +391,83 @@ async function main() {
   console.log("-".repeat(60));
   
   const blankGrid = createTestGrid(10, 10);
-  const result2 = runBenchmark(blankGrid, [], cadicalModule);
+  const result2 = runBenchmarkAvg(blankGrid, [], cadicalModule, 3);
   
   console.log(`  Variables: ${result2.variableCount}`);
   console.log(`  Clauses: ${result2.clauseCount}`);
-  console.log(`  Total time: ${result2.totalTimeMs.toFixed(2)}ms`);
+  console.log(`  Avg time (3 runs): ${result2.totalTimeMs.toFixed(2)}ms`);
   console.log(`  Satisfiable: ${result2.satisfiable}`);
   if (result2.error) console.log(`  Error: ${result2.error}`);
   console.log("");
+  
+  // Test configuration
+  const gridSize = 10;
+  
+  // Helper to create pathlength constraints
+  function makePathConstraint(minDist: number): PathlengthConstraint[] {
+    return [{
+      id: "path1",
+      root: { row: 0, col: 0 },
+      minDistances: {
+        [`${gridSize - 1},${gridSize - 1}`]: minDist, // Opposite corner
+      },
+    }];
+  }
   
   // Test 3: 10x10 grid with pathlength constraint minimum 40
   console.log("-".repeat(60));
   console.log("Test 3: 10x10 grid with pathlength constraint (min 40)");
   console.log("-".repeat(60));
   
-  // Test configuration
-  const gridSize = 10;
-  const minPathDistance = 40;
-  
-  // Create pathlength constraint from corner (0,0) to opposite corner
-  // with minimum distance that forces a long winding path
-  const pathlengthConstraints: PathlengthConstraint[] = [
-    {
-      id: "path1",
-      root: { row: 0, col: 0 },
-      minDistances: {
-        [`${gridSize - 1},${gridSize - 1}`]: minPathDistance, // Opposite corner
-      },
-    },
-  ];
-  
-  // For this test, use the simple grid with all fixed colors
-  // so we're just testing the pathlength constraint encoding
-  const result3 = runBenchmark(simpleGrid, pathlengthConstraints, cadicalModule);
+  const result3 = runBenchmarkAvg(simpleGrid, makePathConstraint(40), cadicalModule, 3);
   
   console.log(`  Variables: ${result3.variableCount}`);
   console.log(`  Clauses: ${result3.clauseCount}`);
-  console.log(`  Total time: ${result3.totalTimeMs.toFixed(2)}ms`);
+  console.log(`  Avg time (3 runs): ${result3.totalTimeMs.toFixed(2)}ms`);
   console.log(`  Satisfiable: ${result3.satisfiable}`);
   if (result3.error) console.log(`  Error: ${result3.error}`);
   console.log("");
   
-  // Test 4: Combined test - blank cells + pathlength constraint
+  // Test 4: Combined test - blank cells + pathlength constraint min 40
   console.log("-".repeat(60));
   console.log("Test 4: 10x10 grid (blank interior) + pathlength (min 40)");
   console.log("-".repeat(60));
   
-  const result4 = runBenchmark(blankGrid, pathlengthConstraints, cadicalModule);
+  const result4 = runBenchmarkAvg(blankGrid, makePathConstraint(40), cadicalModule, 3);
   
   console.log(`  Variables: ${result4.variableCount}`);
   console.log(`  Clauses: ${result4.clauseCount}`);
-  console.log(`  Total time: ${result4.totalTimeMs.toFixed(2)}ms`);
+  console.log(`  Avg time (3 runs): ${result4.totalTimeMs.toFixed(2)}ms`);
   console.log(`  Satisfiable: ${result4.satisfiable}`);
   if (result4.error) console.log(`  Error: ${result4.error}`);
+  console.log("");
+  
+  // Test 5: Higher min limit - 60 (larger scale test)
+  console.log("-".repeat(60));
+  console.log("Test 5: 10x10 grid with pathlength constraint (min 60)");
+  console.log("-".repeat(60));
+  
+  const result5 = runBenchmarkAvg(simpleGrid, makePathConstraint(60), cadicalModule, 3);
+  
+  console.log(`  Variables: ${result5.variableCount}`);
+  console.log(`  Clauses: ${result5.clauseCount}`);
+  console.log(`  Avg time (3 runs): ${result5.totalTimeMs.toFixed(2)}ms`);
+  console.log(`  Satisfiable: ${result5.satisfiable}`);
+  if (result5.error) console.log(`  Error: ${result5.error}`);
+  console.log("");
+  
+  // Test 6: Even higher min limit - 80 (stress test)
+  console.log("-".repeat(60));
+  console.log("Test 6: 10x10 grid with pathlength constraint (min 80)");
+  console.log("-".repeat(60));
+  
+  const result6 = runBenchmarkAvg(simpleGrid, makePathConstraint(80), cadicalModule, 3);
+  
+  console.log(`  Variables: ${result6.variableCount}`);
+  console.log(`  Clauses: ${result6.clauseCount}`);
+  console.log(`  Avg time (3 runs): ${result6.totalTimeMs.toFixed(2)}ms`);
+  console.log(`  Satisfiable: ${result6.satisfiable}`);
+  if (result6.error) console.log(`  Error: ${result6.error}`);
   console.log("");
   
   // Summary with baseline comparison
@@ -426,11 +475,13 @@ async function main() {
   console.log("Summary with Baseline Comparison");
   console.log("=".repeat(80));
   console.log("");
-  console.log("Baseline values (before optimization):");
-  console.log("  Test 1: 6760 vars, 20996 clauses");
-  console.log("  Test 2: 30128 vars, 99620 clauses");
-  console.log("  Test 3: 24800 vars, 85057 clauses");
-  console.log("  Test 4: 48168 vars, 163681 clauses");
+  console.log("Baseline values (before optimization) - measured:");
+  console.log("  Test 1: 6760 vars, 20996 clauses, ~155ms");
+  console.log("  Test 2: 30128 vars, 99620 clauses, ~1336ms");
+  console.log("  Test 3: 24800 vars, 85057 clauses, ~163ms (min 40)");
+  console.log("  Test 4: 48168 vars, 163681 clauses, ~1978ms (min 40)");
+  console.log("  Test 5: 34000 vars, 117857 clauses, ~179ms (min 60)");
+  console.log("  Test 6: 43200 vars, 150657 clauses, ~214ms (min 80)");
   console.log("");
   console.log("Optimizations applied:");
   console.log("  1. Sequential counter encoding for AtMostOne (O(n) vs O(n²) clauses)");
@@ -439,28 +490,33 @@ async function main() {
   console.log("Test                                    | Vars    | Clauses | Time(ms) | SAT");
   console.log("-".repeat(80));
   
-  // Calculate improvements
+  // Calculate improvements (with actual measured baselines)
   const baseline = [
-    { vars: 6760, clauses: 20996 },
-    { vars: 30128, clauses: 99620 },
-    { vars: 24800, clauses: 85057 },
-    { vars: 48168, clauses: 163681 }
+    { vars: 6760, clauses: 20996, time: 155 },
+    { vars: 30128, clauses: 99620, time: 1336 },
+    { vars: 24800, clauses: 85057, time: 163 },
+    { vars: 48168, clauses: 163681, time: 1978 },
+    { vars: 34000, clauses: 117857, time: 179 },  // Actual measured for min 60
+    { vars: 43200, clauses: 150657, time: 214 }   // Actual measured for min 80
   ];
-  const results = [result1, result2, result3, result4];
+  const results = [result1, result2, result3, result4, result5, result6];
   const names = [
     "1. Simple grid (no pathlength)         ",
     "2. Blank interior (no pathlength)      ",
     "3. Simple grid + pathlength (min 40)   ",
-    "4. Blank interior + pathlength (min 40)"
+    "4. Blank interior + pathlength (min 40)",
+    "5. Simple grid + pathlength (min 60)   ",
+    "6. Simple grid + pathlength (min 80)   "
   ];
   
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < results.length; i++) {
     const r = results[i];
     const b = baseline[i];
     const varChange = ((r.variableCount - b.vars) / b.vars * 100).toFixed(1);
     const clauseChange = ((r.clauseCount - b.clauses) / b.clauses * 100).toFixed(1);
+    const timeChange = ((r.totalTimeMs - b.time) / b.time * 100).toFixed(1);
     console.log(`${names[i]} | ${r.variableCount.toString().padStart(7)} | ${r.clauseCount.toString().padStart(7)} | ${r.totalTimeMs.toFixed(1).padStart(8)} | ${r.satisfiable}`);
-    console.log(`  Change from baseline:                 | ${varChange.padStart(6)}% | ${clauseChange.padStart(6)}% |          |`);
+    console.log(`  Change from baseline:                 | ${varChange.padStart(6)}% | ${clauseChange.padStart(6)}% | ${timeChange.padStart(7)}% |`);
   }
   console.log("");
 }
