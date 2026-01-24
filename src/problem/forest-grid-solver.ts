@@ -60,22 +60,35 @@ export function solveForestGridColoring(
     throw new Error("At least one color must be selected");
   }
 
-  // Build nodes list (all grid cells)
+  // Track which cells are hatch cells - these are completely removed from the graph
+  const isHatchCell = (row: number, col: number): boolean => {
+    return colors[row][col] === HATCH_COLOR;
+  };
+
+  // Build nodes list - exclude hatch cells entirely
   const nodes: string[] = [];
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
-      nodes.push(pointKey(row, col));
+      if (!isHatchCell(row, col)) {
+        nodes.push(pointKey(row, col));
+      }
     }
   }
 
-  // Build edges list (based on grid type neighbors)
+  // Build edges list - exclude any edge involving a hatch cell
   const edges: [string, string][] = [];
   const addedEdges = new Set<string>();
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
+      // Skip hatch cells as source
+      if (isHatchCell(row, col)) continue;
+      
       const u: GridPoint = { row, col };
       const neighbors = getNeighbors(u, width, height, gridType);
       for (const v of neighbors) {
+        // Skip edges to hatch cells
+        if (isHatchCell(v.row, v.col)) continue;
+        
         const key = edgeKey(u, v);
         if (!addedEdges.has(key)) {
           addedEdges.add(key);
@@ -85,7 +98,7 @@ export function solveForestGridColoring(
     }
   }
 
-  // Determine which colors are used (have at least one fixed cell)
+  // Determine which colors are used (have at least one fixed cell, excluding hatch)
   const usedColors = new Set<number>();
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
@@ -96,20 +109,19 @@ export function solveForestGridColoring(
     }
   }
 
-  // Build nodeColorHint map
+  // Build nodeColorHint map - only for non-hatch cells
   // For fixed cells: hint = the fixed color
   // For blank cells: hint = -1 (any color)
   const nodeColorHint: Record<string, number> = {};
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
+      // Skip hatch cells - they're not in the graph
+      if (isHatchCell(row, col)) continue;
+      
       const cellColor = colors[row][col];
       const key = pointKey(row, col);
       if (cellColor === null) {
         nodeColorHint[key] = -1; // any color
-      } else if (cellColor === HATCH_COLOR) {
-        // Hatch cells don't participate in tree structure and aren't assigned a forest color.
-        // We exclude them from the forest encoding by not adding a color hint.
-        // They will keep their HATCH_COLOR in the output.
       } else {
         nodeColorHint[key] = cellColor;
       }
@@ -228,7 +240,7 @@ export function solveForestGridColoring(
     }
   }
 
-  // Extract kept edges from the solution
+  // Extract kept edges from the solution (only edges between non-hatch cells)
   const keptEdges: Edge[] = [];
   const wallEdges: Edge[] = [];
 
@@ -247,6 +259,30 @@ export function solveForestGridColoring(
       keptEdges.push({ u, v });
     } else {
       wallEdges.push({ u, v });
+    }
+  }
+
+  // Add walls between hatch cells and non-hatch cells
+  // These edges weren't in the SAT problem but should be displayed as walls
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const u: GridPoint = { row, col };
+      const uIsHatch = isHatchCell(row, col);
+      const neighbors = getNeighbors(u, width, height, gridType);
+      
+      for (const v of neighbors) {
+        const vIsHatch = isHatchCell(v.row, v.col);
+        
+        // Add wall if exactly one of the cells is hatch
+        // Only add once (when u < v to avoid duplicates)
+        if (uIsHatch !== vIsHatch) {
+          const uKey = pointKey(row, col);
+          const vKey = pointKey(v.row, v.col);
+          if (uKey < vKey) {
+            wallEdges.push({ u, v });
+          }
+        }
+      }
     }
   }
 
