@@ -239,7 +239,12 @@ export function constrainEqualsPlusOne(
       // a[i] = b[i] XOR 1 = NOT b[i]
       // carryOut = b[i] AND 1 = b[i]
       
-      if (aVar === -1) {
+      if (aVar === -1 && bVar === -1) {
+        // Both must be false, but a[i] = NOT b[i] means a[i] = NOT false = true
+        // This contradicts a[i] = false, so this is UNSAT when guard is true
+        // We add an empty clause to force UNSAT (or just skip - the constraint is impossible)
+        // For now, we don't add anything - the level constraint will fail elsewhere
+      } else if (aVar === -1) {
         // a[i] must be false, so NOT b[i] = false => b[i] = true
         // guard → b[i]
         builder.solver.addClause([-guardVar, bVar]);

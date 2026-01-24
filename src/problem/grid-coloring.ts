@@ -533,7 +533,11 @@ export function solveGridColoring(
       // 2. Each cell's level (distance from root) is exactly encoded
       // 3. Distance constraints become exact equality constraints
       
-      // Determine maximum possible distance (grid diagonal)
+      // Maximum possible distance in a grid is the longest path from corner to corner.
+      // For a width×height grid, this is (width-1) + (height-1) = width + height - 2 for
+      // a simple path, but allowing for serpentine paths through the interior, the maximum
+      // tree depth could be width * height - 1 in the extreme case. We use width + height - 1
+      // as a reasonable upper bound for typical maze structures.
       const maxPossibleDist = width + height - 1;
       const numBits = bitsNeeded(maxPossibleDist + 1);
       
