@@ -26,27 +26,59 @@ function createEmptyGrid(width: number, height: number): ColorGrid {
   };
 }
 
+interface MazeSetupResult {
+  grid: ColorGrid;
+  constraint: PathlengthConstraint;
+}
+
 function createMazeSetupGrid(
   width: number,
   height: number
-): ColorGrid {
+): MazeSetupResult {
   // Maze setup: 
   // - Orange hatch (HATCH_COLOR) all the way around the border (walls)
+  // - One red square on far left border (entrance)
+  // - One red square on far right border (exit)
   // - All other interior cells: red (color 0)
-  return {
-    width,
-    height,
-    colors: Array.from({ length: height }, (_, row) =>
-      Array.from({ length: width }, (_, col) => {
-        // Border cells: orange hatch (walls)
-        if (row === 0 || row === height - 1 || col === 0 || col === width - 1) {
-          return HATCH_COLOR;
-        }
-        // Interior: red
-        return 0;
-      })
-    ),
+  // - Pathlength constraint from entrance to exit with distance >= max(width, height)
+  
+  // Position the entrance and exit at the middle row of left/right borders
+  const middleRow = Math.floor(height / 2);
+  const entranceCol = 0;
+  const exitCol = width - 1;
+  
+  const colors = Array.from({ length: height }, (_, row) =>
+    Array.from({ length: width }, (_, col) => {
+      // Entrance on far left: red square in the left border
+      if (row === middleRow && col === entranceCol) {
+        return 0; // red
+      }
+      // Exit on far right: red square in the right border
+      if (row === middleRow && col === exitCol) {
+        return 0; // red
+      }
+      // Other border cells: orange hatch (walls)
+      if (row === 0 || row === height - 1 || col === 0 || col === width - 1) {
+        return HATCH_COLOR;
+      }
+      // Interior: red
+      return 0;
+    })
+  );
+  
+  const grid: ColorGrid = { width, height, colors };
+  
+  // Create pathlength constraint with root at entrance and minimum distance at exit
+  const minDistance = Math.max(width, height);
+  const constraint: PathlengthConstraint = {
+    id: `maze_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    root: { row: middleRow, col: entranceCol },
+    minDistances: {
+      [`${middleRow},${exitCol}`]: minDistance,
+    },
   };
+  
+  return { grid, constraint };
 }
 
 /** Generate a unique ID for a new pathlength constraint */
@@ -221,7 +253,10 @@ function App() {
   }, [gridWidth, gridHeight]);
 
   const handleMazeSetup = useCallback(() => {
-    setGrid(createMazeSetupGrid(gridWidth, gridHeight));
+    const { grid, constraint } = createMazeSetupGrid(gridWidth, gridHeight);
+    setGrid(grid);
+    setPathlengthConstraints([constraint]);
+    setSelectedConstraintId(constraint.id);
   }, [gridWidth, gridHeight]);
 
   const handleCancel = useCallback(() => {
