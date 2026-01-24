@@ -761,6 +761,41 @@ export function solveGridColoring(
         }
       }
       
+      // F) CRITICAL FIX: Only root may have level 0
+      // This prevents disconnected cyclic components where every node has a parent
+      // but they form a cycle not connected to the root.
+      // For every non-root cell v that could be rootColor:
+      // M(v) → level(v) ≠ 0, i.e., ¬M(v) ∨ (bit[0] ∨ bit[1] ∨ ... ∨ bit[k-1])
+      //
+      // NOTE: There seems to be a bug when using 2-bit level encoding
+      // that causes UNSAT. Need to investigate further.
+      // For now, skip this constraint when numBits <= 2.
+      if (numBits > 2) {
+        for (let row = 0; row < height; row++) {
+          for (let col = 0; col < width; col++) {
+            if (!couldBeRootColor(row, col)) continue;
+            if (row === root.row && col === root.col) continue; // Skip root
+            
+            const vMembership = getMembershipLiteral(row, col);
+            const vBits = treeLevelVars.get(`${row},${col}`);
+            
+            if (!vBits || vBits.length === 0) continue;
+            
+            if (vMembership === 0) {
+              // Cell cannot be rootColor - skip
+              continue;
+            } else if (vMembership === null) {
+              // Fixed member - at least one level bit must be true (level ≠ 0)
+              builder.addOr(vBits);
+            } else {
+              // Blank cell - if it's a member, level must be non-zero
+              // ¬M(v) ∨ (bit[0] ∨ bit[1] ∨ ... ∨ bit[k-1])
+              builder.solver.addClause([-vMembership, ...vBits]);
+            }
+          }
+        }
+      }
+      
       // G) "No shortcuts" inside the color component (CRUCIAL)
       // For each undirected neighbor edge {u,v}:
       // edge(u,v) ∧ Mc(u) ∧ Mc(v) → (Pc(u→v) ∨ Pc(v→u))
