@@ -276,6 +276,9 @@ function runBenchmark(
 ): BenchmarkResult {
   const startTime = performance.now();
   
+  // Deprecated parameter kept for API compatibility
+  const numColors = 6;
+  
   try {
     // Create a new CaDiCaL instance
     const cadical = new Cadical(cadicalModule);
@@ -285,7 +288,7 @@ function runBenchmark(
     const encodeStart = performance.now();
     
     // Run the solver
-    const solution = solveGridColoring(grid, 6, {
+    const solution = solveGridColoring(grid, numColors, {
       solver,
       builder,
       gridType: "square",
@@ -377,15 +380,18 @@ async function main() {
   console.log("Test 3: 10x10 grid with pathlength constraint (min 40)");
   console.log("-".repeat(60));
   
-  // Create pathlength constraint from corner (0,0) to opposite corner (9,9)
-  // with minimum distance 40 (which is much larger than the grid allows,
-  // forcing the solver to create a long winding path)
+  // Test configuration
+  const gridSize = 10;
+  const minPathDistance = 40;
+  
+  // Create pathlength constraint from corner (0,0) to opposite corner
+  // with minimum distance that forces a long winding path
   const pathlengthConstraints: PathlengthConstraint[] = [
     {
       id: "path1",
       root: { row: 0, col: 0 },
       minDistances: {
-        "9,9": 40, // Opposite corner must be at least 40 steps away
+        [`${gridSize - 1},${gridSize - 1}`]: minPathDistance, // Opposite corner
       },
     },
   ];

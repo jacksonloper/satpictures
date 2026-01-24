@@ -528,18 +528,21 @@ export function solveGridColoring(
     const dc = Math.abs(p1.col - p2.col);
     
     if (gType === "square") {
-      // Manhattan distance
+      // Manhattan distance for 4-neighbor grid
       return dr + dc;
     } else if (gType === "hex") {
-      // Hex distance (using axial coordinates approximation)
-      // In offset coordinates, this is an approximation
-      return Math.max(dr, dc, Math.abs(dr - dc));
+      // Hex distance for odd-r offset coordinates
+      // Convert to axial/cube coordinates for proper hex distance
+      // For odd-r offset: col stays, row converts based on parity
+      // Simplified: use conservative lower bound (Chebyshev)
+      // This ensures we don't exclude reachable cells
+      return Math.max(dr, dc);
     } else if (gType === "octagon") {
-      // Chebyshev distance (can move diagonally)
+      // Chebyshev distance (can move in 8 directions)
       return Math.max(dr, dc);
     } else {
-      // Cairo and CairoBridge: use Manhattan as conservative lower bound
-      // (these have 5-7 neighbors so can potentially reach faster)
+      // Cairo and CairoBridge: these have 5-7 neighbors
+      // Use Chebyshev as conservative lower bound (can reach diagonally)
       return Math.max(dr, dc);
     }
   }
