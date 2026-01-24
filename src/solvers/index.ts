@@ -9,6 +9,7 @@ export type { Clause, FormulaBuilder, Literal, SATSolver, SolveResult } from "./
 export {
   addAtLeastKFalse,
   constrainBinaryEqual,
+  constrainEqualsPlusOne,
   constrainLessThan,
   createBinaryIntVariables,
   MiniSatFormulaBuilder,

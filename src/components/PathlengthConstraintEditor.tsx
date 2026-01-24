@@ -207,6 +207,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
       }
 
       const centroid = getCellCentroid(row, col, cellSize, gridType, grid.width, grid.height);
+      const isTreeMode = constraint.treeMaze ?? false;
       overlays.push(
         <div
           key={cellKey}
@@ -218,7 +219,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
             minWidth: cellSize * 0.5,
             height: cellSize * 0.4,
             borderRadius: "4px",
-            backgroundColor: "rgba(231, 76, 60, 0.85)",
+            backgroundColor: isTreeMode ? "rgba(46, 139, 87, 0.85)" : "rgba(231, 76, 60, 0.85)",
             border: "2px solid white",
             display: "flex",
             alignItems: "center",
@@ -230,7 +231,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
             pointerEvents: "none",
           }}
         >
-          ≥{distance}
+          {isTreeMode ? `=${distance}` : `≥${distance}`}
         </div>
       );
     }
@@ -273,11 +274,36 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
         </button>
       </div>
 
+      {/* Tree Maze Option */}
+      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={constraint.treeMaze ?? false}
+            onChange={(e) => {
+              onConstraintChange({
+                ...constraint,
+                treeMaze: e.target.checked,
+              });
+            }}
+            style={{ width: "16px", height: "16px", cursor: "pointer" }}
+          />
+          <span style={{ fontWeight: constraint.treeMaze ? "bold" : "normal" }}>
+            🌳 Tree Maze
+          </span>
+        </label>
+        <span style={{ fontSize: "11px", color: "#7f8c8d" }}>
+          (enforce no cycles, uses exact distances)
+        </span>
+      </div>
+
       {/* Tool description */}
       <p style={{ fontSize: "12px", color: "#7f8c8d", margin: 0 }}>
         {selectedTool === "root"
           ? "Click on a cell to set it as the root (origin) for distance calculations."
-          : "Click on a cell to specify a minimum distance from the root."}
+          : constraint.treeMaze
+            ? "Click on a cell to specify an exact distance from the root (tree mode)."
+            : "Click on a cell to specify a minimum distance from the root."}
       </p>
 
       {/* Distance input modal - prominent dialog for mobile compatibility */}

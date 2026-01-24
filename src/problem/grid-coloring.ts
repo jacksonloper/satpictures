@@ -10,6 +10,8 @@
  */
 
 import {
+  constrainBinaryEqual,
+  constrainEqualsPlusOne,
   createBinaryIntVariables,
   MiniSatFormulaBuilder,
   MiniSatSolver,
@@ -489,20 +491,21 @@ export function solveGridColoring(
   }
 
   // ============================================
-  // 3. PATHLENGTH LOWER BOUND CONSTRAINTS
+  // 3. PATHLENGTH CONSTRAINTS
   // ============================================
-  // For each pathlength constraint with a root and minimum distances,
-  // enforce that the path from root to each specified cell is at least the minimum distance.
+  // For each pathlength constraint with a root and distance requirements:
   //
-  // We use the standard bounded-reachability SAT encoding:
-  //   R[i][v] = "v is reachable from root using kept edges in at most i steps"
+  // REGULAR MODE (treeMaze = false):
+  //   Enforce that the path from root to each specified cell is at least the minimum distance.
+  //   Uses the standard bounded-reachability SAT encoding:
+  //     R[i][v] = "v is reachable from root using kept edges in at most i steps"
   //
-  // Constraints:
-  //   Base: R[0][root] = true, R[0][other] = false
-  //   Step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor of v} (R[i-1][u] ∧ edge(u,v))
-  //   Forbidden: For each cell with minDistance d: ¬R[d-1][cell] (not reachable in < d steps)
-  //
-  // This correctly enforces that the shortest-path distance from root to cell is >= d.
+  // TREE MAZE MODE (treeMaze = true):
+  //   Enforce that the graph forms a tree (no cycles) and distances are EXACT.
+  //   This is more efficient because we use equality constraints instead of less-than.
+  //   Uses binary-encoded level variables where:
+  //     level[child] = level[parent] + 1
+  //   Each cell has exactly one parent (tree structure).
   
   const pathlengthConstraints = options?.pathlengthConstraints ?? [];
   
@@ -518,123 +521,268 @@ export function solveGridColoring(
     const root = constraint.root;
     constraintRoots.push({ constraintId: constraint.id, root });
     
-    // Get all cells with minimum distance requirements
-    const minDistanceEntries = Object.entries(constraint.minDistances);
-    if (minDistanceEntries.length === 0) {
-      // No distance requirements - skip
-      continue;
-    }
+    // Get all cells with distance requirements
+    const distanceEntries = Object.entries(constraint.minDistances);
     
-    // Find the maximum K we need to encode (max minDistance - 1)
-    let maxK = 0;
-    for (const [, dist] of minDistanceEntries) {
-      if (dist > 0) {
-        maxK = Math.max(maxK, dist - 1);
-      }
-    }
-    
-    if (maxK === 0) {
-      // All minDistances are 1 or less - no constraints needed
-      continue;
-    }
-    
-    // R[i][row,col] variables: reachable in at most i steps
-    const R: Map<string, number>[] = [];
-    for (let step = 0; step <= maxK; step++) {
-      R.push(new Map<string, number>());
-    }
-    
-    // Create variables for all cells at all steps
-    for (let step = 0; step <= maxK; step++) {
+    if (constraint.treeMaze) {
+      // ============================================
+      // TREE MAZE MODE: Binary-encoded exact distances
+      // ============================================
+      // This mode enforces:
+      // 1. The graph of kept edges forms a tree rooted at constraint.root
+      // 2. Each cell's level (distance from root) is exactly encoded
+      // 3. Distance constraints become exact equality constraints
+      
+      // Determine maximum possible distance (grid diagonal)
+      const maxPossibleDist = width + height - 1;
+      const numBits = bitsNeeded(maxPossibleDist + 1);
+      
+      // Create binary-encoded level variables for each cell
+      const treeLevelVars = new Map<string, number[]>();
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
           const key = `${row},${col}`;
-          const varName = `R_${constraint.id}_${step}_${row}_${col}`;
-          R[step].set(key, builder.createNamedVariable(varName));
+          const bits = createBinaryIntVariables(
+            builder,
+            `treeLvl_${constraint.id}_${row}_${col}`,
+            numBits
+          );
+          treeLevelVars.set(key, bits);
         }
       }
-    }
-    
-    // Base case (step 0): only root is reachable
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        const key = `${row},${col}`;
-        const r0 = R[0].get(key)!;
-        if (row === root.row && col === root.col) {
-          // R[0][root] = true
-          builder.addUnit(r0);
-        } else {
-          // R[0][other] = false
-          builder.addUnit(-r0);
-        }
+      
+      // Root has level 0
+      const rootKey = `${root.row},${root.col}`;
+      const rootBits = treeLevelVars.get(rootKey)!;
+      constrainBinaryEqual(builder, rootBits, 0);
+      
+      // Create tree parent variables: treeParent[v][u] = "u is the parent of v in the tree"
+      const treeParentVars = new Map<string, number>();
+      
+      function treeParentKey(child: GridPoint, parent: GridPoint): string {
+        return `treeParent_${constraint.id}_${child.row},${child.col}_from_${parent.row},${parent.col}`;
       }
-    }
-    
-    // Inductive step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
-    for (let step = 1; step <= maxK; step++) {
+      
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
-          const key = `${row},${col}`;
-          const rCurr = R[step].get(key)!;
-          const rPrev = R[step - 1].get(key)!;
-          const neighbors = getNeighbors({ row, col }, width, height, gridType);
+          const v: GridPoint = { row, col };
+          const neighbors = getNeighbors(v, width, height, gridType);
           
-          // Collect all "reachable through neighbor" terms
-          const reachThroughNeighbor: number[] = [];
-          
-          for (const n of neighbors) {
-            const nKey = `${n.row},${n.col}`;
-            const rPrevN = R[step - 1].get(nKey)!;
-            const eKey = edgeKey({ row, col }, n);
+          for (const u of neighbors) {
+            const pKey = treeParentKey(v, u);
+            const pVar = builder.createNamedVariable(pKey);
+            treeParentVars.set(pKey, pVar);
+            
+            // If u is parent of v, then the edge between them must exist
+            const eKey = edgeKey(u, v);
             const edgeVar = edgeVars.get(eKey);
-            if (edgeVar === undefined) continue;
+            if (edgeVar !== undefined) {
+              builder.addImplies(pVar, edgeVar);
+            }
             
-            // Create helper variable: reachThrough = R[i-1][n] ∧ edge(n,v)
-            const reachThrough = builder.createNamedVariable(
-              `reach_${constraint.id}_${step}_${n.row}_${n.col}_to_${row}_${col}`
-            );
-            reachThroughNeighbor.push(reachThrough);
-            
-            // reachThrough → R[i-1][n]
-            builder.solver.addClause([-reachThrough, rPrevN]);
-            // reachThrough → edge
-            builder.solver.addClause([-reachThrough, edgeVar]);
-            // (R[i-1][n] ∧ edge) → reachThrough
-            builder.solver.addClause([-rPrevN, -edgeVar, reachThrough]);
+            // If u is parent of v, then level[v] = level[u] + 1
+            const uBits = treeLevelVars.get(`${u.row},${u.col}`)!;
+            const vBits = treeLevelVars.get(`${v.row},${v.col}`)!;
+            constrainEqualsPlusOne(builder, vBits, uBits, pVar, `treeAdd_${constraint.id}_${v.row}${v.col}_${u.row}${u.col}`);
           }
-          
-          // R[i][v] ↔ R[i-1][v] OR ⋁ reachThroughNeighbor
-          // Forward: (R[i-1][v] OR any reachThrough) → R[i][v]
-          builder.solver.addClause([-rPrev, rCurr]); // R[i-1][v] → R[i][v]
-          for (const rt of reachThroughNeighbor) {
-            builder.solver.addClause([-rt, rCurr]); // reachThrough → R[i][v]
-          }
-          
-          // Backward: R[i][v] → (R[i-1][v] OR ⋁ reachThroughNeighbor)
-          const backwardClause = [-rCurr, rPrev, ...reachThroughNeighbor];
-          builder.solver.addClause(backwardClause);
         }
       }
-    }
-    
-    // Constraint: cells with minDistance d must NOT be reachable in < d steps
-    // i.e., ¬R[d-1][cell] for each cell with minDistance d
-    for (const [cellKey, minDist] of minDistanceEntries) {
-      if (minDist <= 1) continue; // minDist of 1 means any distance >= 1 is OK (always satisfied)
       
-      const [rowStr, colStr] = cellKey.split(',');
-      const row = parseInt(rowStr, 10);
-      const col = parseInt(colStr, 10);
+      // Each non-root cell: if it has any parent (is in the tree), it has exactly one parent
+      // This allows cells to NOT be in the tree (when they have no parent)
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          if (row === root.row && col === root.col) {
+            // Root has no parent
+            const neighbors = getNeighbors(root, width, height, gridType);
+            for (const u of neighbors) {
+              const pKey = treeParentKey(root, u);
+              const pVar = treeParentVars.get(pKey);
+              if (pVar !== undefined) {
+                builder.addUnit(-pVar);
+              }
+            }
+          } else {
+            // Non-root: at most one parent (allows cells to not be in tree)
+            const v: GridPoint = { row, col };
+            const neighbors = getNeighbors(v, width, height, gridType);
+            const parentVarsForV: number[] = [];
+            
+            for (const u of neighbors) {
+              const pKey = treeParentKey(v, u);
+              const pVar = treeParentVars.get(pKey);
+              if (pVar !== undefined) {
+                parentVarsForV.push(pVar);
+              }
+            }
+            
+            // At most one parent (allows cells to not be in the tree)
+            if (parentVarsForV.length > 1) {
+              builder.addAtMostOne(parentVarsForV);
+            }
+          }
+        }
+      }
       
-      // Validate cell is in bounds
-      if (row < 0 || row >= height || col < 0 || col >= width) continue;
+      // Apply exact distance constraints
+      // For cells with distance requirements, they MUST be in the tree (have a parent if not root)
+      for (const [cellKey, exactDist] of distanceEntries) {
+        if (exactDist < 0) continue;
+        
+        const [rowStr, colStr] = cellKey.split(',');
+        const row = parseInt(rowStr, 10);
+        const col = parseInt(colStr, 10);
+        
+        // Validate cell is in bounds
+        if (row < 0 || row >= height || col < 0 || col >= width) continue;
+        
+        // In tree maze mode, the distance is EXACT
+        const cellBits = treeLevelVars.get(cellKey)!;
+        constrainBinaryEqual(builder, cellBits, exactDist);
+        
+        // Ensure this cell is in the tree (has exactly one parent, unless it's the root)
+        if (!(row === root.row && col === root.col)) {
+          const v: GridPoint = { row, col };
+          const neighbors = getNeighbors(v, width, height, gridType);
+          const parentVarsForV: number[] = [];
+          
+          for (const u of neighbors) {
+            const pKey = treeParentKey(v, u);
+            const pVar = treeParentVars.get(pKey);
+            if (pVar !== undefined) {
+              parentVarsForV.push(pVar);
+            }
+          }
+          
+          // This cell MUST have at least one parent (be in the tree)
+          if (parentVarsForV.length > 0) {
+            builder.addOr(parentVarsForV);
+          }
+        }
+      }
       
-      const stepToForbid = minDist - 1;
-      if (stepToForbid > maxK) continue; // Already covered
+    } else {
+      // ============================================
+      // REGULAR MODE: Bounded reachability encoding
+      // ============================================
+      // Enforce distance >= minDistance using standard bounded-reachability encoding
       
-      const rStep = R[stepToForbid].get(cellKey);
-      if (rStep !== undefined) {
-        builder.addUnit(-rStep); // NOT reachable in < minDist steps
+      if (distanceEntries.length === 0) {
+        // No distance requirements - skip
+        continue;
+      }
+      
+      // Find the maximum K we need to encode (max minDistance - 1)
+      let maxK = 0;
+      for (const [, dist] of distanceEntries) {
+        if (dist > 0) {
+          maxK = Math.max(maxK, dist - 1);
+        }
+      }
+      
+      if (maxK === 0) {
+        // All minDistances are 1 or less - no constraints needed
+        continue;
+      }
+      
+      // R[i][row,col] variables: reachable in at most i steps
+      const R: Map<string, number>[] = [];
+      for (let step = 0; step <= maxK; step++) {
+        R.push(new Map<string, number>());
+      }
+      
+      // Create variables for all cells at all steps
+      for (let step = 0; step <= maxK; step++) {
+        for (let row = 0; row < height; row++) {
+          for (let col = 0; col < width; col++) {
+            const key = `${row},${col}`;
+            const varName = `R_${constraint.id}_${step}_${row}_${col}`;
+            R[step].set(key, builder.createNamedVariable(varName));
+          }
+        }
+      }
+      
+      // Base case (step 0): only root is reachable
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          const key = `${row},${col}`;
+          const r0 = R[0].get(key)!;
+          if (row === root.row && col === root.col) {
+            // R[0][root] = true
+            builder.addUnit(r0);
+          } else {
+            // R[0][other] = false
+            builder.addUnit(-r0);
+          }
+        }
+      }
+      
+      // Inductive step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
+      for (let step = 1; step <= maxK; step++) {
+        for (let row = 0; row < height; row++) {
+          for (let col = 0; col < width; col++) {
+            const key = `${row},${col}`;
+            const rCurr = R[step].get(key)!;
+            const rPrev = R[step - 1].get(key)!;
+            const neighbors = getNeighbors({ row, col }, width, height, gridType);
+            
+            // Collect all "reachable through neighbor" terms
+            const reachThroughNeighbor: number[] = [];
+            
+            for (const n of neighbors) {
+              const nKey = `${n.row},${n.col}`;
+              const rPrevN = R[step - 1].get(nKey)!;
+              const eKey = edgeKey({ row, col }, n);
+              const edgeVar = edgeVars.get(eKey);
+              if (edgeVar === undefined) continue;
+              
+              // Create helper variable: reachThrough = R[i-1][n] ∧ edge(n,v)
+              const reachThrough = builder.createNamedVariable(
+                `reach_${constraint.id}_${step}_${n.row}_${n.col}_to_${row}_${col}`
+              );
+              reachThroughNeighbor.push(reachThrough);
+              
+              // reachThrough → R[i-1][n]
+              builder.solver.addClause([-reachThrough, rPrevN]);
+              // reachThrough → edge
+              builder.solver.addClause([-reachThrough, edgeVar]);
+              // (R[i-1][n] ∧ edge) → reachThrough
+              builder.solver.addClause([-rPrevN, -edgeVar, reachThrough]);
+            }
+            
+            // R[i][v] ↔ R[i-1][v] OR ⋁ reachThroughNeighbor
+            // Forward: (R[i-1][v] OR any reachThrough) → R[i][v]
+            builder.solver.addClause([-rPrev, rCurr]); // R[i-1][v] → R[i][v]
+            for (const rt of reachThroughNeighbor) {
+              builder.solver.addClause([-rt, rCurr]); // reachThrough → R[i][v]
+            }
+            
+            // Backward: R[i][v] → (R[i-1][v] OR ⋁ reachThroughNeighbor)
+            const backwardClause = [-rCurr, rPrev, ...reachThroughNeighbor];
+            builder.solver.addClause(backwardClause);
+          }
+        }
+      }
+      
+      // Constraint: cells with minDistance d must NOT be reachable in < d steps
+      // i.e., ¬R[d-1][cell] for each cell with minDistance d
+      for (const [cellKey, minDist] of distanceEntries) {
+        if (minDist <= 1) continue; // minDist of 1 means any distance >= 1 is OK (always satisfied)
+        
+        const [rowStr, colStr] = cellKey.split(',');
+        const row = parseInt(rowStr, 10);
+        const col = parseInt(colStr, 10);
+        
+        // Validate cell is in bounds
+        if (row < 0 || row >= height || col < 0 || col >= width) continue;
+        
+        const stepToForbid = minDist - 1;
+        if (stepToForbid > maxK) continue; // Already covered
+        
+        const rStep = R[stepToForbid].get(cellKey);
+        if (rStep !== undefined) {
+          builder.addUnit(-rStep); // NOT reachable in < minDist steps
+        }
       }
     }
   }

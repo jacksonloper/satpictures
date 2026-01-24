@@ -180,6 +180,145 @@ export function constrainBinaryEqual(
 }
 
 /**
+ * Utility: Encode bits1 = bits2 + 1 (conditional on a guard variable)
+ * 
+ * When guardVar is true, enforces that the binary integer represented by bits1
+ * equals the binary integer represented by bits2 plus 1.
+ * Uses ripple-carry adder logic: bit1[i] = bit2[i] XOR carry[i], where carry[0] = 1.
+ * 
+ * @param builder The formula builder
+ * @param bits1 The result bits (child level)
+ * @param bits2 The operand bits (parent level)
+ * @param guardVar When true, the constraint is enforced; when false, it's not
+ * @param auxPrefix Prefix for auxiliary variable names
+ */
+export function constrainEqualsPlusOne(
+  builder: FormulaBuilder,
+  bits1: number[],
+  bits2: number[],
+  guardVar: number,
+  auxPrefix: string
+): void {
+  const n = Math.max(bits1.length, bits2.length);
+  
+  // Pad arrays if needed (conceptually padding with false/0)
+  const a = [...bits1];
+  const b = [...bits2];
+  while (a.length < n) a.push(-1); // Sentinel for "must be false"
+  while (b.length < n) b.push(-1);
+  
+  // carry[i] represents the carry bit at position i
+  // carry[0] = 1 (since we're adding 1)
+  // a[i] = b[i] XOR carry[i]
+  // carry[i+1] = b[i] AND carry[i]
+  
+  // Create carry variables (carry[0] is always true in this case)
+  const carry: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    if (i === 0) {
+      // carry[0] = 1 (always true for adding 1)
+      // We don't need a variable, just use true
+      carry.push(-1); // Sentinel meaning "always true"
+    } else {
+      carry.push(builder.createNamedVariable(`${auxPrefix}_carry_${i}`));
+    }
+  }
+  
+  for (let i = 0; i < n; i++) {
+    const aVar = a[i];
+    const bVar = b[i];
+    const carryIn = carry[i];
+    const carryOut = carry[i + 1];
+    
+    // When guard is true:
+    // a[i] = b[i] XOR carryIn
+    // carryOut = b[i] AND carryIn
+    
+    if (carryIn === -1) {
+      // carryIn is always true (i === 0)
+      // a[i] = b[i] XOR 1 = NOT b[i]
+      // carryOut = b[i] AND 1 = b[i]
+      
+      if (aVar === -1) {
+        // a[i] must be false, so NOT b[i] = false => b[i] = true
+        // guard → b[i]
+        builder.solver.addClause([-guardVar, bVar]);
+      } else if (bVar === -1) {
+        // b[i] is false, so a[i] = NOT false = true
+        // guard → a[i]
+        builder.solver.addClause([-guardVar, aVar]);
+      } else {
+        // guard → (a[i] ↔ NOT b[i])
+        // guard ∧ a[i] → NOT b[i]: -guard ∨ -a[i] ∨ -b[i]
+        // guard ∧ NOT a[i] → b[i]: -guard ∨ a[i] ∨ b[i]
+        builder.solver.addClause([-guardVar, -aVar, -bVar]);
+        builder.solver.addClause([-guardVar, aVar, bVar]);
+      }
+      
+      // carryOut = b[i]
+      if (bVar === -1) {
+        // carryOut = false
+        builder.solver.addClause([-guardVar, -carryOut]);
+      } else {
+        // guard → (carryOut ↔ b[i])
+        builder.solver.addClause([-guardVar, -carryOut, bVar]);
+        builder.solver.addClause([-guardVar, carryOut, -bVar]);
+      }
+    } else {
+      // General case with carryIn as a variable
+      
+      // a[i] = b[i] XOR carryIn
+      // XOR truth table: a = 1 iff exactly one of b, c is 1
+      if (aVar === -1) {
+        // a[i] = 0, so b[i] XOR carryIn = 0 => b[i] = carryIn
+        if (bVar === -1) {
+          // b[i] = 0, so carryIn must be 0
+          builder.solver.addClause([-guardVar, -carryIn]);
+        } else {
+          // guard → (b[i] ↔ carryIn)
+          builder.solver.addClause([-guardVar, -bVar, carryIn]);
+          builder.solver.addClause([-guardVar, bVar, -carryIn]);
+        }
+      } else if (bVar === -1) {
+        // b[i] = 0, so a[i] = carryIn
+        // guard → (a[i] ↔ carryIn)
+        builder.solver.addClause([-guardVar, -aVar, carryIn]);
+        builder.solver.addClause([-guardVar, aVar, -carryIn]);
+      } else {
+        // a[i] = b[i] XOR carryIn
+        // Using: a ↔ (b XOR c) is equivalent to:
+        // (a ∨ b ∨ c) ∧ (a ∨ ¬b ∨ ¬c) ∧ (¬a ∨ b ∨ ¬c) ∧ (¬a ∨ ¬b ∨ c)
+        // Under guard:
+        builder.solver.addClause([-guardVar, aVar, bVar, carryIn]);
+        builder.solver.addClause([-guardVar, aVar, -bVar, -carryIn]);
+        builder.solver.addClause([-guardVar, -aVar, bVar, -carryIn]);
+        builder.solver.addClause([-guardVar, -aVar, -bVar, carryIn]);
+      }
+      
+      // carryOut = b[i] AND carryIn
+      if (bVar === -1) {
+        // b[i] = 0, so carryOut = 0
+        builder.solver.addClause([-guardVar, -carryOut]);
+      } else {
+        // guard → (carryOut ↔ (b[i] ∧ carryIn))
+        // carryOut → b[i]
+        builder.solver.addClause([-guardVar, -carryOut, bVar]);
+        // carryOut → carryIn
+        builder.solver.addClause([-guardVar, -carryOut, carryIn]);
+        // (b[i] ∧ carryIn) → carryOut
+        builder.solver.addClause([-guardVar, carryOut, -bVar, -carryIn]);
+      }
+    }
+  }
+  
+  // The final carry should be 0 (no overflow)
+  // guard → NOT carry[n]
+  if (carry[n] !== -1) {
+    builder.solver.addClause([-guardVar, -carry[n]]);
+  }
+}
+
+/**
  * Utility: Add constraint that bits1 < bits2 (unsigned)
  * Uses auxiliary variables for the comparison
  *

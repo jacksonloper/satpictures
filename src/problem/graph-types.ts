@@ -53,6 +53,13 @@ export interface PathlengthConstraint {
   root: GridPoint | null;
   /** Map from cell position key ("row,col") to minimum distance from root */
   minDistances: Record<string, number>;
+  /**
+   * If true, enforces that this color region forms a tree (no cycles).
+   * This enables more efficient SAT encoding using equality constraints
+   * (level = parent_level + 1) instead of inequality (level > parent_level).
+   * Binary-encoded distances are exact rather than lower bounds.
+   */
+  treeMaze?: boolean;
 }
 
 /**
