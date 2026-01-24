@@ -41,7 +41,6 @@ import type {
 } from "./graph-types";
 import { HATCH_COLOR } from "./graph-types";
 import { edgeKey, getNeighbors } from "./grid-neighbors";
-import { createTrivialSolution } from "./trivial-solution";
 
 /**
  * Create a key for a directed parent relation
@@ -104,13 +103,12 @@ export function solveGridColoring(
   const gridType = options?.gridType ?? "square";
 
   // ============================================
-  // FAST PATH: All-blank grid optimization
+  // VALIDATION: At least one color must be selected
   // ============================================
-  // If the grid is entirely blank, return a trivial solution:
-  // assign all cells to color 0 and keep all edges (fully connected)
+  // If the grid is entirely blank, throw an error - user must select at least one color
   const isAllBlank = colors.every((row) => row.every((c) => c === null));
   if (isAllBlank) {
-    return createTrivialSolution(width, height, gridType);
+    throw new Error("At least one color must be selected");
   }
 
   // Use provided solver/builder or default to MiniSat
