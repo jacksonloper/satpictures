@@ -25,5 +25,9 @@ export { createTestGrid, createTrivialSolution } from "./trivial-solution";
 // Main solver
 export { solveGridColoring, type SolveOptions } from "./grid-coloring";
 
+// Colored forest SAT encoder
+export { buildColoredForestSatCNF } from "./colored-forest-sat";
+export type { ColoredForestInput, ColoredForestCNFResult } from "./colored-forest-sat";
+
 // Worker types
 export type { SolverRequest, SolverResponse, SolverType } from "./solver.worker";
