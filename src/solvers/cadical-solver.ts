@@ -128,13 +128,57 @@ export class CadicalFormulaBuilder implements FormulaBuilder {
   }
 
   addAtMostOne(literals: number[]): void {
-    // Pairwise encoding: for all pairs, at most one can be true
-    for (let i = 0; i < literals.length; i++) {
-      for (let j = i + 1; j < literals.length; j++) {
-        // ¬li ∨ ¬lj
-        this.solver.addClause([-literals[i], -literals[j]]);
+    const n = literals.length;
+    
+    // For small n, pairwise encoding is fine and produces fewer clauses
+    if (n <= 4) {
+      // Pairwise encoding: for all pairs, at most one can be true
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          // ¬li ∨ ¬lj
+          this.solver.addClause([-literals[i], -literals[j]]);
+        }
       }
+      return;
     }
+    
+    // Sequential counter encoding (Sinz, 2005)
+    // This is O(n) in auxiliary variables and clauses instead of O(n²)
+    //
+    // We create auxiliary variables s[i] for i in 1..n-1
+    // s[i] is true iff at least one of literals[0..i] is true
+    //
+    // Constraints:
+    // 1. ¬x[0] ∨ s[0]              (if x[0], then s[0])
+    // 2. ¬s[i-1] ∨ s[i]            (if s[i-1], then s[i]) 
+    // 3. ¬x[i] ∨ s[i]              (if x[i], then s[i])
+    // 4. ¬x[i] ∨ ¬s[i-1]           (if x[i] and s[i-1], contradiction)
+    //
+    // The key constraint is #4: it says if x[i] is true and any previous
+    // x[j] was true (making s[i-1] true), we have a conflict.
+    
+    // Create auxiliary variables s[0..n-2]
+    const s: number[] = [];
+    for (let i = 0; i < n - 1; i++) {
+      s.push(this.solver.newVariable());
+    }
+    
+    // First literal
+    // ¬x[0] ∨ s[0]
+    this.solver.addClause([-literals[0], s[0]]);
+    
+    // Middle literals
+    for (let i = 1; i < n - 1; i++) {
+      // ¬s[i-1] ∨ s[i] (propagate "at least one true so far")
+      this.solver.addClause([-s[i - 1], s[i]]);
+      // ¬x[i] ∨ s[i] (if x[i], then s[i])
+      this.solver.addClause([-literals[i], s[i]]);
+      // ¬x[i] ∨ ¬s[i-1] (can't have both x[i] and previous x[j])
+      this.solver.addClause([-literals[i], -s[i - 1]]);
+    }
+    
+    // Last literal: just needs ¬x[n-1] ∨ ¬s[n-2]
+    this.solver.addClause([-literals[n - 1], -s[n - 2]]);
   }
 
   addImplies(a: number, b: number): void {
