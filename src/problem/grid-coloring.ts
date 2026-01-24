@@ -90,14 +90,14 @@ export interface SolveOptions {
  * Encode and solve the grid coloring problem
  * 
  * @param grid The grid with colors assigned to cells (null = blank, solver decides)
- * @param _numColors Number of available colors (parameter kept for API compatibility,
- *                   but blank cells are now only assigned colors that already have fixed cells)
+ * @param _numColors DEPRECATED: This parameter is no longer used internally but kept for
+ *                   backward compatibility with existing worker APIs. Blank cells are now
+ *                   only assigned colors that already have fixed cells.
  * @param options Optional solver configuration
  */
 export function solveGridColoring(
   grid: ColorGrid,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _numColors: number = 6,
+  _numColors: number = 6,  // eslint-disable-line @typescript-eslint/no-unused-vars -- kept for API compatibility
   options?: SolveOptions
 ): GridSolution | null {
   const { width, height, colors } = grid;
