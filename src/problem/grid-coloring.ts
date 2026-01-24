@@ -141,6 +141,22 @@ export function solveGridColoring(
   }
 
   // ============================================
+  // Identify colors that use tree maze encoding
+  // ============================================
+  // These colors will skip the regular connectivity encoding
+  // because tree maze provides its own connectivity (via the tree structure)
+  const treeMazeColors = new Set<number>();
+  const constraintsList = options?.pathlengthConstraints ?? [];
+  for (const constraint of constraintsList) {
+    if (constraint.treeMaze && constraint.root) {
+      const rootColor = colors[constraint.root.row][constraint.root.col];
+      if (rootColor !== null && rootColor !== HATCH_COLOR) {
+        treeMazeColors.add(rootColor);
+      }
+    }
+  }
+
+  // ============================================
   // 0. COLOR ASSIGNMENT VARIABLES FOR BLANK CELLS
   // ============================================
   // For blank cells (null), create variables cellColor[row][col][c] meaning "cell has color c"
@@ -238,10 +254,17 @@ export function solveGridColoring(
   // With blank cells, we need conditional constraints based on color assignment
   // OPTIMIZATION: Only process active colors (those with at least one fixed cell)
   // EXCEPTION: Skip hatch color - it doesn't need to form a connected component
+  // EXCEPTION: Skip colors that use tree maze - tree maze provides its own connectivity
 
   for (const color of activeColors) {
     // Skip hatch color - it doesn't need to form a connected component
     if (color === HATCH_COLOR) {
+      continue;
+    }
+    
+    // Skip colors that use tree maze - tree maze provides its own connectivity
+    // via the tree structure with the "no shortcuts" constraint
+    if (treeMazeColors.has(color)) {
       continue;
     }
 
@@ -526,18 +549,47 @@ export function solveGridColoring(
     
     if (constraint.treeMaze) {
       // ============================================
-      // TREE MAZE MODE: Binary-encoded exact distances
+      // TREE MAZE MODE: Tree-per-color with fast distances
       // ============================================
-      // This mode enforces:
-      // 1. The graph of kept edges forms a tree rooted at constraint.root
-      // 2. Each cell's level (distance from root) is exactly encoded
-      // 3. Distance constraints become exact equality constraints
+      // This mode enforces for the color of the root cell:
+      // 1. Cells of that color form ONE rooted tree (connected + acyclic)
+      // 2. Kept edges inside the color are EXACTLY the tree edges (no shortcuts)
+      // 3. Distance constraints from root are enforced via binary "level" labels
+      //
+      // Algorithm based on: Tree-per-color (fast distances)
       
-      // Calculate maximum distance needed for encoding:
-      // - Must be at least as large as any specified distance constraint
-      // - Also consider the grid size as a baseline
-      // The number of bits must be sufficient to represent all required distances
-      let maxRequiredDist = width + height - 1; // Baseline from grid size
+      // Get the color of the root cell - it must be a fixed non-HATCH color
+      const rootCellColor = colors[root.row][root.col];
+      if (rootCellColor === null || rootCellColor === HATCH_COLOR) {
+        throw new Error(`Tree maze root at (${root.row}, ${root.col}) must be a fixed non-HATCH color`);
+      }
+      const rootColor: number = rootCellColor;
+      
+      // Helper to check if a cell is a member of the root's color (or could be)
+      // Returns: the membership literal (positive var if true, negative if false, or the color var for blanks)
+      function getMembershipLiteral(row: number, col: number): number | null {
+        const cellColor = colors[row][col];
+        if (cellColor === rootColor) {
+          return null; // TRUE (fixed member) - no variable needed
+        } else if (cellColor === null) {
+          // Blank cell - use the color variable for rootColor
+          const colorVarName = colorVarKey(row, col, rootColor);
+          return builder.getVariable(colorVarName) ?? null;
+        } else {
+          return 0; // FALSE (fixed to different color) - use 0 as sentinel
+        }
+      }
+      
+      // Helper to check if a cell could be this color
+      function couldBeRootColor(row: number, col: number): boolean {
+        const cellColor = colors[row][col];
+        return cellColor === rootColor || cellColor === null;
+      }
+      
+      // Calculate maximum distance: must accommodate total number of tiles
+      // Max path in a tree with N nodes is N-1
+      const maxPossibleDist = width * height - 1;
+      let maxRequiredDist = maxPossibleDist;
       for (const [, dist] of distanceEntries) {
         if (dist > maxRequiredDist) {
           maxRequiredDist = dist;
@@ -545,17 +597,11 @@ export function solveGridColoring(
       }
       const numBits = bitsNeeded(maxRequiredDist + 1);
       
-      // Helper to check if a cell is HATCH (should be excluded from tree structure)
-      function isHatchCell(row: number, col: number): boolean {
-        return colors[row][col] === HATCH_COLOR;
-      }
-      
-      // Create binary-encoded level variables for each non-HATCH cell
+      // A) Create binary-encoded level variables for each cell that could be rootColor
       const treeLevelVars = new Map<string, number[]>();
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
-          // Skip HATCH cells - they don't participate in tree structure
-          if (isHatchCell(row, col)) continue;
+          if (!couldBeRootColor(row, col)) continue;
           
           const key = `${row},${col}`;
           const bits = createBinaryIntVariables(
@@ -567,16 +613,15 @@ export function solveGridColoring(
         }
       }
       
-      // Root has level 0 - this must exist since root should not be HATCH
+      // B) Root has level 0
       const rootKey = `${root.row},${root.col}`;
       const rootBits = treeLevelVars.get(rootKey);
       if (!rootBits) {
-        // Root is HATCH or otherwise invalid - tree maze cannot work
-        throw new Error(`Tree maze root at (${root.row}, ${root.col}) is a HATCH cell and cannot be used as root`);
+        throw new Error(`Tree maze root at (${root.row}, ${root.col}) has no level variables`);
       }
       constrainBinaryEqual(builder, rootBits, 0);
       
-      // Create tree parent variables: treeParent[v][u] = "u is the parent of v in the tree"
+      // C) Create parent vars Pc(u→v) for adjacent cells that could be rootColor
       const treeParentVars = new Map<string, number>();
       
       function treeParentKey(child: GridPoint, parent: GridPoint): string {
@@ -585,83 +630,186 @@ export function solveGridColoring(
       
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
-          // Skip HATCH cells - they're not part of the tree structure
-          if (isHatchCell(row, col)) continue;
+          if (!couldBeRootColor(row, col)) continue;
           
           const v: GridPoint = { row, col };
           const neighbors = getNeighbors(v, width, height, gridType);
           
           for (const u of neighbors) {
-            // Skip edges to HATCH cells
-            if (isHatchCell(u.row, u.col)) continue;
+            if (!couldBeRootColor(u.row, u.col)) continue;
             
             const pKey = treeParentKey(v, u);
             const pVar = builder.createNamedVariable(pKey);
             treeParentVars.set(pKey, pVar);
             
-            // If u is parent of v, then the edge between them must exist
+            // Implications:
+            // 1. Pc(u→v) → edge(u,v)
             const eKey = edgeKey(u, v);
             const edgeVar = edgeVars.get(eKey);
             if (edgeVar !== undefined) {
               builder.addImplies(pVar, edgeVar);
             }
             
-            // If u is parent of v, then level[v] = level[u] + 1
-            const uBits = treeLevelVars.get(`${u.row},${u.col}`)!;
-            const vBits = treeLevelVars.get(`${v.row},${v.col}`)!;
-            constrainEqualsPlusOne(builder, vBits, uBits, pVar, `treeAdd_${constraint.id}_${v.row}${v.col}_${u.row}${u.col}`);
+            // 2. Pc(u→v) → Mc(u) (parent must be member)
+            const uMembership = getMembershipLiteral(u.row, u.col);
+            if (uMembership === 0) {
+              // u cannot be rootColor, so parent relationship impossible
+              builder.addUnit(-pVar);
+            } else if (uMembership !== null) {
+              // u is blank, membership depends on color var
+              builder.addImplies(pVar, uMembership);
+            }
+            // if uMembership === null, u is fixed to rootColor, always member
+            
+            // 3. Pc(u→v) → Mc(v) (child must be member)
+            const vMembership = getMembershipLiteral(v.row, v.col);
+            if (vMembership === 0) {
+              // v cannot be rootColor, so parent relationship impossible
+              builder.addUnit(-pVar);
+            } else if (vMembership !== null) {
+              // v is blank, membership depends on color var
+              builder.addImplies(pVar, vMembership);
+            }
+            // if vMembership === null, v is fixed to rootColor, always member
+            
+            // 4. Pc(u→v) → (Lc(v) = Lc(u) + 1)
+            const uBits = treeLevelVars.get(`${u.row},${u.col}`);
+            const vBits = treeLevelVars.get(`${v.row},${v.col}`);
+            if (uBits && vBits) {
+              // Check if u is the root (level 0)
+              const isParentRoot = (u.row === root.row && u.col === root.col);
+              if (isParentRoot) {
+                // Special case: parent is root with level 0
+                // Child level should be 1 when this parent relationship is true
+                // P → (vBits = 1)
+                for (let i = 0; i < vBits.length; i++) {
+                  const bitShouldBe = (1 >> i) & 1; // bit i of value 1
+                  if (bitShouldBe) {
+                    // P → vBits[i]
+                    builder.solver.addClause([-pVar, vBits[i]]);
+                  } else {
+                    // P → ¬vBits[i]
+                    builder.solver.addClause([-pVar, -vBits[i]]);
+                  }
+                }
+              } else {
+                // General case: use the ripple-carry adder encoding
+                constrainEqualsPlusOne(builder, vBits, uBits, pVar, 
+                  `treeAdd_${constraint.id}_${v.row}${v.col}_${u.row}${u.col}`);
+              }
+            }
           }
         }
       }
       
-      // TODO: The tree edge constraint (edge → parent_relationship) that would enforce
-      // exact distances on kept edges has been removed because it conflicts with the
-      // connectivity encoding's spanning trees. To properly implement tree maze mode,
-      // this needs to be integrated with the connectivity encoding itself.
-      // See: https://github.com/jacksonloper/satpictures/issues/XX (tree maze bug)
+      // D) Root has no parent
+      const rootNeighbors = getNeighbors(root, width, height, gridType);
+      for (const u of rootNeighbors) {
+        if (!couldBeRootColor(u.row, u.col)) continue;
+        const pKey = treeParentKey(root, u);
+        const pVar = treeParentVars.get(pKey);
+        if (pVar !== undefined) {
+          builder.addUnit(-pVar);
+        }
+      }
       
-      // Each non-root, non-HATCH cell: at most one parent (allows cells to not be in tree)
+      // E) Each member (except root) has exactly one parent
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
-          // Skip HATCH cells
-          if (isHatchCell(row, col)) continue;
+          if (!couldBeRootColor(row, col)) continue;
+          if (row === root.row && col === root.col) continue; // Skip root
           
-          if (row === root.row && col === root.col) {
-            // Root has no parent
-            const neighbors = getNeighbors(root, width, height, gridType);
-            for (const u of neighbors) {
-              if (isHatchCell(u.row, u.col)) continue;
-              const pKey = treeParentKey(root, u);
-              const pVar = treeParentVars.get(pKey);
-              if (pVar !== undefined) {
-                builder.addUnit(-pVar);
-              }
+          const v: GridPoint = { row, col };
+          const neighbors = getNeighbors(v, width, height, gridType);
+          const parentVarsForV: number[] = [];
+          
+          for (const u of neighbors) {
+            if (!couldBeRootColor(u.row, u.col)) continue;
+            const pKey = treeParentKey(v, u);
+            const pVar = treeParentVars.get(pKey);
+            if (pVar !== undefined) {
+              parentVarsForV.push(pVar);
+            }
+          }
+          
+          // AtMostOne(Parents(v))
+          if (parentVarsForV.length > 1) {
+            builder.addAtMostOne(parentVarsForV);
+          }
+          
+          // Member implies at least one parent: ¬Mc(v) ∨ Pc(u1→v) ∨ Pc(u2→v) ∨ ...
+          const vMembership = getMembershipLiteral(v.row, v.col);
+          if (parentVarsForV.length === 0) {
+            // No possible parents - if cell is fixed member, UNSAT
+            if (vMembership === null) {
+              // Fixed member with no parents - add empty clause to force UNSAT
+              builder.solver.addClause([]);
+            } else if (vMembership !== 0) {
+              // Blank cell - cannot take this color
+              builder.addUnit(-vMembership);
             }
           } else {
-            // Non-root: at most one parent (allows cells to not be in tree)
-            const v: GridPoint = { row, col };
-            const neighbors = getNeighbors(v, width, height, gridType);
-            const parentVarsForV: number[] = [];
-            
-            for (const u of neighbors) {
-              if (isHatchCell(u.row, u.col)) continue;
-              const pKey = treeParentKey(v, u);
-              const pVar = treeParentVars.get(pKey);
-              if (pVar !== undefined) {
-                parentVarsForV.push(pVar);
-              }
-            }
-            
-            // At most one parent (allows cells to not be in the tree)
-            if (parentVarsForV.length > 1) {
-              builder.addAtMostOne(parentVarsForV);
+            if (vMembership === null) {
+              // Fixed member - must have at least one parent
+              builder.addOr(parentVarsForV);
+            } else if (vMembership !== 0) {
+              // Blank cell - if it takes this color, must have parent
+              // ¬Mc(v) ∨ Pc(u1→v) ∨ Pc(u2→v) ∨ ...
+              builder.solver.addClause([-vMembership, ...parentVarsForV]);
             }
           }
         }
       }
       
-      // Apply exact distance constraints
-      // For cells with distance requirements, they MUST be in the tree (have a parent if not root)
+      // G) "No shortcuts" inside the color component (CRUCIAL)
+      // For each undirected neighbor edge {u,v}:
+      // edge(u,v) ∧ Mc(u) ∧ Mc(v) → (Pc(u→v) ∨ Pc(v→u))
+      // CNF: ¬edge(u,v) ∨ ¬Mc(u) ∨ ¬Mc(v) ∨ Pc(u→v) ∨ Pc(v→u)
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          if (!couldBeRootColor(row, col)) continue;
+          
+          const v: GridPoint = { row, col };
+          const neighbors = getNeighbors(v, width, height, gridType);
+          
+          for (const u of neighbors) {
+            if (!couldBeRootColor(u.row, u.col)) continue;
+            
+            // Only process each edge once (when u < v lexicographically)
+            if (u.row > v.row || (u.row === v.row && u.col >= v.col)) continue;
+            
+            const eKey = edgeKey(u, v);
+            const edgeVar = edgeVars.get(eKey);
+            if (edgeVar === undefined) continue;
+            
+            const pUV = treeParentVars.get(treeParentKey(v, u)); // u is parent of v
+            const pVU = treeParentVars.get(treeParentKey(u, v)); // v is parent of u
+            
+            if (pUV === undefined || pVU === undefined) continue;
+            
+            const uMembership = getMembershipLiteral(u.row, u.col);
+            const vMembership = getMembershipLiteral(v.row, v.col);
+            
+            // Build clause: ¬edge(u,v) ∨ ¬Mc(u) ∨ ¬Mc(v) ∨ Pc(u→v) ∨ Pc(v→u)
+            const clause: number[] = [-edgeVar, pUV, pVU];
+            
+            if (uMembership === 0 || vMembership === 0) {
+              // One is definitely not this color - constraint is trivially satisfied
+              continue;
+            }
+            if (uMembership !== null) {
+              clause.push(-uMembership);
+            }
+            if (vMembership !== null) {
+              clause.push(-vMembership);
+            }
+            
+            builder.solver.addClause(clause);
+          }
+        }
+      }
+      
+      // H) Apply distance constraints (fast - just constrain level bits)
       for (const [cellKey, exactDist] of distanceEntries) {
         if (exactDist < 0) continue;
         
@@ -672,33 +820,24 @@ export function solveGridColoring(
         // Validate cell is in bounds
         if (row < 0 || row >= height || col < 0 || col >= width) continue;
         
-        // Skip HATCH cells - they can't be part of tree structure
-        if (isHatchCell(row, col)) continue;
+        // Skip cells that can't be rootColor
+        if (!couldBeRootColor(row, col)) continue;
         
-        // In tree maze mode, the distance is EXACT
+        // Get level bits for this cell
         const cellBits = treeLevelVars.get(cellKey);
-        if (!cellBits) continue; // Skip if no level variables (shouldn't happen for non-HATCH)
+        if (!cellBits) continue;
+        
+        // In tree maze mode, the distance is EXACT (Lc(t) = d)
         constrainBinaryEqual(builder, cellBits, exactDist);
         
-        // Ensure this cell is in the tree (has exactly one parent, unless it's the root)
-        if (!(row === root.row && col === root.col)) {
-          const v: GridPoint = { row, col };
-          const neighbors = getNeighbors(v, width, height, gridType);
-          const parentVarsForV: number[] = [];
-          
-          for (const u of neighbors) {
-            if (isHatchCell(u.row, u.col)) continue;
-            const pKey = treeParentKey(v, u);
-            const pVar = treeParentVars.get(pKey);
-            if (pVar !== undefined) {
-              parentVarsForV.push(pVar);
-            }
-          }
-          
-          // This cell MUST have at least one parent (be in the tree)
-          if (parentVarsForV.length > 0) {
-            builder.addOr(parentVarsForV);
-          }
+        // Require membership: the target cell must be this color
+        const membership = getMembershipLiteral(row, col);
+        if (membership === 0) {
+          // Cell cannot be rootColor but has distance constraint - UNSAT
+          builder.solver.addClause([]);
+        } else if (membership !== null) {
+          // Blank cell - force it to be this color
+          builder.addUnit(membership);
         }
       }
       
