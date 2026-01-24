@@ -1,5 +1,5 @@
 import React from "react";
-import type { ColorGrid, GridSolution, GridType } from "../solver";
+import type { ColorGrid, GridSolution, GridType } from "../problem";
 import { Grid } from "./Grid";
 
 interface SolutionGridProps {

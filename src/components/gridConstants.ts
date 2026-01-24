@@ -4,8 +4,8 @@
  * These are used by both Grid.tsx (React rendering) and svgDownload.ts (SVG export)
  */
 
-import type { GridType } from "../solver";
-import { HATCH_COLOR } from "../solver";
+import type { GridType } from "../problem";
+import { HATCH_COLOR } from "../problem";
 
 // Re-export for convenience
 export { HATCH_COLOR };

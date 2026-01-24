@@ -4,8 +4,8 @@
  * Generates and downloads SVG files for grid solutions.
  */
 
-import type { GridSolution, GridType } from "../solver";
-import { HATCH_COLOR } from "../solver";
+import type { GridSolution, GridType } from "../problem";
+import { HATCH_COLOR } from "../problem";
 import {
   COLORS,
   HATCH_BG_COLOR,

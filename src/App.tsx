@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType } from "./solver";
-import { HATCH_COLOR } from "./solver";
-import SolverWorker from "./solver/solver.worker?worker";
-import CadicalWorker from "./solver/cadical.worker?worker";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType } from "./problem";
+import { HATCH_COLOR } from "./problem";
+import SolverWorker from "./problem/solver.worker?worker";
+import CadicalWorker from "./problem/cadical.worker?worker";
 import "./App.css";
 
 // View modes for the sketchpad panel

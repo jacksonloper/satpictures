@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridType, PathlengthConstraint } from "../solver";
+import type { ColorGrid, GridType, PathlengthConstraint } from "../problem";
 import { Grid } from "./Grid";
 import {
   getHexDimensions,

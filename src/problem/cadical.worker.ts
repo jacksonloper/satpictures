@@ -7,9 +7,9 @@
 /// <reference lib="webworker" />
 
 import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./grid-coloring";
-import { CadicalSolver, CadicalFormulaBuilder } from "../sat";
-import type { CadicalClass } from "../sat";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
+import { CadicalSolver, CadicalFormulaBuilder } from "../solvers";
+import type { CadicalClass } from "../solvers";
 
 export interface CadicalSolverRequest {
   gridType: GridType;
