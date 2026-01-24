@@ -300,76 +300,21 @@ export function solveGridColoring(
     }
 
     // =============================================
-    // DYNAMIC ROOT SELECTION
+    // ROOT SELECTION
     // =============================================
-    // For colors with no fixed vertices, the root is the lex-smallest member.
-    // Create "isRoot" variable for each potential vertex.
-    // isRoot[v] = true iff v is a member AND all lex-smaller vertices are not members
-    const hasFixedRoot = fixedVertices.length > 0;
-    const fixedRoot = hasFixedRoot
-      ? fixedVertices.reduce((min, v) => {
-          if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
-            return v;
-          }
-          return min;
-        }, fixedVertices[0])
-      : null;
-
-    // For dynamic roots, create isRoot variables
-    const isRootVars = new Map<string, number>();
-    if (!hasFixedRoot) {
-      // For each vertex, isRoot[v] means v is the root for this color
-      // isRoot[v] ↔ member[v] ∧ ∀u<v: ¬member[u]
-      for (let i = 0; i < potentialVertices.length; i++) {
-        const v = potentialVertices[i];
-        const vKey = `${v.row},${v.col}`;
-        const isRootVar = builder.createNamedVariable(
-          `isRoot_${color}_${v.row},${v.col}`
-        );
-        isRootVars.set(vKey, isRootVar);
-
-        const vMember = getMemberVar(v)!; // All potential vertices are blank here
-
-        if (i === 0) {
-          // First vertex: isRoot ↔ member
-          // isRoot → member
-          builder.addImplies(isRootVar, vMember);
-          // member → isRoot
-          builder.addImplies(vMember, isRootVar);
-        } else {
-          // isRoot[v] ↔ member[v] ∧ ¬member[u0] ∧ ¬member[u1] ∧ ...
-          // where u0, u1, ... are all vertices before v
-
-          // Collect all previous member variables
-          const prevMembers: number[] = [];
-          for (let j = 0; j < i; j++) {
-            const u = potentialVertices[j];
-            const uMember = getMemberVar(u)!;
-            prevMembers.push(uMember);
-          }
-
-          // isRoot → member[v]
-          builder.addImplies(isRootVar, vMember);
-
-          // isRoot → ¬member[u] for all previous u
-          for (const uMember of prevMembers) {
-            builder.solver.addClause([-isRootVar, -uMember]);
-          }
-
-          // (member[v] ∧ ¬member[u0] ∧ ...) → isRoot
-          // Contrapositive: ¬isRoot → (¬member[v] ∨ member[u0] ∨ ...)
-          builder.solver.addClause([isRootVar, -vMember, ...prevMembers]);
-        }
+    // The root is the lexicographically smallest fixed vertex for this color.
+    // Since we only process activeColors (colors with at least one fixed cell),
+    // there is always at least one fixed vertex to serve as root.
+    const fixedRoot = fixedVertices.reduce((min, v) => {
+      if (v.row < min.row || (v.row === min.row && v.col < min.col)) {
+        return v;
       }
-    }
+      return min;
+    }, fixedVertices[0]);
 
     // Helper to check if a vertex is the root
-    function isRoot(v: GridPoint): boolean | number {
-      if (hasFixedRoot) {
-        return v.row === fixedRoot!.row && v.col === fixedRoot!.col;
-      }
-      // Return the isRoot variable
-      return isRootVars.get(`${v.row},${v.col}`)!;
+    function isRoot(v: GridPoint): boolean {
+      return v.row === fixedRoot.row && v.col === fixedRoot.col;
     }
 
     // 2b) Parent (tree) variables
@@ -415,63 +360,34 @@ export function solveGridColoring(
         }
       }
 
-      if (typeof vIsRoot === "boolean" && vIsRoot) {
-        // Fixed root - has no parent
+      if (vIsRoot) {
+        // Root - has no parent
         for (const pVar of parentVarsForV) {
           builder.addUnit(-pVar);
         }
-      } else if (typeof vIsRoot === "boolean" && !vIsRoot) {
-        // Fixed non-root with fixed color - must have exactly one parent
+      } else {
+        // Non-root - must have exactly one parent (if it has this color)
         // At-most-one parent
         if (parentVarsForV.length > 1) {
           builder.addAtMostOne(parentVarsForV);
         }
 
-        // At-least-one parent (since it's fixed to this color)
+        // At-least-one parent (conditional on having this color)
         if (parentVarsForV.length > 0) {
           if (vMember !== null) {
+            // If this vertex has this color, it needs a parent
             builder.solver.addClause([-vMember, ...parentVarsForV]);
           } else {
+            // Fixed to this color - must have a parent
             builder.addOr(parentVarsForV);
           }
         } else {
+          // No potential parents available
           if (vMember === null) {
-            return null; // Fixed vertex isolated
+            return null; // Fixed vertex isolated - impossible to connect
           }
+          // If blank, forbid this color (can't have a parent)
           builder.addUnit(-vMember);
-        }
-      } else {
-        // Dynamic root case - vIsRoot is a variable
-        const isRootVar = vIsRoot as number;
-
-        // At-most-one parent (always applies)
-        if (parentVarsForV.length > 1) {
-          builder.addAtMostOne(parentVarsForV);
-        }
-
-        // If root, no parent: isRoot → ¬p for all p
-        for (const pVar of parentVarsForV) {
-          builder.solver.addClause([-isRootVar, -pVar]);
-        }
-
-        // If member and not root, must have parent: (member ∧ ¬isRoot) → OR(parents)
-        // i.e., ¬member ∨ isRoot ∨ OR(parents)
-        if (parentVarsForV.length > 0) {
-          if (vMember !== null) {
-            builder.solver.addClause([-vMember, isRootVar, ...parentVarsForV]);
-          } else {
-            // Fixed member, must be root or have parent
-            builder.solver.addClause([isRootVar, ...parentVarsForV]);
-          }
-        } else {
-          // No potential parents - must be root if member
-          if (vMember !== null) {
-            // member → isRoot
-            builder.addImplies(vMember, isRootVar);
-          } else {
-            // Fixed member with no parents - must be root
-            builder.addUnit(isRootVar);
-          }
         }
       }
     }
@@ -486,22 +402,10 @@ export function solveGridColoring(
       levelVars.set(`${v.row},${v.col}`, bits);
     }
 
-    // Root has level 0: for fixed root, set directly; for dynamic root, conditional
-    if (hasFixedRoot) {
-      const rootBits = levelVars.get(`${fixedRoot!.row},${fixedRoot!.col}`)!;
-      for (const bit of rootBits) {
-        builder.addUnit(-bit);
-      }
-    } else {
-      // For dynamic roots: isRoot[v] → level[v] = 0
-      for (const v of potentialVertices) {
-        const vKey = `${v.row},${v.col}`;
-        const isRootVar = isRootVars.get(vKey)!;
-        const vBits = levelVars.get(vKey)!;
-        for (const bit of vBits) {
-          builder.solver.addClause([-isRootVar, -bit]); // isRoot → bit = 0
-        }
-      }
+    // Root has level 0
+    const rootBits = levelVars.get(`${fixedRoot.row},${fixedRoot.col}`)!;
+    for (const bit of rootBits) {
+      builder.addUnit(-bit);
     }
 
     // Level ordering constraints
