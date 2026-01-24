@@ -533,18 +533,30 @@ export function solveGridColoring(
       // 2. Each cell's level (distance from root) is exactly encoded
       // 3. Distance constraints become exact equality constraints
       
-      // Maximum possible distance in a grid is the longest path from corner to corner.
-      // For a width×height grid, this is (width-1) + (height-1) = width + height - 2 for
-      // a simple path, but allowing for serpentine paths through the interior, the maximum
-      // tree depth could be width * height - 1 in the extreme case. We use width + height - 1
-      // as a reasonable upper bound for typical maze structures.
-      const maxPossibleDist = width + height - 1;
-      const numBits = bitsNeeded(maxPossibleDist + 1);
+      // Calculate maximum distance needed for encoding:
+      // - Must be at least as large as any specified distance constraint
+      // - Also consider the grid size as a baseline
+      // The number of bits must be sufficient to represent all required distances
+      let maxRequiredDist = width + height - 1; // Baseline from grid size
+      for (const [, dist] of distanceEntries) {
+        if (dist > maxRequiredDist) {
+          maxRequiredDist = dist;
+        }
+      }
+      const numBits = bitsNeeded(maxRequiredDist + 1);
       
-      // Create binary-encoded level variables for each cell
+      // Helper to check if a cell is HATCH (should be excluded from tree structure)
+      function isHatchCell(row: number, col: number): boolean {
+        return colors[row][col] === HATCH_COLOR;
+      }
+      
+      // Create binary-encoded level variables for each non-HATCH cell
       const treeLevelVars = new Map<string, number[]>();
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
+          // Skip HATCH cells - they don't participate in tree structure
+          if (isHatchCell(row, col)) continue;
+          
           const key = `${row},${col}`;
           const bits = createBinaryIntVariables(
             builder,
@@ -557,8 +569,10 @@ export function solveGridColoring(
       
       // Root has level 0
       const rootKey = `${root.row},${root.col}`;
-      const rootBits = treeLevelVars.get(rootKey)!;
-      constrainBinaryEqual(builder, rootBits, 0);
+      const rootBits = treeLevelVars.get(rootKey);
+      if (rootBits) {
+        constrainBinaryEqual(builder, rootBits, 0);
+      }
       
       // Create tree parent variables: treeParent[v][u] = "u is the parent of v in the tree"
       const treeParentVars = new Map<string, number>();
@@ -569,10 +583,16 @@ export function solveGridColoring(
       
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
+          // Skip HATCH cells - they're not part of the tree structure
+          if (isHatchCell(row, col)) continue;
+          
           const v: GridPoint = { row, col };
           const neighbors = getNeighbors(v, width, height, gridType);
           
           for (const u of neighbors) {
+            // Skip edges to HATCH cells
+            if (isHatchCell(u.row, u.col)) continue;
+            
             const pKey = treeParentKey(v, u);
             const pVar = builder.createNamedVariable(pKey);
             treeParentVars.set(pKey, pVar);
@@ -592,14 +612,54 @@ export function solveGridColoring(
         }
       }
       
-      // Each non-root cell: if it has any parent (is in the tree), it has exactly one parent
-      // This allows cells to NOT be in the tree (when they have no parent)
+      // KEY CONSTRAINT FOR TREE STRUCTURE (TEMPORARILY DISABLED):
+      // This constraint forces all kept edges to be part of the tree structure,
+      // but it conflicts with the connectivity spanning tree constraints.
+      // TODO: Need to integrate tree maze with the connectivity encoding properly.
+      /*
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
+          // Skip HATCH cells
+          if (isHatchCell(row, col)) continue;
+          
+          const v: GridPoint = { row, col };
+          const neighbors = getNeighbors(v, width, height, gridType);
+          
+          for (const u of neighbors) {
+            // Skip edges to HATCH cells
+            if (isHatchCell(u.row, u.col)) continue;
+            
+            // Only process each edge once (when u < v lexicographically)
+            if (u.row > v.row || (u.row === v.row && u.col >= v.col)) continue;
+            
+            const eKey = edgeKey(u, v);
+            const edgeVar = edgeVars.get(eKey);
+            if (edgeVar === undefined) continue;
+            
+            const pUV = treeParentVars.get(treeParentKey(v, u)); // u is parent of v
+            const pVU = treeParentVars.get(treeParentKey(u, v)); // v is parent of u
+            
+            if (pUV !== undefined && pVU !== undefined) {
+              // edge(u,v) → (parent(u,v) ∨ parent(v,u))
+              // -edge ∨ parent(u,v) ∨ parent(v,u)
+              builder.solver.addClause([-edgeVar, pUV, pVU]);
+            }
+          }
+        }
+      }
+      */
+      
+      // Each non-root, non-HATCH cell: at most one parent (allows cells to not be in tree)
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          // Skip HATCH cells
+          if (isHatchCell(row, col)) continue;
+          
           if (row === root.row && col === root.col) {
             // Root has no parent
             const neighbors = getNeighbors(root, width, height, gridType);
             for (const u of neighbors) {
+              if (isHatchCell(u.row, u.col)) continue;
               const pKey = treeParentKey(root, u);
               const pVar = treeParentVars.get(pKey);
               if (pVar !== undefined) {
@@ -613,6 +673,7 @@ export function solveGridColoring(
             const parentVarsForV: number[] = [];
             
             for (const u of neighbors) {
+              if (isHatchCell(u.row, u.col)) continue;
               const pKey = treeParentKey(v, u);
               const pVar = treeParentVars.get(pKey);
               if (pVar !== undefined) {
@@ -640,8 +701,12 @@ export function solveGridColoring(
         // Validate cell is in bounds
         if (row < 0 || row >= height || col < 0 || col >= width) continue;
         
+        // Skip HATCH cells - they can't be part of tree structure
+        if (isHatchCell(row, col)) continue;
+        
         // In tree maze mode, the distance is EXACT
-        const cellBits = treeLevelVars.get(cellKey)!;
+        const cellBits = treeLevelVars.get(cellKey);
+        if (!cellBits) continue; // Skip if no level variables (shouldn't happen for non-HATCH)
         constrainBinaryEqual(builder, cellBits, exactDist);
         
         // Ensure this cell is in the tree (has exactly one parent, unless it's the root)
@@ -651,6 +716,7 @@ export function solveGridColoring(
           const parentVarsForV: number[] = [];
           
           for (const u of neighbors) {
+            if (isHatchCell(u.row, u.col)) continue;
             const pKey = treeParentKey(v, u);
             const pVar = treeParentVars.get(pKey);
             if (pVar !== undefined) {
