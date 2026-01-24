@@ -209,9 +209,9 @@ export function buildColoredForestSatCNF(
   }
 
   // ---------- unary distance chain constraints ----------
-  // dist_d(u) → dist_(d-1)(u) for all d >= 2
+  // dist_d(u) → dist_(d-1)(u) for all d >= 2 up to N
   for (const u of nodeList) {
-    for (let d = 2; d <= maxDist; d++) {
+    for (let d = 2; d <= N; d++) {
       cnf.addImp(distVar(u, d), distVar(u, d - 1));
     }
   }
@@ -222,6 +222,13 @@ export function buildColoredForestSatCNF(
     cnf.addUnit(colVar(r, c));
     // Root has distance 0, so dist_d(root) is false for all d >= 1
     cnf.addUnit(-distVar(r, 1));
+  }
+
+  // ---------- global distance cap: dist(u) < N for all nodes ----------
+  // This prevents "infinite" distances that could allow disconnected trees
+  for (const u of nodeList) {
+    // dist(u) >= N should be false (distance must be at most N-1)
+    cnf.addUnit(-distVar(u, N));
   }
 
   // ---------- keep/parent linkage + same-color gating + anti-parallel-parent ----------
@@ -267,7 +274,8 @@ export function buildColoredForestSatCNF(
 
       // Distance increment constraints:
       // par(u,v) ∧ dist(v)>=d → dist(u)>=(d+1)
-      for (let d = 0; d < maxDist; d++) {
+      // Loop up to N-1 so that the last constraint uses dist(u) >= N
+      for (let d = 0; d < N; d++) {
         if (d === 0) {
           // dist(v) >= 0 is always true, so: par(u,v) → dist(u) >= 1
           cnf.addImp(p, distVar(u, 1));
@@ -279,7 +287,8 @@ export function buildColoredForestSatCNF(
 
       // Also enforce the reverse: par(u,v) ∧ ¬dist(v)>=d → ¬dist(u)>=(d+1)
       // Equivalently: par(u,v) ∧ dist(u)>=(d+1) → dist(v)>=d
-      for (let d = 1; d <= maxDist; d++) {
+      // Loop up to N so the last constraint uses dist(u) >= N
+      for (let d = 1; d <= N; d++) {
         if (d === 1) {
           // par(u,v) ∧ dist(u)>=1 → dist(v)>=0 (always true, skip)
         } else {
