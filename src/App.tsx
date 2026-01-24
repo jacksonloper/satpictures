@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
-import type { ColorGrid, GridSolution, GridType, SolverRequest, SolverResponse, SolverType } from "./solver";
-import { HATCH_COLOR, RED_DOT_COLOR, RED_HATCH_COLOR } from "./solver";
+import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType } from "./solver";
+import { HATCH_COLOR } from "./solver";
 import SolverWorker from "./solver/solver.worker?worker";
 import CadicalWorker from "./solver/cadical.worker?worker";
 import "./App.css";
+
+// View modes for the sketchpad panel
+type SketchpadViewMode = "colors" | "pathlength";
 
 // Solution metadata - stored separately because solution may have different dimensions/type than current sketchpad
 interface SolutionMetadata {
   gridType: GridType;
   width: number;
   height: number;
-  reachabilityK: number; // K value that was used for the solve
 }
 
 function createEmptyGrid(width: number, height: number): ColorGrid {
@@ -28,24 +30,15 @@ function createMazeSetupGrid(
   width: number,
   height: number
 ): ColorGrid {
-  // Maze setup for bounded reachability problem:
+  // Maze setup: 
   // - Orange hatch (HATCH_COLOR) all the way around the border (walls)
-  // - Red dot (RED_DOT_COLOR) at position (1, 0) - second row, first column (origin)
-  // - Red hatch (RED_HATCH_COLOR) at position (height-2, width-1) - penultimate row, last column (target)
   // - All other interior cells: red (color 0)
-  // 
-  // This creates a maze where the solver must find a path from origin to target
-  // with distance > K through the red interior.
   return {
     width,
     height,
     colors: Array.from({ length: height }, (_, row) =>
       Array.from({ length: width }, (_, col) => {
-        // Origin: second row, first column - red dot
-        if (row === 1 && col === 0) return RED_DOT_COLOR;
-        // Target: penultimate row, last column - red hatch
-        if (row === height - 2 && col === width - 1) return RED_HATCH_COLOR;
-        // Border cells (except origin and target): orange hatch (walls)
+        // Border cells: orange hatch (walls)
         if (row === 0 || row === height - 1 || col === 0 || col === width - 1) {
           return HATCH_COLOR;
         }
@@ -54,6 +47,11 @@ function createMazeSetupGrid(
       })
     ),
   };
+}
+
+/** Generate a unique ID for a new pathlength constraint */
+function generateConstraintId(): string {
+  return `plc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 function App() {
@@ -72,11 +70,15 @@ function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [solverType, setSolverType] = useState<SolverType>("minisat");
   const [solveTime, setSolveTime] = useState<number | null>(null);
-  const [minWallsProportion, setMinWallsProportion] = useState(0);
   const [gridType, setGridType] = useState<GridType>("square");
-  const [reachabilityK, setReachabilityK] = useState(0);
-  const [showReachabilityLevels, setShowReachabilityLevels] = useState(false);
   const [graphMode, setGraphMode] = useState(false);
+  // Pathlength constraints state
+  const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
+  const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
+  // Sketchpad view mode - colors (normal) or pathlength (constraint editor)
+  const [sketchpadViewMode, setSketchpadViewMode] = useState<SketchpadViewMode>("colors");
+  // Selected constraint for showing distance levels in solution viewer (null = don't show levels)
+  const [selectedLevelConstraintId, setSelectedLevelConstraintId] = useState<string | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -158,7 +160,6 @@ function App() {
     const currentGridType = gridType;
     const currentWidth = grid.width;
     const currentHeight = grid.height;
-    const currentK = reachabilityK;
 
     // Create a new worker based on solver type
     const worker = solverType === "cadical" ? new CadicalWorker() : new SolverWorker();
@@ -175,7 +176,6 @@ function App() {
           gridType: currentGridType,
           width: currentWidth,
           height: currentHeight,
-          reachabilityK: currentK,
         });
         setSolutionStatus("found");
         setErrorMessage(null);
@@ -205,10 +205,16 @@ function App() {
       workerRef.current = null;
     };
 
-    // Send the solve request
-    const request: SolverRequest = { grid, numColors, minWallsProportion, gridType, reachabilityK };
+    // Send the solve request with clear JSON interface
+    const request: SolverRequest = { 
+      gridType, 
+      width: grid.width, 
+      height: grid.height, 
+      colors: grid.colors, 
+      pathlengthConstraints 
+    };
     worker.postMessage(request);
-  }, [grid, numColors, solverType, minWallsProportion, gridType, reachabilityK]);
+  }, [grid, solverType, gridType, pathlengthConstraints]);
 
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
@@ -370,8 +376,43 @@ function App() {
             <h2 style={{ margin: "0 0 16px 0", color: "#2c3e50", fontSize: "1.3em" }}>
               📝 Sketchpad
             </h2>
+            
+            {/* View Mode Toggle */}
+            <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+              <button
+                onClick={() => setSketchpadViewMode("colors")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: sketchpadViewMode === "colors" ? "#3498db" : "#bdc3c7",
+                  color: sketchpadViewMode === "colors" ? "white" : "#2c3e50",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontWeight: sketchpadViewMode === "colors" ? "bold" : "normal",
+                }}
+              >
+                🎨 Colors
+              </button>
+              <button
+                onClick={() => setSketchpadViewMode("pathlength")}
+                style={{
+                  padding: "6px 12px",
+                  backgroundColor: sketchpadViewMode === "pathlength" ? "#3498db" : "#bdc3c7",
+                  color: sketchpadViewMode === "pathlength" ? "white" : "#2c3e50",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontWeight: sketchpadViewMode === "pathlength" ? "bold" : "normal",
+                }}
+              >
+                📏 Pathlength Constraints ({pathlengthConstraints.length})
+              </button>
+            </div>
+
             <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
-              Click cells to paint colors. Click Solve to generate a solution.
+              {sketchpadViewMode === "colors" 
+                ? "Click cells to paint colors. Click Solve to generate a solution."
+                : "Add pathlength lower bound constraints. Each constraint specifies minimum distances from a root cell."}
             </p>
             
             {/* Sketchpad Controls */}
@@ -390,37 +431,142 @@ function App() {
               solverType={solverType}
               onSolverTypeChange={setSolverType}
               solveTime={solveTime}
-              minWallsProportion={minWallsProportion}
-              onMinWallsProportionChange={setMinWallsProportion}
               solution={solution}
               gridType={gridType}
               onGridTypeChange={handleGridTypeChange}
               onDownloadColors={handleDownloadSketchpadColors}
               onUploadColors={handleUploadColors}
               grid={grid}
-              reachabilityK={reachabilityK}
-              onReachabilityKChange={setReachabilityK}
+              pathlengthConstraints={pathlengthConstraints}
+              onPathlengthConstraintsChange={setPathlengthConstraints}
+              selectedConstraintId={selectedConstraintId}
+              onSelectedConstraintIdChange={setSelectedConstraintId}
             />
 
-            <h3 style={{ marginTop: "16px" }}>Colors</h3>
-            <ColorPalette
-              selectedColor={selectedColor}
-              onColorSelect={setSelectedColor}
-              numColors={numColors}
-            />
+            {sketchpadViewMode === "colors" ? (
+              <>
+                <h3 style={{ marginTop: "16px" }}>Colors</h3>
+                <ColorPalette
+                  selectedColor={selectedColor}
+                  onColorSelect={setSelectedColor}
+                  numColors={numColors}
+                />
 
-            {/* Sketchpad Grid */}
-            <div style={{ marginTop: "16px" }}>
-              <SketchpadGrid
-                grid={grid}
-                solution={null}
-                selectedColor={selectedColor}
-                onCellClick={handleCellClick}
-                onCellDrag={handleCellDrag}
-                cellSize={40}
-                gridType={gridType}
-              />
-            </div>
+                {/* Sketchpad Grid */}
+                <div style={{ marginTop: "16px" }}>
+                  <SketchpadGrid
+                    grid={grid}
+                    solution={null}
+                    selectedColor={selectedColor}
+                    onCellClick={handleCellClick}
+                    onCellDrag={handleCellDrag}
+                    cellSize={40}
+                    gridType={gridType}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 style={{ marginTop: "16px" }}>Pathlength Constraints</h3>
+                
+                {/* Constraint List and Management */}
+                <div style={{ marginBottom: "12px" }}>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+                    <button
+                      onClick={() => {
+                        const newConstraint: PathlengthConstraint = {
+                          id: generateConstraintId(),
+                          root: null,
+                          minDistances: {},
+                        };
+                        setPathlengthConstraints([...pathlengthConstraints, newConstraint]);
+                        setSelectedConstraintId(newConstraint.id);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: "#27ae60",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      + Add Constraint
+                    </button>
+                    {selectedConstraintId && (
+                      <button
+                        onClick={() => {
+                          const remainingConstraints = pathlengthConstraints.filter(c => c.id !== selectedConstraintId);
+                          setPathlengthConstraints(remainingConstraints);
+                          setSelectedConstraintId(
+                            remainingConstraints.length > 0
+                              ? remainingConstraints[0].id
+                              : null
+                          );
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#e74c3c",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "13px",
+                        }}
+                      >
+                        Delete Selected
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Constraint selector */}
+                  {pathlengthConstraints.length > 0 && (
+                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                      {pathlengthConstraints.map((c, idx) => (
+                        <button
+                          key={c.id}
+                          onClick={() => setSelectedConstraintId(c.id)}
+                          style={{
+                            padding: "4px 10px",
+                            backgroundColor: selectedConstraintId === c.id ? "#3498db" : "#ecf0f1",
+                            color: selectedConstraintId === c.id ? "white" : "#2c3e50",
+                            border: "1px solid #bdc3c7",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                          }}
+                        >
+                          #{idx + 1}
+                          {c.root && ` (${c.root.row},${c.root.col})`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Constraint Editor */}
+                {selectedConstraintId && pathlengthConstraints.find(c => c.id === selectedConstraintId) && (
+                  <PathlengthConstraintEditor
+                    grid={grid}
+                    gridType={gridType}
+                    constraint={pathlengthConstraints.find(c => c.id === selectedConstraintId)!}
+                    onConstraintChange={(updated) => {
+                      setPathlengthConstraints(
+                        pathlengthConstraints.map(c => c.id === updated.id ? updated : c)
+                      );
+                    }}
+                    cellSize={40}
+                  />
+                )}
+
+                {pathlengthConstraints.length === 0 && (
+                  <p style={{ color: "#7f8c8d", fontStyle: "italic" }}>
+                    No pathlength constraints yet. Click "Add Constraint" to create one.
+                  </p>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -441,7 +587,6 @@ function App() {
                 <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
                   Most recent solver output ({solutionMetadata.width}×{solutionMetadata.height} {solutionMetadata.gridType} grid).
                   {solveTime && ` Solved in ${solveTime.toFixed(0)}ms.`}
-                  {solutionMetadata.reachabilityK > 0 && ` K=${solutionMetadata.reachabilityK}.`}
                 </p>
                 
                 {/* Solution action buttons */}
@@ -488,12 +633,13 @@ function App() {
                   >
                     Download CSV
                   </button>
-                  {solution.reachabilityLevels && (
-                    <button
-                      onClick={() => setShowReachabilityLevels(!showReachabilityLevels)}
+                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && !graphMode && (
+                    <select
+                      value={selectedLevelConstraintId ?? ""}
+                      onChange={(e) => setSelectedLevelConstraintId(e.target.value || null)}
                       style={{
                         padding: "6px 12px",
-                        backgroundColor: showReachabilityLevels ? "#27ae60" : "#95a5a6",
+                        backgroundColor: selectedLevelConstraintId ? "#27ae60" : "#95a5a6",
                         color: "white",
                         border: "none",
                         borderRadius: "4px",
@@ -501,8 +647,18 @@ function App() {
                         fontSize: "13px",
                       }}
                     >
-                      {showReachabilityLevels ? "Hide Levels" : "Show Levels"}
-                    </button>
+                      <option value="">Hide Levels</option>
+                      {Object.keys(solution.distanceLevels).map((constraintId, idx) => {
+                        // Try to find a matching constraint to show root info
+                        const constraint = pathlengthConstraints.find(c => c.id === constraintId);
+                        const rootInfo = constraint?.root ? ` (${constraint.root.row},${constraint.root.col})` : "";
+                        return (
+                          <option key={constraintId} value={constraintId}>
+                            Root #{idx + 1}{rootInfo}
+                          </option>
+                        );
+                      })}
+                    </select>
                   )}
                   <button
                     onClick={() => setGraphMode(!graphMode)}
@@ -527,7 +683,8 @@ function App() {
                     solution={solution}
                     cellSize={40}
                     gridType={solutionMetadata.gridType}
-                    showReachabilityLevels={showReachabilityLevels}
+                    showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
+                    selectedConstraintId={selectedLevelConstraintId}
                     graphMode={graphMode}
                   />
                 </div>

@@ -3,22 +3,50 @@
  */
 
 import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution, GridType } from "./grid-coloring";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./grid-coloring";
 
 export type SolverType = "minisat" | "cadical";
 
+/**
+ * Clear request JSON for the SAT solver.
+ * Encodes everything the user has specified about the grid coloring problem.
+ */
 export interface SolverRequest {
-  grid: ColorGrid;
-  numColors: number;
-  minWallsProportion?: number;
-  gridType?: GridType;
-  reachabilityK?: number;
+  /** Grid type determines neighbor relationships */
+  gridType: GridType;
+  /** Grid width (number of columns) */
+  width: number;
+  /** Grid height (number of rows) */
+  height: number;
+  /** 
+   * Cell colors as 2D array [row][col].
+   * - Positive integers (0, 1, 2, ...) represent fixed colors
+   * - null represents blank cells (solver decides the color)
+   * - Special color -2 (HATCH_COLOR) means "doesn't need to be connected"
+   */
+  colors: (number | null)[][];
+  /**
+   * List of pathlength lower bound constraints.
+   * Each constraint specifies a root cell and minimum distances from that root.
+   */
+  pathlengthConstraints: PathlengthConstraint[];
+  // Legacy fields (kept for compatibility, will be removed)
+  grid?: ColorGrid;
+  numColors?: number;
 }
 
+/**
+ * Clear response JSON from the SAT solver.
+ * Contains the solution if one was found.
+ */
 export interface SolverResponse {
+  /** Whether the solve operation completed without errors */
   success: boolean;
+  /** The grid solution if satisfiable, null if unsatisfiable */
   solution: GridSolution | null;
+  /** Error message if success is false */
   error?: string;
+  /** Which solver was used */
   solverType: SolverType;
 }
 
@@ -42,10 +70,14 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { grid, numColors, minWallsProportion, gridType, reachabilityK } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid, numColors } = event.data;
+
+  // Support both new and legacy request formats
+  const grid: ColorGrid = legacyGrid ?? { width, height, colors };
+  const effectiveNumColors = numColors ?? 6;
 
   try {
-    const solution = solveGridColoring(grid, numColors, { minWallsProportion, gridType, reachabilityK });
+    const solution = solveGridColoring(grid, effectiveNumColors, { gridType, pathlengthConstraints });
     const response: SolverResponse = {
       success: true,
       solution,

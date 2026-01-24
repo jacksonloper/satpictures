@@ -7,14 +7,13 @@
 export {
   createTestGrid,
   HATCH_COLOR,
-  RED_DOT_COLOR,
-  RED_HATCH_COLOR,
   solveGridColoring,
   type ColorGrid,
   type Edge,
   type GridPoint,
   type GridSolution,
   type GridType,
+  type PathlengthConstraint,
   type SolveOptions,
 } from "./grid-coloring";
 

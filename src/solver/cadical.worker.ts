@@ -7,16 +7,19 @@
 /// <reference lib="webworker" />
 
 import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution, GridType } from "./grid-coloring";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./grid-coloring";
 import { CadicalSolver, CadicalFormulaBuilder } from "../sat";
 import type { CadicalClass } from "../sat";
 
 export interface CadicalSolverRequest {
-  grid: ColorGrid;
-  numColors: number;
-  minWallsProportion?: number;
-  gridType?: GridType;
-  reachabilityK?: number;
+  gridType: GridType;
+  width: number;
+  height: number;
+  colors: (number | null)[][];
+  pathlengthConstraints: PathlengthConstraint[];
+  // Legacy fields
+  grid?: ColorGrid;
+  numColors?: number;
 }
 
 export interface CadicalSolverResponse {
@@ -232,7 +235,11 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
-  const { grid, numColors, minWallsProportion, gridType, reachabilityK } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid, numColors } = event.data;
+
+  // Support both new and legacy request formats
+  const grid: ColorGrid = legacyGrid ?? { width, height, colors };
+  const effectiveNumColors = numColors ?? 6;
 
   try {
     // Load the module (cached after first load)
@@ -246,7 +253,7 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
     const builder = new CadicalFormulaBuilder(solver);
     
     // Solve using CaDiCaL
-    const solution = solveGridColoring(grid, numColors, { solver, builder, minWallsProportion, gridType, reachabilityK });
+    const solution = solveGridColoring(grid, effectiveNumColors, { solver, builder, gridType, pathlengthConstraints });
     
     // Clean up
     cadical.release();
