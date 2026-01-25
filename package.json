@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "@babel/parser": "^7.28.6",
+    "d3-shape": "^3.2.0",
     "logic-solver": "^2.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/d3-shape": "^3.1.8",
     "@types/node": "^24.10.9",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

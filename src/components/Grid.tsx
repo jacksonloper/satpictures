@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "../problem";
 import { HATCH_COLOR } from "../problem";
+import { line, curveCatmullRom } from "d3-shape";
 import {
   COLORS,
   HATCH_BG_COLOR,
@@ -271,143 +272,151 @@ export const Grid: React.FC<GridProps> = ({
       nodeMap.set(`${node.row},${node.col}`, node);
     }
     
-    // Compute edges from kept edges
-    interface EdgeData {
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-      color: string;
-      // For octagon/cairobridge: track if this is a diagonal edge and its type
-      isDiagonal?: boolean;
-      isDownSlant?: boolean; // true = down-slant (NW-SE), false = up-slant (NE-SW)
+    // Build tree structure from kept edges
+    // For each color, we'll find the root and build parent-child relationships
+    interface TreeNode {
+      key: string;
+      node: NodeData;
+      parent: TreeNode | null;
+      children: TreeNode[];
     }
     
-    const edges: EdgeData[] = [];
-    
-    // Helper to check if an edge is diagonal (different row AND different col)
-    const isDiagonalEdge = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
-      return e.u.row !== e.v.row && e.u.col !== e.v.col;
-    };
-    
-    // Helper to determine if a diagonal is down-slant (NW-SE) or up-slant (NE-SW)
-    const isDownSlantDiagonal = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
-      // Down-slant: when going from smaller row to larger row, col also increases
-      // (row increases, col increases) OR (row decreases, col decreases)
-      const dRow = e.v.row - e.u.row;
-      const dCol = e.v.col - e.u.col;
-      return (dRow > 0 && dCol > 0) || (dRow < 0 && dCol < 0);
-    };
-    
+    // Build adjacency map from kept edges
+    const adjacencyMap = new Map<string, Set<string>>();
     for (const edge of solution.keptEdges) {
-      const node1 = nodeMap.get(`${edge.u.row},${edge.u.col}`);
-      const node2 = nodeMap.get(`${edge.v.row},${edge.v.col}`);
+      const key1 = `${edge.u.row},${edge.u.col}`;
+      const key2 = `${edge.v.row},${edge.v.col}`;
       
-      if (node1 && node2) {
-        const diagonal = isDiagonalEdge(edge);
-        const downSlant = diagonal ? isDownSlantDiagonal(edge) : undefined;
-        
-        edges.push({
-          x1: node1.cx,
-          y1: node1.cy,
-          x2: node2.cx,
-          y2: node2.cy,
-          color: node1.color,
-          isDiagonal: diagonal,
-          isDownSlant: downSlant,
-        });
+      if (!adjacencyMap.has(key1)) adjacencyMap.set(key1, new Set());
+      if (!adjacencyMap.has(key2)) adjacencyMap.set(key2, new Set());
+      
+      adjacencyMap.get(key1)!.add(key2);
+      adjacencyMap.get(key2)!.add(key1);
+    }
+    
+    // Find root for each color and build trees
+    const colorRootKeys = new Map<string, string>();
+    for (const node of nodes) {
+      const key = `${node.row},${node.col}`;
+      const cellColor = solution.assignedColors[node.row][node.col];
+      const colorKey = String(cellColor);
+      
+      // Root is identified by colorRoots prop or we need to find it
+      // For now, we'll pick the first node of each color as root
+      if (!colorRootKeys.has(colorKey)) {
+        colorRootKeys.set(colorKey, key);
       }
     }
     
-    // For octagon and cairobridge, we need to handle crossing edges with bridges
-    // Separate edges into regular edges and crossing diagonal pairs
-    const regularEdges: EdgeData[] = [];
-    const downSlantEdges: EdgeData[] = [];
-    const upSlantEdges: EdgeData[] = [];
+    // Build trees using BFS from each root
+    const treeNodes = new Map<string, TreeNode>();
     
-    if (gridType === "octagon") {
-      for (const edge of edges) {
-        if (edge.isDiagonal) {
-          if (edge.isDownSlant) {
-            downSlantEdges.push(edge);
-          } else {
-            upSlantEdges.push(edge);
+    for (const [colorKey, rootKey] of colorRootKeys.entries()) {
+      const rootNode = nodeMap.get(rootKey);
+      if (!rootNode) continue;
+      
+      const visited = new Set<string>();
+      const queue: { key: string; parent: TreeNode | null }[] = [{ key: rootKey, parent: null }];
+      
+      while (queue.length > 0) {
+        const { key, parent } = queue.shift()!;
+        
+        if (visited.has(key)) continue;
+        visited.add(key);
+        
+        const node = nodeMap.get(key);
+        if (!node) continue;
+        
+        // Only process nodes of the same color
+        const nodeColor = solution.assignedColors[node.row][node.col];
+        if (String(nodeColor) !== colorKey) continue;
+        
+        const treeNode: TreeNode = {
+          key,
+          node,
+          parent,
+          children: [],
+        };
+        
+        if (parent) {
+          parent.children.push(treeNode);
+        }
+        
+        treeNodes.set(key, treeNode);
+        
+        // Add neighbors to queue
+        const neighbors = adjacencyMap.get(key);
+        if (neighbors) {
+          for (const neighborKey of neighbors) {
+            if (!visited.has(neighborKey)) {
+              queue.push({ key: neighborKey, parent: treeNode });
+            }
           }
-        } else {
-          regularEdges.push(edge);
         }
       }
-    } else if (gridType === "cairobridge") {
-      // For cairobridge, identify bridge diagonals (non-Cairo diagonals)
-      for (const edge of edges) {
-        if (edge.isDiagonal) {
-          // Treat all diagonals as potential crossing edges
-          // Down-slant vs up-slant determines layer
-          if (edge.isDownSlant) {
-            downSlantEdges.push(edge);
-          } else {
-            upSlantEdges.push(edge);
+    }
+    
+    // Generate curved paths for edges
+    // For each node with children, create smooth curves from parent direction to each child
+    interface CurvedPath {
+      d: string;
+      color: string;
+    }
+    
+    const curvedPaths: CurvedPath[] = [];
+    
+    // Create d3 line generator with curve
+    const lineGenerator = line<[number, number]>()
+      .x(d => d[0])
+      .y(d => d[1])
+      .curve(curveCatmullRom.alpha(0.5)); // 0.5 alpha gives nice smooth curves
+    
+    for (const treeNode of treeNodes.values()) {
+      const { node, parent, children } = treeNode;
+      
+      if (children.length === 0) continue;
+      
+      // For each child, create a curved path
+      for (const child of children) {
+        const childNode = child.node;
+        
+        // Calculate control points for smooth curve
+        // Start from parent direction (if exists) and curve to child
+        const points: [number, number][] = [];
+        
+        if (parent) {
+          // Add a point slightly away from current node in the direction from parent
+          const dx = node.cx - parent.node.cx;
+          const dy = node.cy - parent.node.cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist > 0.001) {
+            const normalizedDx = dx / dist;
+            const normalizedDy = dy / dist;
+            const offset = cellSize * 0.15;
+            
+            points.push([node.cx + normalizedDx * offset, node.cy + normalizedDy * offset]);
           }
-        } else {
-          regularEdges.push(edge);
         }
-      }
-    } else {
-      // For other grid types, all edges are regular
-      regularEdges.push(...edges);
-    }
-    
-    // Compute bridge rectangles for crossing edges
-    // The bridge is a white-filled rectangle that the "over" edge passes through
-    interface BridgeData {
-      path: string;
-    }
-    
-    const bridges: BridgeData[] = [];
-    // Bridge sizing ratios - chosen for visual clarity at typical cell sizes
-    const BRIDGE_WIDTH_RATIO = 0.12; // Width of the white bridge perpendicular to edge
-    const BRIDGE_LENGTH_RATIO = 0.25; // Length of the bridge section along the edge
-    const bridgeWidth = cellSize * BRIDGE_WIDTH_RATIO;
-    
-    // For up-slant edges (which go "over"), create bridges at crossing points
-    if (gridType === "octagon" || gridType === "cairobridge") {
-      for (const upEdge of upSlantEdges) {
-        // Direction vector of the edge
-        const dx = upEdge.x2 - upEdge.x1;
-        const dy = upEdge.y2 - upEdge.y1;
-        const len = Math.sqrt(dx * dx + dy * dy);
         
-        // Skip zero-length edges to avoid division by zero
-        if (len < 0.001) continue;
+        // Add the current node position
+        points.push([node.cx, node.cy]);
         
-        // Find the midpoint of this edge (where it crosses)
-        const midX = (upEdge.x1 + upEdge.x2) / 2;
-        const midY = (upEdge.y1 + upEdge.y2) / 2;
+        // Add a control point between current and child
+        const midX = (node.cx + childNode.cx) / 2;
+        const midY = (node.cy + childNode.cy) / 2;
+        points.push([midX, midY]);
         
-        const unitX = dx / len;
-        const unitY = dy / len;
+        // Add the child position
+        points.push([childNode.cx, childNode.cy]);
         
-        // Perpendicular vector
-        const perpX = -unitY;
-        const perpY = unitX;
-        
-        // Bridge extends bridgeWidth/2 perpendicular on each side
-        // and BRIDGE_LENGTH_RATIO * len along the edge direction
-        const halfLen = len * BRIDGE_LENGTH_RATIO / 2;
-        const halfWidth = bridgeWidth / 2;
-        
-        // Four corners of the bridge
-        const c1x = midX - unitX * halfLen + perpX * halfWidth;
-        const c1y = midY - unitY * halfLen + perpY * halfWidth;
-        const c2x = midX - unitX * halfLen - perpX * halfWidth;
-        const c2y = midY - unitY * halfLen - perpY * halfWidth;
-        const c3x = midX + unitX * halfLen - perpX * halfWidth;
-        const c3y = midY + unitY * halfLen - perpY * halfWidth;
-        const c4x = midX + unitX * halfLen + perpX * halfWidth;
-        const c4y = midY + unitY * halfLen + perpY * halfWidth;
-        
-        const bridgePath = `M ${c1x} ${c1y} L ${c2x} ${c2y} L ${c3x} ${c3y} L ${c4x} ${c4y} Z`;
-        bridges.push({ path: bridgePath });
+        const pathD = lineGenerator(points);
+        if (pathD) {
+          curvedPaths.push({
+            d: pathD,
+            color: node.color,
+          });
+        }
       }
     }
     
@@ -420,59 +429,33 @@ export const Grid: React.FC<GridProps> = ({
         }}
       >
         <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#f5f5f5" }}>
-          {/* Layer 1: Regular edges (non-diagonal) */}
-          {regularEdges.map((edge, i) => (
-            <line
-              key={`regular-edge-${i}`}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              stroke={edge.color}
-              strokeWidth={edgeWidth}
-              strokeLinecap="round"
-            />
-          ))}
-          
-          {/* Layer 2: Down-slant diagonal edges (go "under") */}
-          {downSlantEdges.map((edge, i) => (
-            <line
-              key={`down-edge-${i}`}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              stroke={edge.color}
-              strokeWidth={edgeWidth}
-              strokeLinecap="round"
-            />
-          ))}
-          
-          {/* Layer 3: White bridges for up-slant edges */}
-          {bridges.map((bridge, i) => (
+          {/* Layer 1: White borders for all paths */}
+          {curvedPaths.map((path, i) => (
             <path
-              key={`bridge-${i}`}
-              d={bridge.path}
-              fill="white"
-              stroke="none"
-            />
-          ))}
-          
-          {/* Layer 4: Up-slant diagonal edges (go "over") */}
-          {upSlantEdges.map((edge, i) => (
-            <line
-              key={`up-edge-${i}`}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              stroke={edge.color}
-              strokeWidth={edgeWidth}
+              key={`edge-border-${i}`}
+              d={path.d}
+              stroke="white"
+              strokeWidth={edgeWidth * 2.5}
+              fill="none"
               strokeLinecap="round"
+              strokeLinejoin="round"
             />
           ))}
           
-          {/* Layer 5: Render nodes as small dots on top */}
+          {/* Layer 2: Colored paths */}
+          {curvedPaths.map((path, i) => (
+            <path
+              key={`edge-${i}`}
+              d={path.d}
+              stroke={path.color}
+              strokeWidth={edgeWidth}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          
+          {/* Layer 3: Render nodes as small dots on top */}
           {nodes.map(({ row, col, cx, cy, color }) => (
             <circle
               key={`node-${row}-${col}`}
