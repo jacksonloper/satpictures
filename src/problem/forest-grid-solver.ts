@@ -286,17 +286,19 @@ export function solveForestGridColoring(
     }
   }
 
-  // Compute distance levels via BFS from each constraint root
+  // Compute distance levels via BFS from each color root (not constraint roots)
+  // This shows distance from each color's tree root in the solution viewer
   let distanceLevels: Record<string, number[][]> | null = null;
-  const constraintRoots: { constraintId: string; root: GridPoint }[] = [];
+  const colorRootsList: { colorKey: string; root: GridPoint }[] = [];
 
-  for (const constraint of pathlengthConstraints) {
-    if (constraint.root) {
-      constraintRoots.push({ constraintId: constraint.id, root: constraint.root });
+  // Get all color roots from userColorRoots
+  for (const [colorKey, root] of Object.entries(userColorRoots)) {
+    if (root) {
+      colorRootsList.push({ colorKey: `color_${colorKey}`, root });
     }
   }
 
-  if (constraintRoots.length > 0) {
+  if (colorRootsList.length > 0) {
     distanceLevels = {};
 
     // Build adjacency from kept edges
@@ -313,8 +315,8 @@ export function solveForestGridColoring(
       adjacency.get(vKey)!.push(edge.u);
     }
 
-    // BFS from each root
-    for (const { constraintId, root } of constraintRoots) {
+    // BFS from each color root
+    for (const { colorKey, root } of colorRootsList) {
       const levels = Array.from({ length: height }, () =>
         Array.from({ length: width }, () => -1)
       );
@@ -335,7 +337,7 @@ export function solveForestGridColoring(
         }
       }
 
-      distanceLevels[constraintId] = levels;
+      distanceLevels[colorKey] = levels;
     }
   }
 

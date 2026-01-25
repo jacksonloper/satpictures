@@ -212,6 +212,7 @@ function App() {
           newColors[row][col] = selectedColor;
           return { ...prev, colors: newColors };
         });
+        setSolutionStatus("none"); // Hide "Solution found!" on edit
       } else if (editingTool === "roots") {
         const cellColor = grid.colors[row][col];
         // Only allow setting roots for non-null, non-hatch colors
@@ -220,6 +221,7 @@ function App() {
             ...prev,
             [String(cellColor)]: { row, col },
           }));
+          setSolutionStatus("none"); // Hide "Solution found!" on edit
         }
       } else if (editingTool === "distance") {
         // Open distance input dialog for this cell
@@ -243,6 +245,7 @@ function App() {
           newColors[row][col] = selectedColor;
           return { ...prev, colors: newColors };
         });
+        setSolutionStatus("none"); // Hide "Solution found!" on edit
       }
     },
     [editingTool, selectedColor]
@@ -276,6 +279,7 @@ function App() {
       };
       setPathlengthConstraints([updatedConstraint]);
       setSelectedConstraintId(updatedConstraint.id);
+      setSolutionStatus("none"); // Hide "Solution found!" on edit
     } else if (distanceInput === "" || distanceInput === "0") {
       // Empty or zero - remove the distance constraint
       const newDistances = { ...constraint.minDistances };
@@ -291,6 +295,7 @@ function App() {
         setPathlengthConstraints([]);
         setSelectedConstraintId(null);
       }
+      setSolutionStatus("none"); // Hide "Solution found!" on edit
     }
     // Otherwise (non-numeric input), just close without saving
     
@@ -415,6 +420,9 @@ function App() {
   const handleClear = useCallback(() => {
     setGrid(createEmptyGrid(gridWidth, gridHeight));
     setColorRoots({});
+    setPathlengthConstraints([]);
+    setSelectedConstraintId(null);
+    setSolutionStatus("none");
   }, [gridWidth, gridHeight]);
 
   const handleMazeSetup = useCallback(() => {
@@ -854,13 +862,25 @@ function App() {
                       }}
                     >
                       <option value="">Hide Levels</option>
-                      {Object.keys(solution.distanceLevels).map((constraintId, idx) => {
-                        // Try to find a matching constraint to show root info
-                        const constraint = pathlengthConstraints.find(c => c.id === constraintId);
-                        const rootInfo = constraint?.root ? ` (${constraint.root.row},${constraint.root.col})` : "";
+                      {Object.keys(solution.distanceLevels).map((levelKey) => {
+                        // Keys are like "color_0", "color_1", etc. for color roots
+                        const colorMatch = levelKey.match(/^color_(\d+)$/);
+                        if (colorMatch) {
+                          const colorIndex = parseInt(colorMatch[1], 10);
+                          const root = colorRoots[String(colorIndex)];
+                          const rootInfo = root ? ` (${root.row},${root.col})` : "";
+                          const colorNames = ["Red", "Blue", "Green", "Orange", "Purple", "Cyan"];
+                          const colorName = colorNames[colorIndex] ?? `Color ${colorIndex}`;
+                          return (
+                            <option key={levelKey} value={levelKey}>
+                              {colorName}{rootInfo}
+                            </option>
+                          );
+                        }
+                        // Fallback for old-style constraint IDs
                         return (
-                          <option key={constraintId} value={constraintId}>
-                            Root #{idx + 1}{rootInfo}
+                          <option key={levelKey} value={levelKey}>
+                            Root {levelKey}
                           </option>
                         );
                       })}
