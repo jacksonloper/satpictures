@@ -86,15 +86,51 @@ class CNF {
     this.addClause([-a, b]);
   }
 
-  addAtMostOnePairwise(lits: number[]): void {
-    for (let i = 0; i < lits.length; i++)
-      for (let j = i + 1; j < lits.length; j++)
-        this.addClause([-lits[i], -lits[j]]);
+  /**
+   * Add at-most-one constraint using Sinz sequential counter encoding.
+   * Given literals x1..xn, introduces auxiliaries s1..s(n-1) and adds O(n) clauses.
+   *
+   * Clauses:
+   * 1. (~x1 OR s1)
+   * 2. For i = 2..n-1: (~xi OR si), (~s(i-1) OR si), (~xi OR ~s(i-1))
+   * 3. (~xn OR ~s(n-1))
+   */
+  addAtMostOneSinz(lits: number[]): void {
+    const n = lits.length;
+    if (n <= 1) return; // trivially satisfied
+
+    if (n === 2) {
+      // Special case: just one clause
+      this.addClause([-lits[0], -lits[1]]);
+      return;
+    }
+
+    // Create auxiliary variables s1..s(n-1)
+    const auxVars: number[] = [];
+    for (let i = 0; i < n - 1; i++) {
+      auxVars.push(this.v(`_amo_${this.numVars + 1}`));
+    }
+
+    // Clause 1: (~x1 OR s1)
+    this.addClause([-lits[0], auxVars[0]]);
+
+    // Clauses for i = 2..n-1 (indices 1..n-2)
+    for (let i = 1; i < n - 1; i++) {
+      // (~xi OR si)
+      this.addClause([-lits[i], auxVars[i]]);
+      // (~s(i-1) OR si)
+      this.addClause([-auxVars[i - 1], auxVars[i]]);
+      // (~xi OR ~s(i-1))
+      this.addClause([-lits[i], -auxVars[i - 1]]);
+    }
+
+    // Clause 3: (~xn OR ~s(n-1))
+    this.addClause([-lits[n - 1], -auxVars[n - 2]]);
   }
 
   addExactlyOne(lits: number[]): void {
     this.addClause(lits);
-    this.addAtMostOnePairwise(lits);
+    this.addAtMostOneSinz(lits);
   }
 
   toDimacs(): string {
@@ -288,7 +324,7 @@ export function buildConnectivitySatCNF(
         if (parentVarsForV.length > 0) {
           cnf.addClause([-colorVar(v, c), ...parentVarsForV]);
           // At-most-one parent
-          cnf.addAtMostOnePairwise(parentVarsForV);
+          cnf.addAtMostOneSinz(parentVarsForV);
         } else {
           // No neighbors - cannot have this color unless it's the root
           cnf.addUnit(-colorVar(v, c));
@@ -302,7 +338,7 @@ export function buildConnectivitySatCNF(
         }
         cnf.addClause([-colorVar(v, c), ...levelVarsForV]);
         // At-most-one level
-        cnf.addAtMostOnePairwise(levelVarsForV);
+        cnf.addAtMostOneSinz(levelVarsForV);
         // L_{v,c,i} → X_{v,c}
         for (let i = 0; i <= maxLevel; i++) {
           cnf.addImp(levelVar(v, c, i), colorVar(v, c));
