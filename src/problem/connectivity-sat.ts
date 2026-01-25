@@ -1,17 +1,18 @@
 /**
  * Connectivity SAT CNF Builder
  *
- * Uses arborescence-style reachability encoding for strong unit propagation.
+ * Uses single commodity flow encoding for connectivity.
  * This encoding enforces:
  * - Vertex coloring (some precolored)
  * - Choose which edges to keep
  * - Kept edges never connect different colors
  * - Each color-class is connected (one component)
  *
- * Key encoding technique: levels (distance from root) for propagation
- * - L_{v,c,i} = "vertex v has level i in color c"
- * - P_{v←u,c} = "u is parent of v in color c"
- * - Levels provide Horn-ish implications for excellent SAT solver propagation
+ * Key encoding technique: single commodity flow with unary flow values
+ * - Each non-root node produces 1 unit of flow
+ * - For each undirected edge {u,v}, we have two directed arc flow variables
+ * - Arc can only carry flow if both endpoints have same color
+ * - Flow conservation: outgoing flow = incoming flow + 1 for non-root nodes
  */
 
 /**
@@ -89,42 +90,29 @@ class CNF {
   /**
    * Add at-most-one constraint using Sinz sequential counter encoding.
    * Given literals x1..xn, introduces auxiliaries s1..s(n-1) and adds O(n) clauses.
-   *
-   * Clauses:
-   * 1. (~x1 OR s1)
-   * 2. For i = 2..n-1: (~xi OR si), (~s(i-1) OR si), (~xi OR ~s(i-1))
-   * 3. (~xn OR ~s(n-1))
    */
   addAtMostOneSinz(lits: number[]): void {
     const n = lits.length;
-    if (n <= 1) return; // trivially satisfied
+    if (n <= 1) return;
 
     if (n === 2) {
-      // Special case: just one clause
       this.addClause([-lits[0], -lits[1]]);
       return;
     }
 
-    // Create auxiliary variables s1..s(n-1)
     const auxVars: number[] = [];
     for (let i = 0; i < n - 1; i++) {
       auxVars.push(this.v(`_amo_${this.numVars + 1}`));
     }
 
-    // Clause 1: (~x1 OR s1)
     this.addClause([-lits[0], auxVars[0]]);
 
-    // Clauses for i = 2..n-1 (indices 1..n-2)
     for (let i = 1; i < n - 1; i++) {
-      // (~xi OR si)
       this.addClause([-lits[i], auxVars[i]]);
-      // (~s(i-1) OR si)
       this.addClause([-auxVars[i - 1], auxVars[i]]);
-      // (~xi OR ~s(i-1))
       this.addClause([-lits[i], -auxVars[i - 1]]);
     }
 
-    // Clause 3: (~xn OR ~s(n-1))
     this.addClause([-lits[n - 1], -auxVars[n - 2]]);
   }
 
@@ -141,20 +129,12 @@ class CNF {
 }
 
 /**
- * Build a SAT CNF formula for the connectivity problem.
+ * Build a SAT CNF formula for the connectivity problem using single commodity flow.
  *
- * This encoding uses arborescence-style reachability with levels for excellent
- * unit propagation performance. Each color class forms a tree rooted at a
- * designated vertex.
- *
- * Key clauses:
- * 1. Each vertex has exactly one color (from active colors)
- * 2. Precolored vertices are fixed
- * 3. Kept edges are monochromatic: ¬Y_{uv} ∨ ¬X_{u,c} ∨ X_{v,c}
- * 4. Parent implies same color and kept edge
- * 5. Every colored non-root vertex has exactly one parent
- * 6. Root has no parent and is at level 0
- * 7. Parent decreases level by exactly 1
+ * This encoding uses flow conservation to ensure connectivity:
+ * - Each non-root node produces 1 unit of flow
+ * - Flow is transported via directed arcs toward the root
+ * - Flow conservation: outgoing = incoming + 1 for non-root nodes
  *
  * @param input - Configuration specifying nodes, edges, and color hints
  * @returns The CNF formula and metadata
@@ -169,7 +149,7 @@ export function buildConnectivitySatCNF(
   if (N === 0) throw new Error("No nodes.");
   const nodeIndex = new Map(nodeList.map((n, i) => [n, i]));
 
-  // Determine active colors: all non-negative colors that appear in hints
+  // Determine active colors
   const colorSet = new Set<number>();
   for (const n of nodeList) {
     const c = nodeColorHint?.[n];
@@ -177,21 +157,16 @@ export function buildConnectivitySatCNF(
   }
   const colors = [...colorSet].sort((a, b) => a - b);
   if (colors.length === 0) {
-    throw new Error(
-      "No colors provided (need at least one cell with a fixed color)."
-    );
+    throw new Error("No colors provided (need at least one cell with a fixed color).");
   }
 
   // Build adjacency
   const adj = new Map<string, Set<string>>(nodeList.map((n) => [n, new Set()]));
-  const edgeKey = (a: string, b: string): string => {
-    return a < b ? `${a}--${b}` : `${b}--${a}`;
-  };
+  const edgeKey = (a: string, b: string): string => a < b ? `${a}--${b}` : `${b}--${a}`;
   const undirectedEdges: [string, string][] = [];
   const edgeSeen = new Set<string>();
   for (const [u0, v0] of edges) {
-    const u = String(u0),
-      v = String(v0);
+    const u = String(u0), v = String(v0);
     if (!nodeIndex.has(u) || !nodeIndex.has(v))
       throw new Error(`Edge contains unknown node: [${u0},${v0}]`);
     if (u === v) throw new Error(`Self-loop edge not allowed: ${u0}`);
@@ -203,22 +178,18 @@ export function buildConnectivitySatCNF(
     adj.get(v)!.add(u);
   }
 
-  // Max level is N-1 (longest possible path in a tree)
-  const maxLevel = N - 1;
+  // Max flow value (N-1 is max possible through any single arc)
+  const maxFlow = N - 1;
 
   const cnf = new CNF();
 
   // ---------- Variables ----------
   // X_{v,c} = vertex v has color c
   const colorVar = (v: string, c: number) => cnf.v(`X(${v})=${c}`);
-  // Y_{uv} = edge is kept
+  // Y_{uv} = edge is kept (for visualization)
   const keepVar = (u: string, v: string) => cnf.v(`Y(${edgeKey(u, v)})`);
-  // P_{v←u,c} = u is parent of v in color c
-  const parentVar = (v: string, u: string, c: number) =>
-    cnf.v(`P(${v}<-${u},c=${c})`);
-  // L_{v,c,i} = vertex v has level i in color c
-  const levelVar = (v: string, c: number, i: number) =>
-    cnf.v(`L(${v},c=${c},i=${i})`);
+  // F_{u→v,k} = "flow on arc u→v is at least k" (unary encoding)
+  const flowVar = (u: string, v: string, k: number) => cnf.v(`F(${u}->${v},>=${k})`);
 
   // ---------- (1) Each vertex has exactly one color ----------
   for (const v of nodeList) {
@@ -230,149 +201,178 @@ export function buildConnectivitySatCNF(
         // Blank - any color allowed
       } else if (Number.isInteger(hinted) && hinted >= 0) {
         if (!colorSet.has(hinted)) {
-          throw new Error(
-            `Hinted color ${hinted} for node ${v} not in allowed set.`
-          );
+          throw new Error(`Hinted color ${hinted} for node ${v} not in allowed set.`);
         }
         cnf.addUnit(colorVar(v, hinted));
       } else {
-        throw new Error(
-          `nodeColorHint[${v}] must be -1 or a nonnegative integer.`
-        );
+        throw new Error(`nodeColorHint[${v}] must be -1 or a nonnegative integer.`);
       }
     }
   }
 
   // ---------- Determine root for each color ----------
-  // For each color, pick the lexicographically smallest fixed vertex
   const rootOfColor: Record<number, string> = {};
   for (const c of colors) {
-    // Find all vertices fixed to this color
     const fixedVertices: string[] = [];
     for (const v of nodeList) {
       const hint = nodeColorHint?.[v];
-      if (hint === c) {
-        fixedVertices.push(v);
-      }
+      if (hint === c) fixedVertices.push(v);
     }
     if (fixedVertices.length === 0) {
       throw new Error(`Color ${c} has no fixed vertices to serve as root.`);
     }
-    // Sort lexicographically and pick first
     fixedVertices.sort();
     rootOfColor[c] = fixedVertices[0];
   }
 
-  // ---------- (3) Kept edges must be monochromatic ----------
-  // For each edge {u,v} and each color c:
-  //   (¬Y_{uv} ∨ ¬X_{u,c} ∨ X_{v,c}) ∧ (¬Y_{uv} ∨ ¬X_{v,c} ∨ X_{u,c})
+  // ---------- (2) Unary flow encoding: monotonicity ----------
+  // F_{u→v,k} → F_{u→v,k-1}
   for (const [u, v] of undirectedEdges) {
-    const yVar = keepVar(u, v);
+    for (let k = 2; k <= maxFlow; k++) {
+      cnf.addImp(flowVar(u, v, k), flowVar(u, v, k - 1));
+      cnf.addImp(flowVar(v, u, k), flowVar(v, u, k - 1));
+    }
+  }
+
+  // ---------- (3) Arc can only carry flow if both endpoints have same color ----------
+  for (const [u, v] of undirectedEdges) {
     for (const c of colors) {
       const xu = colorVar(u, c);
       const xv = colorVar(v, c);
-      // If edge is kept and u has color c, then v must have color c
-      cnf.addClause([-yVar, -xu, xv]);
-      // If edge is kept and v has color c, then u must have color c
-      cnf.addClause([-yVar, -xv, xu]);
+      // If there's flow u→v and u has color c, then v must have color c (and vice versa)
+      cnf.addClause([-flowVar(u, v, 1), -xu, xv]);
+      cnf.addClause([-flowVar(u, v, 1), -xv, xu]);
+      cnf.addClause([-flowVar(v, u, 1), -xu, xv]);
+      cnf.addClause([-flowVar(v, u, 1), -xv, xu]);
     }
   }
 
-  // ---------- Connectivity via arborescence with levels ----------
-  for (const c of colors) {
-    const root = rootOfColor[c];
+  // ---------- (4) Flow conservation using unary adder ----------
+  // For each node v: out_total = in_total + 1 (if non-root)
+  // We use a compact encoding with auxiliary variables for sums
 
-    // ---------- (4) Root is at level 0 ----------
-    cnf.addUnit(levelVar(root, c, 0));
-    // Root has no other levels
-    for (let i = 1; i <= maxLevel; i++) {
-      cnf.addUnit(-levelVar(root, c, i));
-    }
+  for (const v of nodeList) {
+    const neighbors = [...adj.get(v)!];
+    if (neighbors.length === 0) continue;
 
-    // ---------- (2), (4), (5), (7) Parent and level constraints ----------
-    for (const v of nodeList) {
-      const isRoot = v === root;
-      const neighbors = [...adj.get(v)!];
+    const isRoot = colors.some((c) => rootOfColor[c] === v);
 
-      // Get all potential parent variables for v in color c
-      const parentVarsForV: number[] = [];
-      for (const u of neighbors) {
-        parentVarsForV.push(parentVar(v, u, c));
-      }
+    // Unary sum variables
+    const inSum = (k: number) => cnf.v(`_inSum(${v})>=${k}`);
+    const outSum = (k: number) => cnf.v(`_outSum(${v})>=${k}`);
 
-      if (isRoot) {
-        // Root has no parent in this color
-        for (const pVar of parentVarsForV) {
-          cnf.addUnit(-pVar);
-        }
-      } else {
-        // ---------- (4.1) Parent implies same color and kept edge ----------
-        for (const u of neighbors) {
-          const pVar = parentVar(v, u, c);
-          const yVar = keepVar(u, v);
+    const maxTotal = neighbors.length * maxFlow;
 
-          // P_{v←u,c} → Y_{uv} (parent implies edge kept)
-          cnf.addImp(pVar, yVar);
-          // P_{v←u,c} → X_{u,c} (parent has same color)
-          cnf.addImp(pVar, colorVar(u, c));
-          // P_{v←u,c} → X_{v,c} (child has same color)
-          cnf.addImp(pVar, colorVar(v, c));
-        }
+    // Build incoming sum using sequential addition
+    // We add one arc at a time to a running sum
+    {
+      let prevSum = (k: number) => flowVar(neighbors[0], v, k);
+      
+      for (let i = 1; i < neighbors.length; i++) {
+        const arcFlow = (k: number) => flowVar(neighbors[i], v, k);
+        const isLast = i === neighbors.length - 1;
+        const currSum = isLast ? inSum : (k: number) => cnf.v(`_inPartial(${v},${i})>=${k}`);
+        
+        const maxPrev = i * maxFlow;
+        const maxCurr = Math.min((i + 1) * maxFlow, maxTotal);
 
-        // ---------- (2) Non-root vertex has exactly one parent if colored ----------
-        // X_{v,c} → ⋁_{u∈N(v)} P_{v←u,c}
-        if (parentVarsForV.length > 0) {
-          cnf.addClause([-colorVar(v, c), ...parentVarsForV]);
-          // At-most-one parent
-          cnf.addAtMostOneSinz(parentVarsForV);
-        } else {
-          // No neighbors - cannot have this color unless it's the root
-          cnf.addUnit(-colorVar(v, c));
-        }
-
-        // ---------- (3) Level domain: exactly one level if in color ----------
-        // X_{v,c} → ⋁_{i=0}^{maxLevel} L_{v,c,i}
-        const levelVarsForV: number[] = [];
-        for (let i = 0; i <= maxLevel; i++) {
-          levelVarsForV.push(levelVar(v, c, i));
-        }
-        cnf.addClause([-colorVar(v, c), ...levelVarsForV]);
-        // At-most-one level
-        cnf.addAtMostOneSinz(levelVarsForV);
-        // L_{v,c,i} → X_{v,c}
-        for (let i = 0; i <= maxLevel; i++) {
-          cnf.addImp(levelVar(v, c, i), colorVar(v, c));
-        }
-
-        // ---------- (5) Parent decreases level by exactly 1 ----------
-        // P_{v←u,c} ∧ L_{v,c,i} → L_{u,c,i-1}
-        // And: P_{v←u,c} → ¬L_{v,c,0} (can't have parent at level 0)
-        for (const u of neighbors) {
-          const pVar = parentVar(v, u, c);
-
-          // Can't have parent if at level 0
-          cnf.addClause([-pVar, -levelVar(v, c, 0)]);
-
-          // Level decrement
-          for (let i = 1; i <= maxLevel; i++) {
-            cnf.addClause([-pVar, -levelVar(v, c, i), levelVar(u, c, i - 1)]);
+        // Forward: prevSum >= a ∧ arcFlow >= b → currSum >= a+b
+        for (let a = 0; a <= maxPrev; a++) {
+          for (let b = 0; b <= maxFlow; b++) {
+            const sum = a + b;
+            if (sum > 0 && sum <= maxCurr) {
+              const clause: number[] = [];
+              if (a > 0) clause.push(-prevSum(a));
+              if (b > 0) clause.push(-arcFlow(b));
+              clause.push(currSum(sum));
+              if (clause.length > 1) cnf.addClause(clause);
+            }
           }
         }
+
+        // Monotonicity
+        for (let k = 2; k <= maxCurr; k++) {
+          cnf.addImp(currSum(k), currSum(k - 1));
+        }
+
+        prevSum = currSum;
+      }
+
+      // Handle single neighbor case
+      if (neighbors.length === 1) {
+        for (let k = 1; k <= maxFlow; k++) {
+          cnf.addImp(flowVar(neighbors[0], v, k), inSum(k));
+          cnf.addImp(inSum(k), flowVar(neighbors[0], v, k));
+        }
+      }
+    }
+
+    // Build outgoing sum similarly
+    {
+      let prevSum = (k: number) => flowVar(v, neighbors[0], k);
+      
+      for (let i = 1; i < neighbors.length; i++) {
+        const arcFlow = (k: number) => flowVar(v, neighbors[i], k);
+        const isLast = i === neighbors.length - 1;
+        const currSum = isLast ? outSum : (k: number) => cnf.v(`_outPartial(${v},${i})>=${k}`);
+        
+        const maxPrev = i * maxFlow;
+        const maxCurr = Math.min((i + 1) * maxFlow, maxTotal);
+
+        for (let a = 0; a <= maxPrev; a++) {
+          for (let b = 0; b <= maxFlow; b++) {
+            const sum = a + b;
+            if (sum > 0 && sum <= maxCurr) {
+              const clause: number[] = [];
+              if (a > 0) clause.push(-prevSum(a));
+              if (b > 0) clause.push(-arcFlow(b));
+              clause.push(currSum(sum));
+              if (clause.length > 1) cnf.addClause(clause);
+            }
+          }
+        }
+
+        for (let k = 2; k <= maxCurr; k++) {
+          cnf.addImp(currSum(k), currSum(k - 1));
+        }
+
+        prevSum = currSum;
+      }
+
+      if (neighbors.length === 1) {
+        for (let k = 1; k <= maxFlow; k++) {
+          cnf.addImp(flowVar(v, neighbors[0], k), outSum(k));
+          cnf.addImp(outSum(k), flowVar(v, neighbors[0], k));
+        }
+      }
+    }
+
+    // ---------- Flow conservation constraint ----------
+    // Non-root: outSum >= k ↔ inSum >= k-1 (each node produces 1 unit)
+    if (!isRoot) {
+      // outSum >= 1 always (each non-root produces at least 1)
+      cnf.addUnit(outSum(1));
+      
+      // For k >= 2: outSum >= k ↔ inSum >= k-1
+      for (let k = 2; k <= maxTotal; k++) {
+        cnf.addImp(inSum(k - 1), outSum(k));
+        cnf.addImp(outSum(k), inSum(k - 1));
       }
     }
   }
 
-  // ---------- Note on tree structure ----------
-  // The arborescence encoding ensures each color class is connected via a
-  // spanning tree (each non-root vertex has exactly one parent). However,
-  // extra edges within the same color could still be kept (forming a connected
-  // graph, not just a tree). The reduceToTree option documents this behavior.
-  //
-  // If stricter tree enforcement is needed (no extra edges), additional
-  // cardinality constraints could be added here. For now, the encoding
-  // naturally produces tree-like solutions due to the SAT solver's tendency
-  // to minimize assignments.
-  void reduceToTree; // Reserved for future stricter enforcement
+  // ---------- (5) Link flow to kept edges ----------
+  // Y_{uv} ↔ (F_{u→v,1} ∨ F_{v→u,1})
+  for (const [u, v] of undirectedEdges) {
+    const yVar = keepVar(u, v);
+    const fUV = flowVar(u, v, 1);
+    const fVU = flowVar(v, u, 1);
+    cnf.addClause([-yVar, fUV, fVU]);
+    cnf.addImp(fUV, yVar);
+    cnf.addImp(fVU, yVar);
+  }
+
+  void reduceToTree;
 
   return {
     numVars: cnf.numVars,
@@ -382,7 +382,7 @@ export function buildConnectivitySatCNF(
     dimacs: cnf.toDimacs(),
     meta: {
       colors,
-      maxLevel,
+      maxLevel: maxFlow,
       nodes: nodeList,
       edges: undirectedEdges,
       rootOfColor,

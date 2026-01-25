@@ -229,37 +229,28 @@ export function solveConnectivityGridColoring(
   let keptEdges: Edge[] = [];
   const wallEdges: Edge[] = [];
 
-  // If reduceToTree is enabled, we only keep edges that are part of the parent relationship
+  // If reduceToTree is enabled, we only keep edges with directed flow
   // Otherwise, we keep all edges marked as kept by the SAT solver
   if (reduceToTree) {
-    // For tree mode: only keep edges where one vertex is the parent of the other
-    // The parent relationship is encoded as P(v<-u,c=X) meaning u is parent of v in color X
+    // For tree mode: only keep edges where there is directed flow (F(u->v,>=1) or F(v->u,>=1))
+    // This creates a spanning tree structure
     for (const [uKey, vKey] of meta.edges) {
       const [uRow, uCol] = uKey.split(",").map(Number);
       const [vRow, vCol] = vKey.split(",").map(Number);
       const u: GridPoint = { row: uRow, col: uCol };
       const v: GridPoint = { row: vRow, col: vCol };
 
-      // Check if this edge is a parent-child relationship for any color
-      let isTreeEdge = false;
-      for (const c of activeColors) {
-        // Check P(v<-u,c=X) - u is parent of v
-        const pVarName1 = `P(${vKey}<-${uKey},c=${c})`;
-        const pVarId1 = varOf.get(pVarName1);
-        if (pVarId1 !== undefined && result.assignment.get(pVarId1)) {
-          isTreeEdge = true;
-          break;
-        }
-        // Check P(u<-v,c=X) - v is parent of u
-        const pVarName2 = `P(${uKey}<-${vKey},c=${c})`;
-        const pVarId2 = varOf.get(pVarName2);
-        if (pVarId2 !== undefined && result.assignment.get(pVarId2)) {
-          isTreeEdge = true;
-          break;
-        }
-      }
+      // Check if there is flow on this edge (in either direction)
+      // Flow variables: F(u->v,>=1) and F(v->u,>=1)
+      const flowUV = `F(${uKey}->${vKey},>=1)`;
+      const flowVU = `F(${vKey}->${uKey},>=1)`;
+      const flowUVId = varOf.get(flowUV);
+      const flowVUId = varOf.get(flowVU);
+      
+      const hasFlowUV = flowUVId !== undefined && result.assignment.get(flowUVId);
+      const hasFlowVU = flowVUId !== undefined && result.assignment.get(flowVUId);
 
-      if (isTreeEdge) {
+      if (hasFlowUV || hasFlowVU) {
         keptEdges.push({ u, v });
       } else {
         wallEdges.push({ u, v });

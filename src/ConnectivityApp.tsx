@@ -390,12 +390,12 @@ function ConnectivityApp() {
       <h1>Connectivity Solver</h1>
       <p className="description">
         Paint cells with colors and click Solve to find a valid coloring where each
-        color forms a connected component. This page uses an <strong>arborescence-style encoding</strong> with
-        level constraints for strong SAT propagation.
+        color forms a connected component. This page uses a <strong>single commodity flow encoding</strong> for
+        connectivity.
       </p>
       <p className="description" style={{ fontSize: "0.9em", fontStyle: "italic", marginTop: "-8px" }}>
         <strong>Simplified mode:</strong> Colors only - no roots or distance constraints.
-        Each color class is connected via a tree rooted at an automatically selected cell.
+        Each color class is connected via flow toward an automatically selected root.
         <a href="/" style={{ marginLeft: "8px" }}>→ Full solver with roots &amp; distances</a>
       </p>
 
