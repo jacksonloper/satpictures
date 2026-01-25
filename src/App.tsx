@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, PathlengthConstraintEditor, SketchpadGrid, SolutionGrid, downloadSolutionSVG, COLORS } from "./components";
+import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType, ColorRoots } from "./problem";
 import { HATCH_COLOR } from "./problem";
 import SolverWorker from "./problem/solver.worker?worker";
 import CadicalWorker from "./problem/cadical.worker?worker";
 import "./App.css";
 
-// View modes for the sketchpad panel
-type SketchpadViewMode = "colors" | "pathlength" | "roots";
+// Tool types - different tools for editing the same unified view
+type EditingTool = "colors" | "roots" | "distance";
 
 // Solution metadata - stored separately because solution may have different dimensions/type than current sketchpad
 interface SolutionMetadata {
@@ -105,15 +105,18 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [gridType, setGridType] = useState<GridType>("square");
   const [graphMode, setGraphMode] = useState(false);
-  // Pathlength constraints state
+  // Pathlength constraints state - now a single constraint (simplified)
   const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
   const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
-  // Sketchpad view mode - colors (normal), pathlength (constraint editor), or roots (set tree roots)
-  const [sketchpadViewMode, setSketchpadViewMode] = useState<SketchpadViewMode>("colors");
+  // Editing tool - controls what action clicking on a cell does (all tools see the same view)
+  const [editingTool, setEditingTool] = useState<EditingTool>("colors");
   // Selected constraint for showing distance levels in solution viewer (null = don't show levels)
   const [selectedLevelConstraintId, setSelectedLevelConstraintId] = useState<string | null>(null);
   // Color roots - maps color index (as string) to the root cell for that color's tree
   const [colorRoots, setColorRoots] = useState<ColorRoots>({});
+  // Distance input state for distance tool
+  const [distanceInput, setDistanceInput] = useState<string>("");
+  const [pendingDistanceCell, setPendingDistanceCell] = useState<{ row: number; col: number } | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -128,51 +131,184 @@ function App() {
     };
   }, []);
 
+  // Auto-manage roots when colors change:
+  // 7a. Every color used must have a root as soon as it's assigned to at least one tile
+  // 7b. Root must go out of existence if color of its tile changes (and auto-place new root if tiles remain)
+  useEffect(() => {
+    // Find all used colors (non-null, non-hatch) from grid
+    const usedColors = new Set<number>();
+    for (const row of grid.colors) {
+      for (const cell of row) {
+        if (cell !== null && cell !== HATCH_COLOR && cell >= 0) {
+          usedColors.add(cell);
+        }
+      }
+    }
+
+    setColorRoots((prevRoots) => {
+      const newRoots = { ...prevRoots };
+      let changed = false;
+
+      // Remove roots for colors no longer used
+      for (const colorStr of Object.keys(newRoots)) {
+        const color = parseInt(colorStr, 10);
+        if (!usedColors.has(color)) {
+          delete newRoots[colorStr];
+          changed = true;
+        }
+      }
+
+      // Check if existing roots are still valid (root cell still has that color)
+      for (const colorStr of Object.keys(newRoots)) {
+        const color = parseInt(colorStr, 10);
+        const root = newRoots[colorStr];
+        if (root && grid.colors[root.row]?.[root.col] !== color) {
+          // Root's cell no longer has this color - find a new cell with this color
+          let foundNew = false;
+          for (let r = 0; r < grid.height && !foundNew; r++) {
+            for (let c = 0; c < grid.width && !foundNew; c++) {
+              if (grid.colors[r][c] === color) {
+                newRoots[colorStr] = { row: r, col: c };
+                foundNew = true;
+                changed = true;
+              }
+            }
+          }
+          if (!foundNew) {
+            // No cells with this color exist - remove root
+            delete newRoots[colorStr];
+            changed = true;
+          }
+        }
+      }
+
+      // Add roots for colors that are used but don't have a root yet
+      for (const color of usedColors) {
+        if (!newRoots[String(color)]) {
+          // Find first cell with this color
+          for (let r = 0; r < grid.height; r++) {
+            for (let c = 0; c < grid.width; c++) {
+              if (grid.colors[r][c] === color) {
+                newRoots[String(color)] = { row: r, col: c };
+                changed = true;
+                break;
+              }
+            }
+            if (newRoots[String(color)]) break;
+          }
+        }
+      }
+
+      return changed ? newRoots : prevRoots;
+    });
+  }, [grid.colors, grid.width, grid.height]);
+
+  // Unified cell click handler - behavior depends on current tool
   const handleCellClick = useCallback(
     (row: number, col: number) => {
-      setGrid((prev) => {
-        const newColors = prev.colors.map((r) => [...r]);
-        newColors[row][col] = selectedColor;
-        return { ...prev, colors: newColors };
-      });
-    },
-    [selectedColor]
-  );
-
-  const handleCellDrag = useCallback(
-    (row: number, col: number) => {
-      setGrid((prev) => {
-        const newColors = prev.colors.map((r) => [...r]);
-        newColors[row][col] = selectedColor;
-        return { ...prev, colors: newColors };
-      });
-    },
-    [selectedColor]
-  );
-
-  // Handle clicking a cell in "roots" mode to set it as the root for its color
-  const handleRootCellClick = useCallback(
-    (row: number, col: number) => {
-      const cellColor = grid.colors[row][col];
-      // Only allow setting roots for non-null, non-hatch colors
-      if (cellColor !== null && cellColor !== HATCH_COLOR && cellColor >= 0) {
-        setColorRoots((prev) => ({
-          ...prev,
-          [String(cellColor)]: { row, col },
-        }));
+      if (editingTool === "colors") {
+        setGrid((prev) => {
+          const newColors = prev.colors.map((r) => [...r]);
+          newColors[row][col] = selectedColor;
+          return { ...prev, colors: newColors };
+        });
+      } else if (editingTool === "roots") {
+        const cellColor = grid.colors[row][col];
+        // Only allow setting roots for non-null, non-hatch colors
+        if (cellColor !== null && cellColor !== HATCH_COLOR && cellColor >= 0) {
+          setColorRoots((prev) => ({
+            ...prev,
+            [String(cellColor)]: { row, col },
+          }));
+        }
+      } else if (editingTool === "distance") {
+        // Open distance input dialog for this cell
+        const cellKey = `${row},${col}`;
+        // Get single constraint or create one
+        const constraint = pathlengthConstraints[0];
+        const existingDistance = constraint?.minDistances[cellKey];
+        setPendingDistanceCell({ row, col });
+        setDistanceInput(existingDistance ? existingDistance.toString() : "");
       }
     },
-    [grid.colors]
+    [editingTool, selectedColor, grid.colors, pathlengthConstraints]
   );
 
-  // Clear root for a specific color
-  const handleClearRoot = useCallback((color: number) => {
-    setColorRoots((prev) => {
-      const newRoots = { ...prev };
-      delete newRoots[String(color)];
-      return newRoots;
-    });
-  }, []);
+  // Cell drag is only for colors tool
+  const handleCellDrag = useCallback(
+    (row: number, col: number) => {
+      if (editingTool === "colors") {
+        setGrid((prev) => {
+          const newColors = prev.colors.map((r) => [...r]);
+          newColors[row][col] = selectedColor;
+          return { ...prev, colors: newColors };
+        });
+      }
+    },
+    [editingTool, selectedColor]
+  );
+
+  // Handle distance input submission
+  const handleDistanceSubmit = useCallback(() => {
+    if (!pendingDistanceCell) return;
+
+    const cellKey = `${pendingDistanceCell.row},${pendingDistanceCell.col}`;
+    const parsed = parseInt(distanceInput, 10);
+
+    // Ensure we have a constraint
+    let constraint = pathlengthConstraints[0];
+    if (!constraint) {
+      constraint = {
+        id: generateConstraintId(),
+        root: null,
+        minDistances: {},
+      };
+    }
+
+    if (!isNaN(parsed) && parsed > 0) {
+      // Valid positive integer - add/update the distance
+      const updatedConstraint = {
+        ...constraint,
+        minDistances: {
+          ...constraint.minDistances,
+          [cellKey]: parsed,
+        },
+      };
+      setPathlengthConstraints([updatedConstraint]);
+      setSelectedConstraintId(updatedConstraint.id);
+    } else if (distanceInput === "" || distanceInput === "0") {
+      // Empty or zero - remove the distance constraint
+      const newDistances = { ...constraint.minDistances };
+      delete newDistances[cellKey];
+      const updatedConstraint = {
+        ...constraint,
+        minDistances: newDistances,
+      };
+      if (Object.keys(newDistances).length > 0 || constraint.root) {
+        setPathlengthConstraints([updatedConstraint]);
+      } else {
+        // No more constraints, can remove it entirely
+        setPathlengthConstraints([]);
+        setSelectedConstraintId(null);
+      }
+    }
+    // Otherwise (non-numeric input), just close without saving
+    
+    setPendingDistanceCell(null);
+    setDistanceInput("");
+  }, [pendingDistanceCell, distanceInput, pathlengthConstraints]);
+
+  const handleDistanceKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        handleDistanceSubmit();
+      } else if (e.key === "Escape") {
+        setPendingDistanceCell(null);
+        setDistanceInput("");
+      }
+    },
+    [handleDistanceSubmit]
+  );
 
   const handleWidthChange = useCallback((width: number) => {
     const clampedWidth = Math.min(Math.max(width, 2), 20);
@@ -444,14 +580,6 @@ function App() {
               📝 Sketchpad
             </h2>
             
-            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
-              {sketchpadViewMode === "colors" 
-                ? "Click cells to paint colors. Click Solve to generate a solution."
-                : sketchpadViewMode === "roots"
-                ? "Click a colored cell to set it as the root for that color's tree. Each color needs exactly one root."
-                : "Add pathlength lower bound constraints. Each constraint specifies minimum distances from the color's root."}
-            </p>
-            
             {/* Sketchpad Controls */}
             <Controls
               gridWidth={gridWidth}
@@ -480,283 +608,171 @@ function App() {
               onSelectedConstraintIdChange={setSelectedConstraintId}
             />
 
-            {/* View Mode Toggle - underneath upload colors */}
-            <div style={{ display: "flex", gap: "8px", marginTop: "16px", marginBottom: "12px", flexWrap: "wrap" }}>
-              <button
-                onClick={() => setSketchpadViewMode("colors")}
-                style={{
-                  padding: "6px 12px",
-                  backgroundColor: sketchpadViewMode === "colors" ? "#3498db" : "#bdc3c7",
-                  color: sketchpadViewMode === "colors" ? "white" : "#2c3e50",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontWeight: sketchpadViewMode === "colors" ? "bold" : "normal",
-                }}
-              >
-                🎨 Colors
-              </button>
-              <button
-                onClick={() => setSketchpadViewMode("roots")}
-                style={{
-                  padding: "6px 12px",
-                  backgroundColor: sketchpadViewMode === "roots" ? "#e74c3c" : "#bdc3c7",
-                  color: sketchpadViewMode === "roots" ? "white" : "#2c3e50",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontWeight: sketchpadViewMode === "roots" ? "bold" : "normal",
-                }}
-              >
-                🌳 Set Roots ({Object.keys(colorRoots).length})
-              </button>
-              <button
-                onClick={() => setSketchpadViewMode("pathlength")}
-                style={{
-                  padding: "6px 12px",
-                  backgroundColor: sketchpadViewMode === "pathlength" ? "#3498db" : "#bdc3c7",
-                  color: sketchpadViewMode === "pathlength" ? "white" : "#2c3e50",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontWeight: sketchpadViewMode === "pathlength" ? "bold" : "normal",
-                }}
-              >
-                📏 Pathlength Constraints ({pathlengthConstraints.length})
-              </button>
+            {/* Unified Grid - always shows colors, roots, and distances */}
+            <div style={{ marginTop: "16px" }}>
+              <SketchpadGrid
+                grid={grid}
+                solution={null}
+                selectedColor={editingTool === "colors" ? selectedColor : null}
+                onCellClick={handleCellClick}
+                onCellDrag={handleCellDrag}
+                cellSize={40}
+                gridType={gridType}
+                colorRoots={colorRoots}
+                distanceConstraint={pathlengthConstraints[0]}
+              />
             </div>
 
-            {sketchpadViewMode === "colors" ? (
-              <>
-                <h3 style={{ marginTop: "16px" }}>Colors</h3>
-                <ColorPalette
-                  selectedColor={selectedColor}
-                  onColorSelect={setSelectedColor}
-                  numColors={numColors}
-                />
-
-                {/* Sketchpad Grid */}
-                <div style={{ marginTop: "16px" }}>
-                  <SketchpadGrid
-                    grid={grid}
-                    solution={null}
-                    selectedColor={selectedColor}
-                    onCellClick={handleCellClick}
-                    onCellDrag={handleCellDrag}
-                    cellSize={40}
-                    gridType={gridType}
-                    colorRoots={colorRoots}
-                  />
+            {/* Distance input dialog - shown when distance tool has a pending cell */}
+            {pendingDistanceCell && (
+              <div
+                style={{
+                  padding: "16px",
+                  marginTop: "12px",
+                  backgroundColor: "#fff3cd",
+                  borderRadius: "8px",
+                  border: "2px solid #ffc107",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                }}
+              >
+                <div style={{ fontWeight: "bold", fontSize: "14px", marginBottom: "8px" }}>
+                  Set minimum distance for cell ({pendingDistanceCell.row}, {pendingDistanceCell.col})
                 </div>
-              </>
-            ) : sketchpadViewMode === "roots" ? (
-              <>
-                <h3 style={{ marginTop: "16px" }}>Tree Roots</h3>
-                <p style={{ fontSize: "13px", color: "#666", marginBottom: "12px" }}>
-                  Each non-hatch color must have exactly one root cell marked. 
-                  Click on a colored cell to set it as that color's root.
-                </p>
-                
-                {/* Show current roots status */}
-                {(() => {
-                  // Get all used colors (non-null, non-hatch) from grid
-                  const usedColors = new Set<number>();
-                  for (const row of grid.colors) {
-                    for (const cell of row) {
-                      if (cell !== null && cell !== HATCH_COLOR && cell >= 0) {
-                        usedColors.add(cell);
-                      }
-                    }
-                  }
-                  const usedColorsArr = [...usedColors].sort((a, b) => a - b);
-                  
-                  if (usedColorsArr.length === 0) {
-                    return (
-                      <p style={{ color: "#7f8c8d", fontStyle: "italic" }}>
-                        No colors have been painted yet. Go to Colors mode to paint some cells first.
-                      </p>
-                    );
-                  }
-
-                  return (
-                    <div style={{ marginBottom: "12px" }}>
-                      {usedColorsArr.map(color => {
-                        const root = colorRoots[String(color)];
-                        const hasRoot = !!root;
-                        return (
-                          <div
-                            key={color}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              marginBottom: "6px",
-                              padding: "6px 8px",
-                              backgroundColor: hasRoot ? "#d4edda" : "#f8d7da",
-                              borderRadius: "4px",
-                              border: `1px solid ${hasRoot ? "#c3e6cb" : "#f5c6cb"}`,
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: "20px",
-                                height: "20px",
-                                backgroundColor: COLORS[color % COLORS.length],
-                                borderRadius: "4px",
-                              }}
-                            />
-                            <span style={{ fontSize: "13px" }}>
-                              Color {color + 1}:
-                            </span>
-                            {hasRoot ? (
-                              <>
-                                <span style={{ fontSize: "13px", color: "#155724" }}>
-                                  Root at ({root.row}, {root.col}) ✓
-                                </span>
-                                <button
-                                  onClick={() => handleClearRoot(color)}
-                                  style={{
-                                    marginLeft: "auto",
-                                    padding: "2px 6px",
-                                    backgroundColor: "#e74c3c",
-                                    color: "white",
-                                    border: "none",
-                                    borderRadius: "3px",
-                                    cursor: "pointer",
-                                    fontSize: "11px",
-                                  }}
-                                >
-                                  Clear
-                                </button>
-                              </>
-                            ) : (
-                              <span style={{ fontSize: "13px", color: "#721c24" }}>
-                                No root set ✗
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-                
-                {/* Grid for setting roots */}
-                <div style={{ marginTop: "16px" }}>
-                  <SketchpadGrid
-                    grid={grid}
-                    solution={null}
-                    selectedColor={null}
-                    onCellClick={handleRootCellClick}
-                    onCellDrag={() => {}}
-                    cellSize={40}
-                    gridType={gridType}
-                    colorRoots={colorRoots}
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                <h3 style={{ marginTop: "16px" }}>Pathlength Constraints</h3>
-                
-                {/* Constraint List and Management */}
-                <div style={{ marginBottom: "12px" }}>
-                  <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-                    <button
-                      onClick={() => {
-                        const newConstraint: PathlengthConstraint = {
-                          id: generateConstraintId(),
-                          root: null,
-                          minDistances: {},
-                        };
-                        setPathlengthConstraints([...pathlengthConstraints, newConstraint]);
-                        setSelectedConstraintId(newConstraint.id);
-                      }}
-                      style={{
-                        padding: "6px 12px",
-                        backgroundColor: "#27ae60",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        fontSize: "13px",
-                      }}
-                    >
-                      + Add Constraint
-                    </button>
-                    {selectedConstraintId && (
-                      <button
-                        onClick={() => {
-                          const remainingConstraints = pathlengthConstraints.filter(c => c.id !== selectedConstraintId);
-                          setPathlengthConstraints(remainingConstraints);
-                          setSelectedConstraintId(
-                            remainingConstraints.length > 0
-                              ? remainingConstraints[0].id
-                              : null
-                          );
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#e74c3c",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "13px",
-                        }}
-                      >
-                        Delete Selected
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Constraint selector */}
-                  {pathlengthConstraints.length > 0 && (
-                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                      {pathlengthConstraints.map((c, idx) => (
-                        <button
-                          key={c.id}
-                          onClick={() => setSelectedConstraintId(c.id)}
-                          style={{
-                            padding: "4px 10px",
-                            backgroundColor: selectedConstraintId === c.id ? "#3498db" : "#ecf0f1",
-                            color: selectedConstraintId === c.id ? "white" : "#2c3e50",
-                            border: "1px solid #bdc3c7",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                          }}
-                        >
-                          #{idx + 1}
-                          {c.root && ` (${c.root.row},${c.root.col})`}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Constraint Editor */}
-                {selectedConstraintId && pathlengthConstraints.find(c => c.id === selectedConstraintId) && (
-                  <PathlengthConstraintEditor
-                    grid={grid}
-                    gridType={gridType}
-                    constraint={pathlengthConstraints.find(c => c.id === selectedConstraintId)!}
-                    onConstraintChange={(updated) => {
-                      setPathlengthConstraints(
-                        pathlengthConstraints.map(c => c.id === updated.id ? updated : c)
-                      );
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={distanceInput}
+                    onChange={(e) => setDistanceInput(e.target.value)}
+                    onKeyDown={handleDistanceKeyDown}
+                    autoFocus
+                    style={{
+                      width: "80px",
+                      padding: "8px 12px",
+                      borderRadius: "4px",
+                      border: "2px solid #3498db",
+                      fontSize: "16px",
                     }}
-                    cellSize={40}
+                    placeholder="e.g. 5"
                   />
-                )}
-
-                {pathlengthConstraints.length === 0 && (
-                  <p style={{ color: "#7f8c8d", fontStyle: "italic" }}>
-                    No pathlength constraints yet. Click "Add Constraint" to create one.
-                  </p>
-                )}
-              </>
+                  <button
+                    onClick={handleDistanceSubmit}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#27ae60",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPendingDistanceCell(null);
+                      setDistanceInput("");
+                    }}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#95a5a6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div style={{ fontSize: "12px", color: "#7f8c8d", marginTop: "8px" }}>
+                  Enter a positive integer for minimum distance, or 0/empty to remove constraint.
+                </div>
+              </div>
             )}
+
+            {/* Tool Selector - below canvas */}
+            <div style={{ marginTop: "16px", padding: "12px", backgroundColor: "#ecf0f1", borderRadius: "6px" }}>
+              <div style={{ fontSize: "13px", color: "#7f8c8d", marginBottom: "8px" }}>
+                <strong>Tool:</strong>{" "}
+                {editingTool === "colors" && "Click cells to paint colors"}
+                {editingTool === "roots" && "Click a colored cell to set its root"}
+                {editingTool === "distance" && "Click a cell to set minimum distance from root"}
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  onClick={() => setEditingTool("colors")}
+                  style={{
+                    padding: "6px 12px",
+                    backgroundColor: editingTool === "colors" ? "#3498db" : "#bdc3c7",
+                    color: editingTool === "colors" ? "white" : "#2c3e50",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontWeight: editingTool === "colors" ? "bold" : "normal",
+                  }}
+                >
+                  🎨 Colors
+                </button>
+                <button
+                  onClick={() => setEditingTool("roots")}
+                  style={{
+                    padding: "6px 12px",
+                    backgroundColor: editingTool === "roots" ? "#e74c3c" : "#bdc3c7",
+                    color: editingTool === "roots" ? "white" : "#2c3e50",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontWeight: editingTool === "roots" ? "bold" : "normal",
+                  }}
+                >
+                  🌳 Roots
+                </button>
+                <button
+                  onClick={() => setEditingTool("distance")}
+                  style={{
+                    padding: "6px 12px",
+                    backgroundColor: editingTool === "distance" ? "#9b59b6" : "#bdc3c7",
+                    color: editingTool === "distance" ? "white" : "#2c3e50",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontWeight: editingTool === "distance" ? "bold" : "normal",
+                  }}
+                >
+                  📏 Distance
+                </button>
+              </div>
+
+              {/* Tool-specific controls below selector */}
+              {editingTool === "colors" && (
+                <div style={{ marginTop: "12px" }}>
+                  <ColorPalette
+                    selectedColor={selectedColor}
+                    onColorSelect={setSelectedColor}
+                    numColors={numColors}
+                  />
+                </div>
+              )}
+
+              {editingTool === "roots" && (
+                <div style={{ marginTop: "12px", fontSize: "12px", color: "#7f8c8d" }}>
+                  Roots are auto-assigned when you paint a color. Click any colored cell to move its root.
+                </div>
+              )}
+
+              {editingTool === "distance" && (
+                <div style={{ marginTop: "12px", fontSize: "12px", color: "#7f8c8d" }}>
+                  {pathlengthConstraints.length > 0 && pathlengthConstraints[0].minDistances
+                    ? `${Object.keys(pathlengthConstraints[0].minDistances).length} distance constraint(s) set`
+                    : "No distance constraints set. Click a cell to add one."}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

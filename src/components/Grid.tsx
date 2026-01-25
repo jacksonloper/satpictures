@@ -67,6 +67,7 @@ interface GridProps {
   selectedConstraintId?: string | null;
   graphMode?: boolean;
   colorRoots?: ColorRoots;
+  distanceConstraint?: PathlengthConstraint;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -82,6 +83,7 @@ export const Grid: React.FC<GridProps> = ({
   selectedConstraintId = null,
   graphMode = false,
   colorRoots = {},
+  distanceConstraint,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -112,6 +114,18 @@ export const Grid: React.FC<GridProps> = ({
       return solution.distanceLevels[selectedConstraintId][row][col];
     },
     [showDistanceLevels, selectedConstraintId, solution]
+  );
+
+  // Helper to get min distance constraint for a cell (from sketchpad constraint)
+  const getMinDistanceConstraint = useCallback(
+    (row: number, col: number): number | null => {
+      if (!distanceConstraint?.minDistances) {
+        return null;
+      }
+      const cellKey = `${row},${col}`;
+      return distanceConstraint.minDistances[cellKey] ?? null;
+    },
+    [distanceConstraint]
   );
 
   // Create a set of kept edge keys for quick lookup
@@ -492,6 +506,7 @@ export const Grid: React.FC<GridProps> = ({
       isRoot: boolean;
       walls: { x1: number; y1: number; x2: number; y2: number }[];
       reachLevel: number | null;
+      minDistConstraint: number | null;
     }[] = [];
     
     for (let row = 0; row < grid.height; row++) {
@@ -539,8 +554,10 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
         
-        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, isRoot, walls, reachLevel });
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, isRoot, walls, reachLevel, minDistConstraint });
       }
     }
     
@@ -643,6 +660,37 @@ export const Grid: React.FC<GridProps> = ({
                   style={{ pointerEvents: "none" }}
                 >
                   R
+                </text>
+              </g>
+            )
+          )}
+          
+          {/* Fifth pass: render min distance constraint markers */}
+          {hexData.map(({ row, col, cx, cy, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={cx - cellSize * 0.25}
+                  y={cy - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
                 </text>
               </g>
             )
@@ -1627,6 +1675,8 @@ export const Grid: React.FC<GridProps> = ({
           
           // Get distance level if available
           const reachLevel = getDistanceLevel(row, col);
+          // Get min distance constraint if available
+          const minDistConstraint = getMinDistanceConstraint(row, col);
 
           return (
             <div
@@ -1652,9 +1702,9 @@ export const Grid: React.FC<GridProps> = ({
                   ? `${wallThickness}px solid ${WALL_COLOR}`
                   : "none",
                 // Center content for reachability level or root indicator
-                display: (reachLevel !== null || isRoot) ? "flex" : undefined,
-                alignItems: (reachLevel !== null || isRoot) ? "center" : undefined,
-                justifyContent: (reachLevel !== null || isRoot) ? "center" : undefined,
+                display: (reachLevel !== null || isRoot || minDistConstraint !== null) ? "flex" : undefined,
+                alignItems: (reachLevel !== null || isRoot || minDistConstraint !== null) ? "center" : undefined,
+                justifyContent: (reachLevel !== null || isRoot || minDistConstraint !== null) ? "center" : undefined,
               }}
             >
               {reachLevel !== null && (
@@ -1685,6 +1735,25 @@ export const Grid: React.FC<GridProps> = ({
                   color: "#2c3e50",
                 }}>
                   R
+                </div>
+              )}
+              {/* Show min distance constraint marker when not showing reach level or root */}
+              {minDistConstraint !== null && reachLevel === null && !isRoot && (
+                <div style={{
+                  minWidth: cellSize * 0.5,
+                  height: cellSize * 0.4,
+                  padding: "2px 4px",
+                  borderRadius: "4px",
+                  backgroundColor: "rgba(231, 76, 60, 0.85)",
+                  border: "2px solid white",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "11px",
+                  fontWeight: "bold",
+                  color: "white",
+                }}>
+                  ≥{minDistConstraint}
                 </div>
               )}
             </div>
