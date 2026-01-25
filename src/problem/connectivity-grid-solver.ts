@@ -226,24 +226,63 @@ export function solveConnectivityGridColoring(
   }
 
   // Extract kept edges from the solution (only edges between non-hatch cells)
-  const keptEdges: Edge[] = [];
+  let keptEdges: Edge[] = [];
   const wallEdges: Edge[] = [];
 
-  for (const [uKey, vKey] of meta.edges) {
-    const [uRow, uCol] = uKey.split(",").map(Number);
-    const [vRow, vCol] = vKey.split(",").map(Number);
-    const u: GridPoint = { row: uRow, col: uCol };
-    const v: GridPoint = { row: vRow, col: vCol };
+  // If reduceToTree is enabled, we only keep edges that are part of the parent relationship
+  // Otherwise, we keep all edges marked as kept by the SAT solver
+  if (reduceToTree) {
+    // For tree mode: only keep edges where one vertex is the parent of the other
+    // The parent relationship is encoded as P(v<-u,c=X) meaning u is parent of v in color X
+    for (const [uKey, vKey] of meta.edges) {
+      const [uRow, uCol] = uKey.split(",").map(Number);
+      const [vRow, vCol] = vKey.split(",").map(Number);
+      const u: GridPoint = { row: uRow, col: uCol };
+      const v: GridPoint = { row: vRow, col: vCol };
 
-    // Check the keep variable
-    const keepKey = uKey < vKey ? `${uKey}--${vKey}` : `${vKey}--${uKey}`;
-    const keepVarName = `Y(${keepKey})`;
-    const keepVarId = varOf.get(keepVarName);
+      // Check if this edge is a parent-child relationship for any color
+      let isTreeEdge = false;
+      for (const c of activeColors) {
+        // Check P(v<-u,c=X) - u is parent of v
+        const pVarName1 = `P(${vKey}<-${uKey},c=${c})`;
+        const pVarId1 = varOf.get(pVarName1);
+        if (pVarId1 !== undefined && result.assignment.get(pVarId1)) {
+          isTreeEdge = true;
+          break;
+        }
+        // Check P(u<-v,c=X) - v is parent of u
+        const pVarName2 = `P(${uKey}<-${vKey},c=${c})`;
+        const pVarId2 = varOf.get(pVarName2);
+        if (pVarId2 !== undefined && result.assignment.get(pVarId2)) {
+          isTreeEdge = true;
+          break;
+        }
+      }
 
-    if (keepVarId !== undefined && result.assignment.get(keepVarId)) {
-      keptEdges.push({ u, v });
-    } else {
-      wallEdges.push({ u, v });
+      if (isTreeEdge) {
+        keptEdges.push({ u, v });
+      } else {
+        wallEdges.push({ u, v });
+      }
+    }
+  } else {
+    // Normal mode: keep all edges marked as kept
+    for (const [uKey, vKey] of meta.edges) {
+      const [uRow, uCol] = uKey.split(",").map(Number);
+      const [vRow, vCol] = vKey.split(",").map(Number);
+      const u: GridPoint = { row: uRow, col: uCol };
+      const v: GridPoint = { row: vRow, col: vCol };
+
+      // Check the keep variable
+      const keepKey = uKey < vKey ? `${uKey}--${vKey}` : `${vKey}--${uKey}`;
+      const keepVarName = `Y(${keepKey})`;
+      const keepVarId = varOf.get(keepVarName);
+
+      if (keepVarId !== undefined && result.assignment.get(keepVarId)) {
+        keptEdges.push({ u, v });
+      } else {
+        wallEdges.push({ u, v });
+      }
     }
   }
 
@@ -271,11 +310,68 @@ export function solveConnectivityGridColoring(
     }
   }
 
+  // Compute distance levels via BFS from each auto-selected root
+  // This shows distance from each color's tree root in the solution viewer
+  let distanceLevels: Record<string, number[][]> | null = null;
+  const colorRootsList: { colorKey: string; root: GridPoint }[] = [];
+
+  // Get roots from meta.rootOfColor (auto-selected roots)
+  for (const [colorStr, rootKey] of Object.entries(meta.rootOfColor)) {
+    const [rootRow, rootCol] = rootKey.split(",").map(Number);
+    colorRootsList.push({ 
+      colorKey: `color_${colorStr}`, 
+      root: { row: rootRow, col: rootCol } 
+    });
+  }
+
+  if (colorRootsList.length > 0) {
+    distanceLevels = {};
+
+    // Build adjacency from kept edges
+    const adjacency = new Map<string, GridPoint[]>();
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        adjacency.set(pointKey(row, col), []);
+      }
+    }
+    for (const edge of keptEdges) {
+      const uKey = pointKey(edge.u.row, edge.u.col);
+      const vKey = pointKey(edge.v.row, edge.v.col);
+      adjacency.get(uKey)!.push(edge.v);
+      adjacency.get(vKey)!.push(edge.u);
+    }
+
+    // BFS from each color root
+    for (const { colorKey, root } of colorRootsList) {
+      const levels = Array.from({ length: height }, () =>
+        Array.from({ length: width }, () => -1)
+      );
+
+      levels[root.row][root.col] = 0;
+      const queue: GridPoint[] = [root];
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const currentLevel = levels[current.row][current.col];
+        const neighbors = adjacency.get(pointKey(current.row, current.col))!;
+
+        for (const neighbor of neighbors) {
+          if (levels[neighbor.row][neighbor.col] === -1) {
+            levels[neighbor.row][neighbor.col] = currentLevel + 1;
+            queue.push(neighbor);
+          }
+        }
+      }
+
+      distanceLevels[colorKey] = levels;
+    }
+  }
+
   return {
     keptEdges,
     wallEdges,
     assignedColors,
-    distanceLevels: null,
+    distanceLevels,
     stats: {
       numVars: cnfResult.numVars,
       numClauses: cnfResult.clauses.length,

@@ -45,6 +45,8 @@ function ConnectivityApp() {
   const [graphMode, setGraphMode] = useState(false);
   const [satStats, setSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [reduceToTree, setReduceToTree] = useState(false);
+  // Selected constraint for showing distance levels in solution viewer (null = don't show levels)
+  const [selectedLevelConstraintId, setSelectedLevelConstraintId] = useState<string | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -640,6 +642,55 @@ function ConnectivityApp() {
                   >
                     Download CSV
                   </button>
+                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && !graphMode && (
+                    <select
+                      value={selectedLevelConstraintId ?? ""}
+                      onChange={(e) => setSelectedLevelConstraintId(e.target.value || null)}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: selectedLevelConstraintId ? "#27ae60" : "#95a5a6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      <option value="">Hide Levels</option>
+                      {Object.keys(solution.distanceLevels).map((levelKey) => {
+                        // Keys are like "color_0", "color_1", etc. for color roots
+                        const colorMatch = levelKey.match(/^color_(\d+)$/);
+                        if (colorMatch) {
+                          const colorIndex = parseInt(colorMatch[1], 10);
+                          // Find the root from distanceLevels (it's at level 0)
+                          const levels = solution.distanceLevels![levelKey];
+                          let rootInfo = "";
+                          for (let r = 0; r < levels.length; r++) {
+                            for (let c = 0; c < levels[r].length; c++) {
+                              if (levels[r][c] === 0) {
+                                rootInfo = ` (root: ${r},${c})`;
+                                break;
+                              }
+                            }
+                            if (rootInfo) break;
+                          }
+                          const colorNames = ["Red", "Blue", "Green", "Orange", "Purple", "Cyan"];
+                          const colorName = colorNames[colorIndex] ?? `Color ${colorIndex}`;
+                          return (
+                            <option key={levelKey} value={levelKey}>
+                              {colorName}{rootInfo}
+                            </option>
+                          );
+                        }
+                        // Fallback for old-style constraint IDs
+                        return (
+                          <option key={levelKey} value={levelKey}>
+                            Root {levelKey}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  )}
                   <button
                     onClick={() => setGraphMode(!graphMode)}
                     style={{
@@ -663,6 +714,8 @@ function ConnectivityApp() {
                     solution={solution}
                     cellSize={40}
                     gridType={solutionMetadata.gridType}
+                    showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
+                    selectedConstraintId={selectedLevelConstraintId}
                     graphMode={graphMode}
                   />
                 </div>
