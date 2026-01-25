@@ -597,6 +597,7 @@ function App() {
       <p className="description" style={{ fontSize: "0.9em", fontStyle: "italic", marginTop: "-8px" }}>
         <strong>Purpose:</strong> While purpose-built maze software can solve these problems more efficiently,
         this project explores how far modern SAT solvers have come by encoding the problem as pure logical constraints.
+        <a href="/connectivity.html" style={{ marginLeft: "8px" }}>→ Simplified connectivity solver (colors only)</a>
       </p>
 
       {/* Main content area with two panels */}
