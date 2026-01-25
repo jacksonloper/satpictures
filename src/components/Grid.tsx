@@ -286,12 +286,30 @@ export const Grid: React.FC<GridProps> = ({
       nodeKey2: string;
       // Edge index for adjacency lookup
       edgeIndex: number;
-      // For curved edges: the vertex the curve should pass through and the control point
-      // The curve will be rendered as a quadratic Bézier that passes through the vertex
-      curveThrough?: { vx: number; vy: number }; // vertex coordinates
+      // Trim info: how much to trim from each end for corner curves
+      // trimStart/trimEnd are distances from P1/P2 respectively
+      trimStart?: number;
+      trimEnd?: number;
     }
     
     const edges: EdgeData[] = [];
+    
+    // Corner curve data: quadratic Bézier from trim point A to trim point B with control at node
+    interface CornerCurve {
+      // Start point (trimmed end of first edge)
+      ax: number;
+      ay: number;
+      // End point (trimmed end of second edge)  
+      bx: number;
+      by: number;
+      // Control point (the node/vertex)
+      cx: number;
+      cy: number;
+      // Color for the curve
+      color: string;
+    }
+    
+    const cornerCurves: CornerCurve[] = [];
     
     // Helper to check if an edge is diagonal (different row AND different col)
     const isDiagonalEdge = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
@@ -346,20 +364,26 @@ export const Grid: React.FC<GridProps> = ({
       nodeEdges.get(edge.nodeKey2)!.push(i);
     }
     
-    // For nodes with 2+ edges, find the pair closest to 180° and curve them
-    // This creates smoother visual paths through vertices
+    // For nodes with 2+ edges, find the pair closest to 180° and create corner curves
+    // This creates smoother visual paths through vertices by:
+    // 1. Trimming the two edges back from the node
+    // 2. Drawing a corner curve between the trimmed points with node as control point
+    const TRIM_RATIO = 0.3; // Trim 30% of edge length from the node end
+    
     for (const [nodeKey, edgeIndices] of nodeEdges.entries()) {
       if (edgeIndices.length < 2) continue;
       
       const node = nodeMap.get(nodeKey);
       if (!node) continue;
       
-      // Compute angle for each edge from this node's perspective
+      // Compute angle and length for each edge from this node's perspective
       interface EdgeAngle {
         edgeIndex: number;
         angle: number; // angle in radians, relative to positive x-axis
         otherEndX: number;
         otherEndY: number;
+        length: number;
+        isNode1: boolean; // true if this node is nodeKey1 of the edge
       }
       
       const edgeAngles: EdgeAngle[] = edgeIndices.map(idx => {
@@ -371,7 +395,8 @@ export const Grid: React.FC<GridProps> = ({
         const dx = otherEndX - node.cx;
         const dy = otherEndY - node.cy;
         const angle = Math.atan2(dy, dx);
-        return { edgeIndex: idx, angle, otherEndX, otherEndY };
+        const length = Math.sqrt(dx * dx + dy * dy);
+        return { edgeIndex: idx, angle, otherEndX, otherEndY, length, isNode1 };
       });
       
       // Find the pair of edges with angles closest to 180° apart (straightest path)
@@ -394,23 +419,56 @@ export const Grid: React.FC<GridProps> = ({
         }
       }
       
-      // Always curve the best pair of edges (no angle threshold)
-      // This ensures smooth transitions even at right angles
+      // Create corner curve for the best pair
       if (bestPair) {
         const [ea1, ea2] = bestPair;
         const edge1 = edges[ea1.edgeIndex];
         const edge2 = edges[ea2.edgeIndex];
         
-        // Mark each edge to curve through this vertex
-        // The renderer will compute the actual control point to make the curve pass through
-        // Only set if edge doesn't already have a curve point
-        // (another node may have already curved this edge)
-        if (!edge1.curveThrough) {
-          edge1.curveThrough = { vx: node.cx, vy: node.cy };
+        // Calculate trim distances (proportional to edge length)
+        const trim1 = ea1.length * TRIM_RATIO;
+        const trim2 = ea2.length * TRIM_RATIO;
+        
+        // Record trims on the edges (trim from the node end)
+        // For edge1: if this node is nodeKey1, trim from start; else trim from end
+        if (ea1.isNode1) {
+          edge1.trimStart = Math.max(edge1.trimStart || 0, trim1);
+        } else {
+          edge1.trimEnd = Math.max(edge1.trimEnd || 0, trim1);
         }
-        if (!edge2.curveThrough) {
-          edge2.curveThrough = { vx: node.cx, vy: node.cy };
+        
+        // For edge2: same logic
+        if (ea2.isNode1) {
+          edge2.trimStart = Math.max(edge2.trimStart || 0, trim2);
+        } else {
+          edge2.trimEnd = Math.max(edge2.trimEnd || 0, trim2);
         }
+        
+        // Calculate the trimmed points (where the corner curve will connect)
+        // Point A: trim1 distance from node along edge1's direction toward other end
+        const dx1 = ea1.otherEndX - node.cx;
+        const dy1 = ea1.otherEndY - node.cy;
+        const ux1 = dx1 / ea1.length;
+        const uy1 = dy1 / ea1.length;
+        const ax = node.cx + ux1 * trim1;
+        const ay = node.cy + uy1 * trim1;
+        
+        // Point B: trim2 distance from node along edge2's direction toward other end
+        const dx2 = ea2.otherEndX - node.cx;
+        const dy2 = ea2.otherEndY - node.cy;
+        const ux2 = dx2 / ea2.length;
+        const uy2 = dy2 / ea2.length;
+        const bx = node.cx + ux2 * trim2;
+        const by = node.cy + uy2 * trim2;
+        
+        // Create corner curve: quadratic Bézier from A to B with control at node
+        cornerCurves.push({
+          ax, ay,
+          bx, by,
+          cx: node.cx,
+          cy: node.cy,
+          color: edge1.color,
+        });
       }
     }
     
@@ -506,42 +564,59 @@ export const Grid: React.FC<GridProps> = ({
       }
     }
     
-    // Helper to render an edge - either as a line or a quadratic Bézier curve
-    // For curved edges, we compute the control point so the curve passes through the vertex
+    // Helper to render an edge as a trimmed line
+    // Edges are trimmed from their endpoints to make room for corner curves
     const renderEdge = (edge: EdgeData, keyPrefix: string, i: number) => {
-      if (edge.curveThrough) {
-        // Render as quadratic Bézier curve that passes through the vertex
-        // For a quadratic Bézier B(t) from P0 to P2 with control point C,
-        // to pass through point V at t=0.5: C = 2*V - 0.5*(P0 + P2)
-        const { vx, vy } = edge.curveThrough;
-        const cx = 2 * vx - 0.5 * (edge.x1 + edge.x2);
-        const cy = 2 * vy - 0.5 * (edge.y1 + edge.y2);
-        const d = `M ${edge.x1} ${edge.y1} Q ${cx} ${cy} ${edge.x2} ${edge.y2}`;
-        return (
-          <path
-            key={`${keyPrefix}-${i}`}
-            d={d}
-            stroke={edge.color}
-            strokeWidth={edgeWidth}
-            strokeLinecap="round"
-            fill="none"
-          />
-        );
-      } else {
-        // Render as straight line
-        return (
-          <line
-            key={`${keyPrefix}-${i}`}
-            x1={edge.x1}
-            y1={edge.y1}
-            x2={edge.x2}
-            y2={edge.y2}
-            stroke={edge.color}
-            strokeWidth={edgeWidth}
-            strokeLinecap="round"
-          />
-        );
-      }
+      // Calculate trimmed endpoints
+      const dx = edge.x2 - edge.x1;
+      const dy = edge.y2 - edge.y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      
+      if (len < 0.001) return null; // Skip degenerate edges
+      
+      const ux = dx / len;
+      const uy = dy / len;
+      
+      // Apply trims: trimStart shortens from P1, trimEnd shortens from P2
+      const trimStart = edge.trimStart || 0;
+      const trimEnd = edge.trimEnd || 0;
+      
+      const x1 = edge.x1 + ux * trimStart;
+      const y1 = edge.y1 + uy * trimStart;
+      const x2 = edge.x2 - ux * trimEnd;
+      const y2 = edge.y2 - uy * trimEnd;
+      
+      // If trimmed too much, skip
+      if (trimStart + trimEnd >= len) return null;
+      
+      return (
+        <line
+          key={`${keyPrefix}-${i}`}
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          stroke={edge.color}
+          strokeWidth={edgeWidth}
+          strokeLinecap="round"
+        />
+      );
+    };
+    
+    // Helper to render corner curves
+    const renderCornerCurve = (curve: CornerCurve, i: number) => {
+      // Quadratic Bézier from A to B with control at C (the node)
+      const d = `M ${curve.ax} ${curve.ay} Q ${curve.cx} ${curve.cy} ${curve.bx} ${curve.by}`;
+      return (
+        <path
+          key={`corner-${i}`}
+          d={d}
+          stroke={curve.color}
+          strokeWidth={edgeWidth}
+          strokeLinecap="round"
+          fill="none"
+        />
+      );
     };
     
     return (
@@ -553,8 +628,11 @@ export const Grid: React.FC<GridProps> = ({
         }}
       >
         <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#f5f5f5" }}>
-          {/* Layer 1: Regular edges (non-diagonal) */}
+          {/* Layer 1: Regular edges (non-diagonal) - trimmed */}
           {regularEdges.map((edge, i) => renderEdge(edge, "regular-edge", i))}
+          
+          {/* Layer 1b: Corner curves for regular edges */}
+          {cornerCurves.map((curve, i) => renderCornerCurve(curve, i))}
           
           {/* Layer 2: Down-slant diagonal edges (go "under") */}
           {downSlantEdges.map((edge, i) => renderEdge(edge, "down-edge", i))}
