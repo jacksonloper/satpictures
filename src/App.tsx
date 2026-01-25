@@ -4,6 +4,7 @@ import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverReq
 import { HATCH_COLOR } from "./problem";
 import SolverWorker from "./problem/solver.worker?worker";
 import CadicalWorker from "./problem/cadical.worker?worker";
+import DPLLWorker from "./problem/dpll.worker?worker";
 import "./App.css";
 
 // Tool types - different tools for editing the same unified view
@@ -100,7 +101,7 @@ function App() {
     "none" | "found" | "unsatisfiable" | "error"
   >("none");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [solverType, setSolverType] = useState<SolverType>("minisat");
+  const [solverType, setSolverType] = useState<SolverType>("cadical");
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [gridType, setGridType] = useState<GridType>("square");
   const [graphMode, setGraphMode] = useState(false);
@@ -363,7 +364,14 @@ function App() {
     const currentHeight = grid.height;
 
     // Create a new worker based on solver type
-    const worker = solverType === "cadical" ? new CadicalWorker() : new SolverWorker();
+    let worker: Worker;
+    if (solverType === "cadical") {
+      worker = new CadicalWorker();
+    } else if (solverType === "dpll") {
+      worker = new DPLLWorker();
+    } else {
+      worker = new SolverWorker();
+    }
     workerRef.current = worker;
 
     worker.onmessage = (event: MessageEvent<SolverResponse>) => {

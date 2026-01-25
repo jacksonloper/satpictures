@@ -1971,8 +1971,8 @@ interface ControlsProps {
   solving: boolean;
   solutionStatus: "none" | "found" | "unsatisfiable" | "error";
   errorMessage?: string | null;
-  solverType?: "minisat" | "cadical";
-  onSolverTypeChange?: (solverType: "minisat" | "cadical") => void;
+  solverType?: "minisat" | "cadical" | "dpll";
+  onSolverTypeChange?: (solverType: "minisat" | "cadical" | "dpll") => void;
   solveTime?: number | null;
   solution?: GridSolution | null;
   gridType?: GridType;
@@ -1998,7 +1998,7 @@ export const Controls: React.FC<ControlsProps> = ({
   solving,
   solutionStatus,
   errorMessage,
-  solverType = "minisat",
+  solverType = "cadical",
   onSolverTypeChange,
   solveTime,
   solution: _solution,
@@ -2075,7 +2075,7 @@ export const Controls: React.FC<ControlsProps> = ({
             <span style={{ minWidth: "50px" }}>Solver:</span>
             <select
               value={solverType}
-              onChange={(e) => onSolverTypeChange(e.target.value as "minisat" | "cadical")}
+              onChange={(e) => onSolverTypeChange(e.target.value as "minisat" | "cadical" | "dpll")}
               style={{
                 padding: "4px 8px",
                 borderRadius: "4px",
@@ -2084,8 +2084,9 @@ export const Controls: React.FC<ControlsProps> = ({
                 fontSize: "14px",
               }}
             >
-              <option value="minisat">MiniSat</option>
-              <option value="cadical">CaDiCaL</option>
+              <option value="cadical">CaDiCaL (2019)</option>
+              <option value="minisat">MiniSat (2005)</option>
+              <option value="dpll">DPLL (1962)</option>
             </select>
           </label>
         )}
@@ -2238,10 +2239,10 @@ export const Controls: React.FC<ControlsProps> = ({
           }}
         >
           {solutionStatus === "found"
-            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}${_solution ? ` Walls: ${Math.round(_solution.wallEdges.length / (_solution.wallEdges.length + _solution.keptEdges.length) * 100)}%` : ""}`
+            ? `Solution found! Each color region is now connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : solverType === "dpll" ? "DPLL" : "MiniSat"})` : ""}${_solution ? ` Walls: ${Math.round(_solution.wallEdges.length / (_solution.wallEdges.length + _solution.keptEdges.length) * 100)}%` : ""}`
             : solutionStatus === "error"
               ? errorMessage || "Unknown error occurred."
-              : `No solution exists - some color regions cannot be connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : "MiniSat"})` : ""}`}
+              : `No solution exists - some color regions cannot be connected.${solveTime !== undefined && solveTime !== null ? ` (${solveTime.toFixed(0)}ms with ${solverType === "cadical" ? "CaDiCaL" : solverType === "dpll" ? "DPLL" : "MiniSat"})` : ""}`}
         </div>
       )}
     </div>
