@@ -294,7 +294,7 @@ export const Grid: React.FC<GridProps> = ({
     
     const edges: EdgeData[] = [];
     
-    // Corner curve data: quadratic Bézier from trim point A to trim point B with control at node
+    // Corner curve data: cubic Bézier from trim point A to trim point B passing through node C
     interface CornerCurve {
       // Start point (trimmed end of first edge)
       ax: number;
@@ -302,14 +302,77 @@ export const Grid: React.FC<GridProps> = ({
       // End point (trimmed end of second edge)  
       bx: number;
       by: number;
-      // Control point (the node/vertex)
+      // Point the curve must pass through (the node/vertex)
       cx: number;
       cy: number;
+      // Tangent direction at A (unit vector pointing away from node along edge1)
+      dax: number;
+      day: number;
+      // Tangent direction at B (unit vector pointing away from node along edge2)
+      dbx: number;
+      dby: number;
       // Color for the curve
       color: string;
     }
     
     const cornerCurves: CornerCurve[] = [];
+    
+    // Cubic Bézier from A->B with endpoint tangent directions dA,dB (unit-ish),
+    // forced to pass through C at parameter t (default 0.5). Returns SVG path string.
+    const svgBezierThroughPoint = (
+      A: [number, number], 
+      B: [number, number], 
+      C: [number, number], 
+      dA: [number, number], 
+      dB: [number, number], 
+      t: number = 0.5
+    ): string => {
+      const add = (p: [number, number], q: [number, number]): [number, number] => [p[0]+q[0], p[1]+q[1]];
+      const sub = (p: [number, number], q: [number, number]): [number, number] => [p[0]-q[0], p[1]-q[1]];
+      const mul = (p: [number, number], s: number): [number, number] => [p[0]*s, p[1]*s];
+      const norm = (p: [number, number]): number => Math.hypot(p[0], p[1]);
+      const unit = (p: [number, number]): [number, number] => { 
+        const n = norm(p) || 1; 
+        return [p[0]/n, p[1]/n]; 
+      };
+
+      dA = unit(dA); 
+      dB = unit(dB);
+
+      const s = 1 - t;
+
+      // Bézier: P0=A, P3=B, P1=A+α dA, P2=B-β dB
+      // B(t)= (s^3)A + 3(s^2 t)P1 + 3(s t^2)P2 + (t^3)B
+      // Rearranged: C = base + (3 s^2 t) α dA + (3 s t^2)(-β dB)
+      const base = add(
+        add(mul(A, s*s*s + 3*s*s*t), mul(B, t*t*t + 3*s*t*t)),
+        [0, 0]
+      );
+      const r = sub(C, base);
+
+      const k1 = 3*s*s*t;      // coefficient for α dA
+      const k2 = 3*s*t*t;      // coefficient for (-β dB)
+
+      // Solve 2x2: [k1 dA , -k2 dB] [α β]^T = r
+      const u = mul(dA, k1);
+      const v = mul(dB, -k2);
+
+      const det = u[0]*v[1] - u[1]*v[0];
+      if (Math.abs(det) < 1e-12) {
+        // Degenerate: directions nearly parallel in a bad way. Fall back to a simple curve.
+        const P1 = add(A, mul(dA, norm(sub(B, A)) / 3));
+        const P2 = sub(B, mul(dB, norm(sub(B, A)) / 3));
+        return `M ${A[0]} ${A[1]} C ${P1[0]} ${P1[1]} ${P2[0]} ${P2[1]} ${B[0]} ${B[1]}`;
+      }
+
+      const alpha = ( r[0]*v[1] - r[1]*v[0]) / det;
+      const beta  = (-r[0]*u[1] + r[1]*u[0]) / det;
+
+      const P1 = add(A, mul(dA, alpha));
+      const P2 = sub(B, mul(dB, beta));
+
+      return `M ${A[0]} ${A[1]} C ${P1[0]} ${P1[1]} ${P2[0]} ${P2[1]} ${B[0]} ${B[1]}`;
+    };
     
     // Helper to check if an edge is diagonal (different row AND different col)
     const isDiagonalEdge = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
@@ -461,12 +524,20 @@ export const Grid: React.FC<GridProps> = ({
         const bx = node.cx + ux2 * trim2;
         const by = node.cy + uy2 * trim2;
         
-        // Create corner curve: quadratic Bézier from A to B with control at node
+        // Create corner curve: cubic Bézier from A to B passing through node
+        // Tangent at A points toward the node (opposite of edge direction from node)
+        // Tangent at B points toward the node (opposite of edge direction from node)
         cornerCurves.push({
           ax, ay,
           bx, by,
           cx: node.cx,
           cy: node.cy,
+          // Tangent at A: pointing toward node (negative of edge1 direction)
+          dax: -ux1,
+          day: -uy1,
+          // Tangent at B: pointing toward node (negative of edge2 direction)
+          dbx: -ux2,
+          dby: -uy2,
           color: edge1.color,
         });
       }
@@ -605,8 +676,15 @@ export const Grid: React.FC<GridProps> = ({
     
     // Helper to render corner curves
     const renderCornerCurve = (curve: CornerCurve, i: number) => {
-      // Quadratic Bézier from A to B with control at C (the node)
-      const d = `M ${curve.ax} ${curve.ay} Q ${curve.cx} ${curve.cy} ${curve.bx} ${curve.by}`;
+      // Cubic Bézier from A to B passing through C (the node) at t=0.5
+      const d = svgBezierThroughPoint(
+        [curve.ax, curve.ay],
+        [curve.bx, curve.by],
+        [curve.cx, curve.cy],
+        [curve.dax, curve.day],
+        [curve.dbx, curve.dby],
+        0.5
+      );
       return (
         <path
           key={`corner-${i}`}
