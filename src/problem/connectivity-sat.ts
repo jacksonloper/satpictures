@@ -8,12 +8,12 @@
  * - Kept edges never connect different colors
  * - Each color-class is connected (one component)
  *
- * Key encoding technique: single commodity flow with unary flow values
+ * Key encoding technique: single commodity flow with BINARY flow values
  * - Each non-root node produces 1 unit of flow
- * - For each undirected edge {u,v}, we have two directed arc flow variables
+ * - For each directed arc, flow is represented as a binary number (log2(N) bits)
  * - Arc can only carry flow if both endpoints have same color
  * - Flow conservation: outgoing flow = incoming flow + 1 for non-root nodes
- * - Totalizer encoding for proper bidirectional sum constraints
+ * - Uses binary adder circuits for sum computation (much more efficient than unary)
  */
 
 /**
@@ -123,99 +123,161 @@ class CNF {
   }
 
   /**
-   * Build a totalizer for summing unary-encoded values.
-   * Given input functions that return "input i >= k" literals,
-   * returns an output function for "sum >= k" with proper bidirectional constraints.
-   *
-   * @param inputs Array of functions (k) => literal for "input >= k"
-   * @param maxPerInput Maximum value each input can have
-   * @param prefix Variable name prefix for auxiliary variables
-   * @returns Function (k) => literal for "sum >= k"
+   * Create a full adder circuit.
+   * Returns [sum, carry] literals.
    */
-  buildTotalizer(
-    inputs: Array<(k: number) => number>,
-    maxPerInput: number,
-    prefix: string
-  ): (k: number) => number {
-    if (inputs.length === 0) {
-      // Empty sum is always 0
-      return (k: number) => {
-        if (k <= 0) return this.v(`${prefix}_true`); // Always true for k <= 0
-        return -this.v(`${prefix}_true`); // Always false for k > 0
-      };
-    }
+  fullAdder(a: number, b: number, cin: number, prefix: string): [number, number] {
+    const sum = this.v(`${prefix}_sum`);
+    const cout = this.v(`${prefix}_cout`);
 
-    if (inputs.length === 1) {
-      return inputs[0];
-    }
+    // sum = a XOR b XOR cin
+    // cout = (a AND b) OR (cin AND (a XOR b))
 
-    // Recursively build totalizer using divide-and-conquer
-    const mid = Math.floor(inputs.length / 2);
-    const leftInputs = inputs.slice(0, mid);
-    const rightInputs = inputs.slice(mid);
+    // For sum: exactly odd number of {a, b, cin} are true
+    // sum ↔ (a XOR b XOR cin)
+    this.addClause([-a, -b, -cin, sum]);
+    this.addClause([-a, -b, cin, -sum]);
+    this.addClause([-a, b, -cin, -sum]);
+    this.addClause([-a, b, cin, sum]);
+    this.addClause([a, -b, -cin, -sum]);
+    this.addClause([a, -b, cin, sum]);
+    this.addClause([a, b, -cin, sum]);
+    this.addClause([a, b, cin, -sum]);
 
-    const leftSum = this.buildTotalizer(leftInputs, maxPerInput, `${prefix}_L`);
-    const rightSum = this.buildTotalizer(rightInputs, maxPerInput, `${prefix}_R`);
+    // cout ↔ at least 2 of {a, b, cin} are true
+    this.addClause([-a, -b, cout]);
+    this.addClause([-a, -cin, cout]);
+    this.addClause([-b, -cin, cout]);
+    this.addClause([a, b, -cout]);
+    this.addClause([a, cin, -cout]);
+    this.addClause([b, cin, -cout]);
 
-    const maxLeft = leftInputs.length * maxPerInput;
-    const maxRight = rightInputs.length * maxPerInput;
-    const maxTotal = maxLeft + maxRight;
+    return [sum, cout];
+  }
 
-    // Create output variables for the combined sum
-    const outVars = new Map<number, number>();
-    const outSum = (k: number): number => {
-      if (k <= 0) return this.v(`${prefix}_true`);
-      if (k > maxTotal) return -this.v(`${prefix}_true`);
-      if (!outVars.has(k)) {
-        outVars.set(k, this.v(`${prefix}>=${k}`));
+  /**
+   * Create a half adder circuit.
+   * Returns [sum, carry] literals.
+   */
+  halfAdder(a: number, b: number, prefix: string): [number, number] {
+    const sum = this.v(`${prefix}_sum`);
+    const cout = this.v(`${prefix}_cout`);
+
+    // sum = a XOR b
+    this.addClause([-a, -b, -sum]);
+    this.addClause([-a, b, sum]);
+    this.addClause([a, -b, sum]);
+    this.addClause([a, b, -sum]);
+
+    // cout = a AND b
+    this.addClause([-a, -b, cout]); // Remove: cout can be false when both false
+    this.addImp(cout, a);
+    this.addImp(cout, b);
+    this.addClause([-a, -b, cout]);
+
+    return [sum, cout];
+  }
+
+  /**
+   * Add two binary numbers represented as arrays of literals (LSB first).
+   * Returns the sum as an array of literals (LSB first), with length max(a.len, b.len) + 1.
+   */
+  binaryAdd(a: number[], b: number[], prefix: string): number[] {
+    const maxLen = Math.max(a.length, b.length);
+    const result: number[] = [];
+    let carry: number | null = null;
+
+    // Create a "false" literal for padding
+    const falseLit = -this.v(`${prefix}_true`);
+    this.addUnit(-falseLit); // Make _true actually true
+
+    for (let i = 0; i < maxLen; i++) {
+      const ai = i < a.length ? a[i] : falseLit;
+      const bi = i < b.length ? b[i] : falseLit;
+
+      if (carry === null) {
+        const [sum, cout] = this.halfAdder(ai, bi, `${prefix}_bit${i}`);
+        result.push(sum);
+        carry = cout;
+      } else {
+        const [sum, cout] = this.fullAdder(ai, bi, carry, `${prefix}_bit${i}`);
+        result.push(sum);
+        carry = cout;
       }
-      return outVars.get(k)!;
-    };
+    }
 
-    // Add totalizer clauses (both directions)
-    // Forward: leftSum >= a ∧ rightSum >= b → outSum >= a+b
-    // Backward: outSum >= k → ∨_{a+b=k} (leftSum >= a ∧ rightSum >= b)
-    //           Equivalently: ¬outSum >= k ∨ ∨_{a+b=k} (leftSum >= a ∧ rightSum >= b)
-    //           Which requires auxiliary variables or is handled by contrapositive
+    if (carry !== null) {
+      result.push(carry);
+    }
 
-    for (let a = 0; a <= maxLeft; a++) {
-      for (let b = 0; b <= maxRight; b++) {
-        const sum = a + b;
-        if (sum > 0 && sum <= maxTotal) {
-          // Forward: leftSum >= a ∧ rightSum >= b → outSum >= sum
-          const clause: number[] = [outSum(sum)];
-          if (a > 0) clause.push(-leftSum(a));
-          if (b > 0) clause.push(-rightSum(b));
-          this.addClause(clause);
-        }
+    return result;
+  }
+
+  /**
+   * Add multiple binary numbers using a tree of adders.
+   * Each number is represented as an array of literals (LSB first).
+   */
+  binaryAddMultiple(numbers: number[][], prefix: string): number[] {
+    if (numbers.length === 0) {
+      return [];
+    }
+    if (numbers.length === 1) {
+      return numbers[0];
+    }
+
+    // Pair up and add recursively
+    const nextLevel: number[][] = [];
+    for (let i = 0; i < numbers.length; i += 2) {
+      if (i + 1 < numbers.length) {
+        nextLevel.push(this.binaryAdd(numbers[i], numbers[i + 1], `${prefix}_add${i}`));
+      } else {
+        nextLevel.push(numbers[i]);
       }
     }
 
-    // Backward (contrapositive): outSum >= k → (leftSum >= a ∨ rightSum >= k-a) for all valid a
-    // This is: ¬outSum >= k ∨ leftSum >= a ∨ rightSum >= k-a
-    // We need this for all a from max(0, k-maxRight) to min(maxLeft, k)
-    for (let k = 1; k <= maxTotal; k++) {
-      // outSum >= k implies there exist a, b with a + b >= k where leftSum >= a and rightSum >= b
-      // Contrapositive: if for all valid (a, b) pairs, either leftSum < a or rightSum < b, then outSum < k
-      // This is enforced by: outSum >= k → leftSum >= (k - maxRight) when k > maxRight
-      //                  and: outSum >= k → rightSum >= (k - maxLeft) when k > maxLeft
-      const minFromLeft = Math.max(0, k - maxRight);
-      const minFromRight = Math.max(0, k - maxLeft);
+    return this.binaryAddMultiple(nextLevel, `${prefix}_L`);
+  }
 
-      if (minFromLeft > 0) {
-        this.addImp(outSum(k), leftSum(minFromLeft));
-      }
-      if (minFromRight > 0) {
-        this.addImp(outSum(k), rightSum(minFromRight));
-      }
+  /**
+   * Assert that binary number a equals binary number b + constant.
+   * a and b are arrays of literals (LSB first).
+   */
+  assertBinaryEq(a: number[], b: number[], prefix: string): void {
+    // Pad to same length
+    const maxLen = Math.max(a.length, b.length);
+    const falseLit = -this.v(`${prefix}_true`);
+    this.addUnit(-falseLit);
+
+    for (let i = 0; i < maxLen; i++) {
+      const ai = i < a.length ? a[i] : falseLit;
+      const bi = i < b.length ? b[i] : falseLit;
+      // ai ↔ bi
+      this.addImp(ai, bi);
+      this.addImp(bi, ai);
     }
 
-    // Monotonicity: outSum >= k → outSum >= k-1
-    for (let k = 2; k <= maxTotal; k++) {
-      this.addImp(outSum(k), outSum(k - 1));
+    // Extra bits in a must be false
+    for (let i = maxLen; i < a.length; i++) {
+      this.addUnit(-a[i]);
     }
+  }
 
-    return outSum;
+  /**
+   * Create binary representation of a constant.
+   */
+  binaryConstant(value: number, numBits: number, prefix: string): number[] {
+    const result: number[] = [];
+    const trueLit = this.v(`${prefix}_true`);
+    this.addUnit(trueLit);
+
+    for (let i = 0; i < numBits; i++) {
+      if ((value >> i) & 1) {
+        result.push(trueLit);
+      } else {
+        result.push(-trueLit);
+      }
+    }
+    return result;
   }
 
   toDimacs(): string {
@@ -232,7 +294,7 @@ class CNF {
  * - Each non-root node produces 1 unit of flow
  * - Flow is transported via directed arcs toward the root
  * - Flow conservation: outgoing = incoming + 1 for non-root nodes
- * - Uses totalizer encoding for proper bidirectional sum constraints
+ * - Uses binary adder circuits for correct sum computation
  *
  * @param input - Configuration specifying nodes, edges, and color hints
  * @returns The CNF formula and metadata
@@ -276,18 +338,34 @@ export function buildConnectivitySatCNF(
     adj.get(v)!.add(u);
   }
 
-  // Max flow value (N-1 is max possible through any single arc)
-  const maxFlow = N - 1;
+  // Number of bits needed for binary flow representation
+  // Max flow on any arc is N-1, so we need ceil(log2(N)) bits
+  const numBits = Math.max(1, Math.ceil(Math.log2(N)));
 
   const cnf = new CNF();
+
+  // Create a shared "true" literal for constants
+  const trueLit = cnf.v("_TRUE");
+  cnf.addUnit(trueLit);
 
   // ---------- Variables ----------
   // X_{v,c} = vertex v has color c
   const colorVar = (v: string, c: number) => cnf.v(`X(${v})=${c}`);
   // Y_{uv} = edge is kept (for visualization)
   const keepVar = (u: string, v: string) => cnf.v(`Y(${edgeKey(u, v)})`);
-  // F_{u→v,k} = "flow on arc u→v is at least k" (unary encoding)
-  const flowVar = (u: string, v: string, k: number) => cnf.v(`F(${u}->${v},>=${k})`);
+  // Binary flow variables: F_{u→v}[bit] for each directed arc
+  const flowBits: Map<string, number[]> = new Map();
+  const getFlowBits = (u: string, v: string): number[] => {
+    const key = `${u}->${v}`;
+    if (!flowBits.has(key)) {
+      const bits: number[] = [];
+      for (let b = 0; b < numBits; b++) {
+        bits.push(cnf.v(`F(${key})[${b}]`));
+      }
+      flowBits.set(key, bits);
+    }
+    return flowBits.get(key)!;
+  };
 
   // ---------- (1) Each vertex has exactly one color ----------
   for (const v of nodeList) {
@@ -323,31 +401,30 @@ export function buildConnectivitySatCNF(
     rootOfColor[c] = fixedVertices[0];
   }
 
-  // ---------- (2) Unary flow encoding: monotonicity ----------
-  // F_{u→v,k} → F_{u→v,k-1}
+  // ---------- (2) Arc flow = 0 if endpoints have different colors ----------
+  // If u and v have different colors, all bits of flow(u→v) must be 0
   for (const [u, v] of undirectedEdges) {
-    for (let k = 2; k <= maxFlow; k++) {
-      cnf.addImp(flowVar(u, v, k), flowVar(u, v, k - 1));
-      cnf.addImp(flowVar(v, u, k), flowVar(v, u, k - 1));
-    }
-  }
+    const flowUV = getFlowBits(u, v);
+    const flowVU = getFlowBits(v, u);
 
-  // ---------- (3) Arc can only carry flow if both endpoints have same color ----------
-  for (const [u, v] of undirectedEdges) {
     for (const c of colors) {
       const xu = colorVar(u, c);
       const xv = colorVar(v, c);
-      // If there's flow u→v and u has color c, then v must have color c (and vice versa)
-      cnf.addClause([-flowVar(u, v, 1), -xu, xv]);
-      cnf.addClause([-flowVar(u, v, 1), -xv, xu]);
-      cnf.addClause([-flowVar(v, u, 1), -xu, xv]);
-      cnf.addClause([-flowVar(v, u, 1), -xv, xu]);
+      // If u has color c and v doesn't have color c, then flow must be 0
+      // Equivalently: for each bit: xu ∧ ¬xv → ¬bit
+      // Which is: ¬xu ∨ xv ∨ ¬bit
+      for (let b = 0; b < numBits; b++) {
+        cnf.addClause([-xu, xv, -flowUV[b]]);
+        cnf.addClause([xu, -xv, -flowUV[b]]);
+        cnf.addClause([-xu, xv, -flowVU[b]]);
+        cnf.addClause([xu, -xv, -flowVU[b]]);
+      }
     }
   }
 
-  // ---------- (4) Flow conservation using totalizer ----------
-  // For each node v: out_total = in_total + 1 (if non-root)
-  // Uses totalizer for proper bidirectional sum constraints
+  // ---------- (3) Flow conservation using binary adders ----------
+  // For each node v: sum of outgoing flows = sum of incoming flows + 1 (if non-root)
+  // For root: sum of outgoing flows = 0 (or we allow any, root is sink)
 
   for (const v of nodeList) {
     const neighbors = [...adj.get(v)!];
@@ -355,46 +432,49 @@ export function buildConnectivitySatCNF(
 
     const isRoot = colors.some((c) => rootOfColor[c] === v);
 
-    // Build totalizer for incoming flow
-    const incomingFlows = neighbors.map((u) => (k: number) => flowVar(u, v, k));
-    const inSum = cnf.buildTotalizer(incomingFlows, maxFlow, `_in(${v})`);
+    // Gather incoming and outgoing flow bits
+    const incomingFlowBits = neighbors.map((u) => getFlowBits(u, v));
+    const outgoingFlowBits = neighbors.map((u) => getFlowBits(v, u));
 
-    // Build totalizer for outgoing flow
-    const outgoingFlows = neighbors.map((u) => (k: number) => flowVar(v, u, k));
-    const outSum = cnf.buildTotalizer(outgoingFlows, maxFlow, `_out(${v})`);
+    // Compute sum of incoming flows
+    const inSum = cnf.binaryAddMultiple(incomingFlowBits, `_inSum(${v})`);
 
-    const maxTotal = neighbors.length * maxFlow;
+    // Compute sum of outgoing flows
+    const outSum = cnf.binaryAddMultiple(outgoingFlowBits, `_outSum(${v})`);
 
-    // ---------- Flow conservation constraint ----------
-    // Non-root: outSum >= k ↔ inSum >= k-1 (each node produces 1 unit)
     if (!isRoot) {
-      // outSum >= 1 always (each non-root produces at least 1)
-      cnf.addUnit(outSum(1));
-
-      // For k >= 2: outSum >= k ↔ inSum >= k-1
-      for (let k = 2; k <= maxTotal; k++) {
-        cnf.addImp(inSum(k - 1), outSum(k));
-        cnf.addImp(outSum(k), inSum(k - 1));
+      // Conservation: outSum = inSum + 1
+      // First compute inSum + 1
+      const one: number[] = [];
+      for (let b = 0; b < numBits; b++) {
+        one.push(b === 0 ? trueLit : -trueLit);
       }
+      const inSumPlusOne = cnf.binaryAdd(inSum, one, `_inSumP1(${v})`);
+
+      // Assert outSum = inSumPlusOne
+      cnf.assertBinaryEq(outSum, inSumPlusOne, `_conserve(${v})`);
+    }
+    // For root: no constraint (root absorbs all flow)
+  }
+
+  // ---------- (4) Link flow to kept edges ----------
+  // If flow(u→v) > 0 or flow(v→u) > 0, then edge is kept
+  // Flow > 0 means at least one bit is set
+  for (const [u, v] of undirectedEdges) {
+    const yVar = keepVar(u, v);
+    const flowUV = getFlowBits(u, v);
+    const flowVU = getFlowBits(v, u);
+
+    // If any bit of flowUV is true, Y must be true
+    // bit → Y for each bit
+    for (let b = 0; b < numBits; b++) {
+      cnf.addImp(flowUV[b], yVar);
+      cnf.addImp(flowVU[b], yVar);
     }
   }
 
-  // ---------- (5) Link flow to kept edges (one direction only) ----------
-  // F_{u→v,1} → Y_{uv} and F_{v→u,1} → Y_{uv}
-  // But NOT Y → flow (kept edges don't have to carry flow)
-  for (const [u, v] of undirectedEdges) {
-    const yVar = keepVar(u, v);
-    const fUV = flowVar(u, v, 1);
-    const fVU = flowVar(v, u, 1);
-    // Flow implies edge is kept (for visualization)
-    cnf.addImp(fUV, yVar);
-    cnf.addImp(fVU, yVar);
-    // Removed: cnf.addClause([-yVar, fUV, fVU]); // This was forcing tree-like behavior
-  }
-
-  // ---------- (6) Kept edges must be monochromatic ----------
+  // ---------- (5) Kept edges must be monochromatic ----------
   // An edge can only be kept if both endpoints have the same color
-  // Y_{uv} ∧ X_{u,c} → X_{v,c}  and  Y_{uv} ∧ X_{v,c} → X_{u,c}
   for (const [u, v] of undirectedEdges) {
     const yVar = keepVar(u, v);
     for (const c of colors) {
@@ -417,7 +497,7 @@ export function buildConnectivitySatCNF(
     dimacs: cnf.toDimacs(),
     meta: {
       colors,
-      maxLevel: maxFlow,
+      maxLevel: N - 1,
       nodes: nodeList,
       edges: undirectedEdges,
       rootOfColor,
