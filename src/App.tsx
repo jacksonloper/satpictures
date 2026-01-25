@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
+import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, MapView, downloadSolutionSVG } from "./components";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType, ColorRoots } from "./problem";
 import { HATCH_COLOR } from "./problem";
 import SolverWorker from "./problem/solver.worker?worker";
@@ -105,6 +105,7 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [gridType, setGridType] = useState<GridType>("square");
   const [graphMode, setGraphMode] = useState(false);
+  const [mapMode, setMapMode] = useState(false);
   // Pathlength constraints state - now a single constraint (simplified)
   const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
   const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
@@ -874,7 +875,7 @@ function App() {
                   >
                     Download CSV
                   </button>
-                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && !graphMode && (
+                  {solution.distanceLevels && Object.keys(solution.distanceLevels).length > 0 && !graphMode && !mapMode && (
                     <select
                       value={selectedLevelConstraintId ?? ""}
                       onChange={(e) => setSelectedLevelConstraintId(e.target.value || null)}
@@ -914,7 +915,7 @@ function App() {
                     </select>
                   )}
                   <button
-                    onClick={() => setGraphMode(!graphMode)}
+                    onClick={() => { setGraphMode(!graphMode); if (!graphMode) setMapMode(false); }}
                     style={{
                       padding: "6px 12px",
                       backgroundColor: graphMode ? "#3498db" : "#95a5a6",
@@ -927,19 +928,42 @@ function App() {
                   >
                     {graphMode ? "Tile View" : "Graph View"}
                   </button>
+                  <button
+                    onClick={() => { setMapMode(!mapMode); if (!mapMode) setGraphMode(false); }}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: mapMode ? "#27ae60" : "#95a5a6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {mapMode ? "Tile View" : "Map View 🚗"}
+                  </button>
                 </div>
                 
-                {/* Solution Grid */}
+                {/* Solution Grid / Map View */}
                 <div style={{ marginTop: "12px" }}>
-                  <SolutionGrid
-                    grid={solutionDisplayGrid!}
-                    solution={solution}
-                    cellSize={40}
-                    gridType={solutionMetadata.gridType}
-                    showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
-                    selectedConstraintId={selectedLevelConstraintId}
-                    graphMode={graphMode}
-                  />
+                  {mapMode ? (
+                    <MapView
+                      grid={solutionDisplayGrid!}
+                      solution={solution}
+                      cellSize={40}
+                      gridType={solutionMetadata.gridType}
+                    />
+                  ) : (
+                    <SolutionGrid
+                      grid={solutionDisplayGrid!}
+                      solution={solution}
+                      cellSize={40}
+                      gridType={solutionMetadata.gridType}
+                      showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
+                      selectedConstraintId={selectedLevelConstraintId}
+                      graphMode={graphMode}
+                    />
+                  )}
                 </div>
               </>
             ) : (
