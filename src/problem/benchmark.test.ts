@@ -22,7 +22,14 @@ import { getNeighbors, edgeKey } from "./grid-neighbors";
 const RED = 0;
 
 /**
- * Create a maze-style grid setup
+ * Create a maze-style grid setup matching the browser's createMazeSetupGrid
+ * 
+ * Browser Maze Setup:
+ * - Entrance: middle row, leftmost column (col 0) - RED
+ * - Exit: middle row, rightmost column (col width-1) - RED
+ * - All INTERIOR cells are RED (pre-colored, not blank!)
+ * - Border cells (except entrance/exit) are HATCH
+ * - minDistance = max(width, height)
  */
 function createMazeSetup(size: number, minDistance: number): {
   grid: ColorGrid;
@@ -33,25 +40,37 @@ function createMazeSetup(size: number, minDistance: number): {
 } {
   const colors: (number | null)[][] = [];
   
+  const middleRow = Math.floor(size / 2);
+  const entranceCol = 0;
+  const exitCol = size - 1;
+  
   for (let row = 0; row < size; row++) {
     const rowColors: (number | null)[] = [];
     for (let col = 0; col < size; col++) {
-      if (row === 0 || row === size - 1 || col === 0 || col === size - 1) {
+      // Entrance on far left: red square in the left border
+      if (row === middleRow && col === entranceCol) {
+        rowColors.push(RED);
+      }
+      // Exit on far right: red square in the right border
+      else if (row === middleRow && col === exitCol) {
+        rowColors.push(RED);
+      }
+      // Other border cells: orange hatch (walls)
+      else if (row === 0 || row === size - 1 || col === 0 || col === size - 1) {
         rowColors.push(HATCH_COLOR);
-      } else {
-        rowColors.push(null);
+      }
+      // Interior: red (matching the browser - NOT blank/null!)
+      else {
+        rowColors.push(RED);
       }
     }
     colors.push(rowColors);
   }
   
-  const rootRow = 1;
-  const rootCol = 1;
-  colors[rootRow][rootCol] = RED;
-  
-  const targetRow = size - 2;
-  const targetCol = size - 2;
-  colors[targetRow][targetCol] = RED;
+  const rootRow = middleRow;
+  const rootCol = entranceCol;
+  const targetRow = middleRow;
+  const targetCol = exitCol;
   
   const grid: ColorGrid = { width: size, height: size, colors };
   
@@ -508,6 +527,63 @@ function buildNewEncodingDimacs(
 }
 
 /**
+ * Run MiniSat on a DIMACS file and return the time
+ */
+function runMinisat(dimacsContent: string): { time: number; sat: boolean | null; error?: string } {
+  const tmpDir = "/tmp/satbenchmark";
+  if (!fs.existsSync(tmpDir)) {
+    fs.mkdirSync(tmpDir, { recursive: true });
+  }
+  
+  const inputFile = path.join(tmpDir, `input_${Date.now()}.cnf`);
+  const outputFile = path.join(tmpDir, `output_${Date.now()}.txt`);
+  fs.writeFileSync(inputFile, dimacsContent);
+  
+  const start = performance.now();
+  
+  try {
+    execSync(`minisat ${inputFile} ${outputFile} 2>&1`, { 
+      timeout: 120000,  // 2 minute timeout
+      encoding: 'utf-8',
+      maxBuffer: 50 * 1024 * 1024  // 50MB buffer
+    });
+    const end = performance.now();
+    
+    // Read the output file to check result
+    const output = fs.readFileSync(outputFile, 'utf-8');
+    const sat = output.includes('SAT') && !output.includes('UNSAT');
+    const unsat = output.includes('UNSAT');
+    
+    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
+    try { fs.unlinkSync(outputFile); } catch { /* ignore */ }
+    
+    return {
+      time: end - start,
+      sat: sat ? true : (unsat ? false : null)
+    };
+  } catch (e: unknown) {
+    const end = performance.now();
+    const error = e as { status?: number; stdout?: string; stderr?: string; message?: string };
+    
+    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
+    try { fs.unlinkSync(outputFile); } catch { /* ignore */ }
+    
+    // MiniSat returns exit code 10 for SAT, 20 for UNSAT
+    if (error.status === 10) {
+      return { time: end - start, sat: true };
+    } else if (error.status === 20) {
+      return { time: end - start, sat: false };
+    }
+    
+    return {
+      time: end - start,
+      sat: null,
+      error: error.message || "Unknown error"
+    };
+  }
+}
+
+/**
  * Run CaDiCaL on a DIMACS file and return the time
  */
 function runCadical(dimacsContent: string): { time: number; sat: boolean | null; error?: string } {
@@ -569,58 +645,52 @@ function runSingleBenchmark(size: number, minDistance: number): void {
   console.log(`Target cell: (${targetCell.row}, ${targetCell.col})`);
   console.log("");
   
-  // OLD ENCODING
-  console.log("-".repeat(60));
-  console.log("OLD ENCODING (Connected Component + Bounded Reachability)");
-  console.log("-".repeat(60));
+  // Build CNFs
+  const startBuildOld = performance.now();
+  const oldCNF = buildOldEncodingDimacs(grid, pathlengthConstraints, "square");
+  const buildTimeOld = performance.now() - startBuildOld;
   
-  try {
-    const startBuild = performance.now();
-    const oldCNF = buildOldEncodingDimacs(grid, pathlengthConstraints, "square");
-    const buildTime = performance.now() - startBuild;
-    
-    console.log(`CNF: ${oldCNF.numVars} variables, ${oldCNF.numClauses} clauses`);
-    console.log(`Build time: ${buildTime.toFixed(2)}ms`);
-    
-    const result = runCadical(oldCNF.dimacs);
-    if (result.error) {
-      console.log(`Status: ERROR - ${result.error}`);
-    } else {
-      console.log(`Status: ${result.sat === true ? 'SATISFIABLE' : result.sat === false ? 'UNSATISFIABLE' : 'UNKNOWN'}`);
-      console.log(`Solve time: ${result.time.toFixed(2)}ms`);
-      console.log(`Total time: ${(buildTime + result.time).toFixed(2)}ms`);
-    }
-  } catch (e) {
-    console.log(`Status: ERROR - ${(e as Error).message}`);
-  }
+  const startBuildNew = performance.now();
+  const newCNF = buildNewEncodingDimacs(grid, colorRoots, pathlengthConstraints, "square");
+  const buildTimeNew = performance.now() - startBuildNew;
   
+  console.log("CNF STATISTICS:");
+  console.log(`  Old encoding: ${oldCNF.numVars} variables, ${oldCNF.numClauses} clauses (built in ${buildTimeOld.toFixed(0)}ms)`);
+  console.log(`  New encoding: ${newCNF.numVars} variables, ${newCNF.numClauses} clauses (built in ${buildTimeNew.toFixed(0)}ms)`);
   console.log("");
   
-  // NEW ENCODING
+  // Test with CaDiCaL
   console.log("-".repeat(60));
-  console.log("NEW ENCODING (Tree with Unary Distance Variables)");
+  console.log("CADICAL SOLVER RESULTS:");
   console.log("-".repeat(60));
   
-  try {
-    const startBuild = performance.now();
-    const newCNF = buildNewEncodingDimacs(grid, colorRoots, pathlengthConstraints, "square");
-    const buildTime = performance.now() - startBuild;
-    
-    console.log(`CNF: ${newCNF.numVars} variables, ${newCNF.numClauses} clauses`);
-    console.log(`Build time: ${buildTime.toFixed(2)}ms`);
-    
-    const result = runCadical(newCNF.dimacs);
-    if (result.error) {
-      console.log(`Status: ERROR - ${result.error}`);
-    } else {
-      console.log(`Status: ${result.sat === true ? 'SATISFIABLE' : result.sat === false ? 'UNSATISFIABLE' : 'UNKNOWN'}`);
-      console.log(`Solve time: ${result.time.toFixed(2)}ms`);
-      console.log(`Total time: ${(buildTime + result.time).toFixed(2)}ms`);
-    }
-  } catch (e) {
-    console.log(`Status: ERROR - ${(e as Error).message}`);
+  const cadicalOld = runCadical(oldCNF.dimacs);
+  const cadicalNew = runCadical(newCNF.dimacs);
+  
+  console.log(`  Old encoding: ${cadicalOld.sat === true ? 'SAT' : cadicalOld.sat === false ? 'UNSAT' : 'ERROR'} in ${cadicalOld.time.toFixed(0)}ms`);
+  console.log(`  New encoding: ${cadicalNew.sat === true ? 'SAT' : cadicalNew.sat === false ? 'UNSAT' : 'ERROR'} in ${cadicalNew.time.toFixed(0)}ms`);
+  
+  if (cadicalOld.sat && cadicalNew.sat) {
+    const ratio = cadicalNew.time / cadicalOld.time;
+    console.log(`  => Old is ${ratio.toFixed(1)}x ${ratio > 1 ? 'FASTER' : 'SLOWER'}`);
   }
+  console.log("");
   
+  // Test with MiniSat
+  console.log("-".repeat(60));
+  console.log("MINISAT SOLVER RESULTS:");
+  console.log("-".repeat(60));
+  
+  const minisatOld = runMinisat(oldCNF.dimacs);
+  const minisatNew = runMinisat(newCNF.dimacs);
+  
+  console.log(`  Old encoding: ${minisatOld.sat === true ? 'SAT' : minisatOld.sat === false ? 'UNSAT' : 'ERROR'} in ${minisatOld.time.toFixed(0)}ms`);
+  console.log(`  New encoding: ${minisatNew.sat === true ? 'SAT' : minisatNew.sat === false ? 'UNSAT' : 'ERROR'} in ${minisatNew.time.toFixed(0)}ms`);
+  
+  if (minisatOld.sat && minisatNew.sat) {
+    const ratio = minisatNew.time / minisatOld.time;
+    console.log(`  => Old is ${ratio.toFixed(1)}x ${ratio > 1 ? 'FASTER' : 'SLOWER'}`);
+  }
   console.log("");
 }
 
@@ -629,21 +699,28 @@ function runSingleBenchmark(size: number, minDistance: number): void {
  */
 function runBenchmark(): void {
   const SIZE = 12;
+  // Browser uses minDistance = max(width, height)
+  const MIN_DISTANCE = Math.max(SIZE, SIZE);
   
   console.log("=".repeat(60));
-  console.log("BENCHMARK: Tree vs No-Tree SAT Encoding (CaDiCaL)");
+  console.log("BENCHMARK: Tree vs No-Tree SAT Encoding");
   console.log("=".repeat(60));
   console.log(`Grid size: ${SIZE}x${SIZE}`);
   console.log(`Inner grid (excluding hatch border): ${SIZE-2}x${SIZE-2} = ${(SIZE-2)*(SIZE-2)} cells`);
-  console.log(`Solver: CaDiCaL v1.7.3`);
+  console.log(`Min distance: ${MIN_DISTANCE} (matching browser's Maze Setup)`);
   console.log("");
-  console.log("NOTE: Both root and target cells are set to RED color,");
-  console.log("which forces the old encoding to connect them via spanning tree.");
+  console.log("NOTE: All interior cells are pre-colored RED (matching browser).");
+  console.log("Entrance at middle-left, exit at middle-right.");
   console.log("");
   
-  // Test with distance 70
   console.log("=".repeat(60));
-  console.log("TEST: Min distance = 70");
+  console.log(`TEST: Min distance = ${MIN_DISTANCE}`);
+  console.log("=".repeat(60));
+  runSingleBenchmark(SIZE, MIN_DISTANCE);
+  
+  // Also test with the user's requested minDistance = 70
+  console.log("=".repeat(60));
+  console.log("TEST: Min distance = 70 (user requested)");
   console.log("=".repeat(60));
   runSingleBenchmark(SIZE, 70);
 }
