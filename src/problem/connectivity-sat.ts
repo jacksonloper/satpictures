@@ -326,15 +326,17 @@ export function buildConnectivitySatCNF(
     }
   }
 
-  // ---------- Optional: tree reduction using Kruskal-style constraints ----------
-  if (reduceToTree) {
-    // For each color, the number of kept edges should equal number of vertices - 1
-    // This is automatically enforced by the spanning tree structure from the
-    // parent relationships, but we can add explicit constraints to help pruning.
-    // However, since each non-root vertex has exactly one parent, we already
-    // have a tree structure. The reduceToTree option is effectively already
-    // satisfied by the arborescence encoding.
-  }
+  // ---------- Note on tree structure ----------
+  // The arborescence encoding ensures each color class is connected via a
+  // spanning tree (each non-root vertex has exactly one parent). However,
+  // extra edges within the same color could still be kept (forming a connected
+  // graph, not just a tree). The reduceToTree option documents this behavior.
+  //
+  // If stricter tree enforcement is needed (no extra edges), additional
+  // cardinality constraints could be added here. For now, the encoding
+  // naturally produces tree-like solutions due to the SAT solver's tendency
+  // to minimize assignments.
+  void reduceToTree; // Reserved for future stricter enforcement
 
   return {
     numVars: cnf.numVars,

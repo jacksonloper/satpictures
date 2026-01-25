@@ -219,6 +219,18 @@ function formatErrorMessage(error: unknown): string {
 
 /**
  * Load the CaDiCaL WASM module by fetching and evaluating the script
+ *
+ * SECURITY NOTE: This function uses eval() to load the Emscripten-generated JavaScript.
+ * This is necessary because:
+ * 1. Vite bundles workers as ES modules by default
+ * 2. ES module workers don't support importScripts()
+ * 3. The Emscripten-generated script expects to run in global scope
+ * 4. The script is loaded from a controlled, same-origin source (/cadical/cadical-emscripten.js)
+ *
+ * This is a known limitation when integrating Emscripten modules with modern ES module bundlers.
+ * The security risk is mitigated by:
+ * - Only evaluating scripts from our own server (same-origin)
+ * - The script content is fetched from a static asset, not user input
  */
 function loadCadicalModule(): Promise<CadicalModule> {
   return new Promise((resolve, reject) => {
