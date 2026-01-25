@@ -203,6 +203,8 @@ export const Grid: React.FC<GridProps> = ({
     // Graph mode sizing constants (as fractions of cellSize)
     const GRAPH_NODE_RADIUS_RATIO = 0.08; // Small dots for nodes
     const GRAPH_EDGE_WIDTH_RATIO = 0.06; // Thin lines for edges
+    const CURVE_CONTROL_OFFSET_RATIO = 0.15; // Control point offset for smooth curves
+    const MIN_DISTANCE_THRESHOLD = 0.001; // Minimum distance to avoid division by zero
     const nodeRadius = cellSize * GRAPH_NODE_RADIUS_RATIO;
     const edgeWidth = cellSize * GRAPH_EDGE_WIDTH_RATIO;
     
@@ -301,10 +303,15 @@ export const Grid: React.FC<GridProps> = ({
       const cellColor = solution.assignedColors[node.row][node.col];
       const colorKey = String(cellColor);
       
-      // Root is identified by colorRoots prop or we need to find it
-      // For now, we'll pick the first node of each color as root
+      // Check if root is specified in colorRoots prop
       if (!colorRootKeys.has(colorKey)) {
-        colorRootKeys.set(colorKey, key);
+        const rootFromProp = colorRoots[colorKey];
+        if (rootFromProp) {
+          colorRootKeys.set(colorKey, `${rootFromProp.row},${rootFromProp.col}`);
+        } else {
+          // Fallback: pick the first node of each color as root
+          colorRootKeys.set(colorKey, key);
+        }
       }
     }
     
@@ -390,10 +397,10 @@ export const Grid: React.FC<GridProps> = ({
           const dy = node.cy - parent.node.cy;
           const dist = Math.sqrt(dx * dx + dy * dy);
           
-          if (dist > 0.001) {
+          if (dist > MIN_DISTANCE_THRESHOLD) {
             const normalizedDx = dx / dist;
             const normalizedDy = dy / dist;
-            const offset = cellSize * 0.15;
+            const offset = cellSize * CURVE_CONTROL_OFFSET_RATIO;
             
             points.push([node.cx + normalizedDx * offset, node.cy + normalizedDy * offset]);
           }
