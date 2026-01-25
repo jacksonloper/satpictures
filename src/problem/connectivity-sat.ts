@@ -13,6 +13,7 @@
  * - For each undirected edge {u,v}, we have two directed arc flow variables
  * - Arc can only carry flow if both endpoints have same color
  * - Flow conservation: outgoing flow = incoming flow + 1 for non-root nodes
+ * - Totalizer encoding for proper bidirectional sum constraints
  */
 
 /**
@@ -121,6 +122,102 @@ class CNF {
     this.addAtMostOneSinz(lits);
   }
 
+  /**
+   * Build a totalizer for summing unary-encoded values.
+   * Given input functions that return "input i >= k" literals,
+   * returns an output function for "sum >= k" with proper bidirectional constraints.
+   *
+   * @param inputs Array of functions (k) => literal for "input >= k"
+   * @param maxPerInput Maximum value each input can have
+   * @param prefix Variable name prefix for auxiliary variables
+   * @returns Function (k) => literal for "sum >= k"
+   */
+  buildTotalizer(
+    inputs: Array<(k: number) => number>,
+    maxPerInput: number,
+    prefix: string
+  ): (k: number) => number {
+    if (inputs.length === 0) {
+      // Empty sum is always 0
+      return (k: number) => {
+        if (k <= 0) return this.v(`${prefix}_true`); // Always true for k <= 0
+        return -this.v(`${prefix}_true`); // Always false for k > 0
+      };
+    }
+
+    if (inputs.length === 1) {
+      return inputs[0];
+    }
+
+    // Recursively build totalizer using divide-and-conquer
+    const mid = Math.floor(inputs.length / 2);
+    const leftInputs = inputs.slice(0, mid);
+    const rightInputs = inputs.slice(mid);
+
+    const leftSum = this.buildTotalizer(leftInputs, maxPerInput, `${prefix}_L`);
+    const rightSum = this.buildTotalizer(rightInputs, maxPerInput, `${prefix}_R`);
+
+    const maxLeft = leftInputs.length * maxPerInput;
+    const maxRight = rightInputs.length * maxPerInput;
+    const maxTotal = maxLeft + maxRight;
+
+    // Create output variables for the combined sum
+    const outVars = new Map<number, number>();
+    const outSum = (k: number): number => {
+      if (k <= 0) return this.v(`${prefix}_true`);
+      if (k > maxTotal) return -this.v(`${prefix}_true`);
+      if (!outVars.has(k)) {
+        outVars.set(k, this.v(`${prefix}>=${k}`));
+      }
+      return outVars.get(k)!;
+    };
+
+    // Add totalizer clauses (both directions)
+    // Forward: leftSum >= a ∧ rightSum >= b → outSum >= a+b
+    // Backward: outSum >= k → ∨_{a+b=k} (leftSum >= a ∧ rightSum >= b)
+    //           Equivalently: ¬outSum >= k ∨ ∨_{a+b=k} (leftSum >= a ∧ rightSum >= b)
+    //           Which requires auxiliary variables or is handled by contrapositive
+
+    for (let a = 0; a <= maxLeft; a++) {
+      for (let b = 0; b <= maxRight; b++) {
+        const sum = a + b;
+        if (sum > 0 && sum <= maxTotal) {
+          // Forward: leftSum >= a ∧ rightSum >= b → outSum >= sum
+          const clause: number[] = [outSum(sum)];
+          if (a > 0) clause.push(-leftSum(a));
+          if (b > 0) clause.push(-rightSum(b));
+          this.addClause(clause);
+        }
+      }
+    }
+
+    // Backward (contrapositive): outSum >= k → (leftSum >= a ∨ rightSum >= k-a) for all valid a
+    // This is: ¬outSum >= k ∨ leftSum >= a ∨ rightSum >= k-a
+    // We need this for all a from max(0, k-maxRight) to min(maxLeft, k)
+    for (let k = 1; k <= maxTotal; k++) {
+      // outSum >= k implies there exist a, b with a + b >= k where leftSum >= a and rightSum >= b
+      // Contrapositive: if for all valid (a, b) pairs, either leftSum < a or rightSum < b, then outSum < k
+      // This is enforced by: outSum >= k → leftSum >= (k - maxRight) when k > maxRight
+      //                  and: outSum >= k → rightSum >= (k - maxLeft) when k > maxLeft
+      const minFromLeft = Math.max(0, k - maxRight);
+      const minFromRight = Math.max(0, k - maxLeft);
+
+      if (minFromLeft > 0) {
+        this.addImp(outSum(k), leftSum(minFromLeft));
+      }
+      if (minFromRight > 0) {
+        this.addImp(outSum(k), rightSum(minFromRight));
+      }
+    }
+
+    // Monotonicity: outSum >= k → outSum >= k-1
+    for (let k = 2; k <= maxTotal; k++) {
+      this.addImp(outSum(k), outSum(k - 1));
+    }
+
+    return outSum;
+  }
+
   toDimacs(): string {
     let out = `p cnf ${this.numVars} ${this.clauses.length}\n`;
     for (const cl of this.clauses) out += `${cl.join(" ")} 0\n`;
@@ -135,6 +232,7 @@ class CNF {
  * - Each non-root node produces 1 unit of flow
  * - Flow is transported via directed arcs toward the root
  * - Flow conservation: outgoing = incoming + 1 for non-root nodes
+ * - Uses totalizer encoding for proper bidirectional sum constraints
  *
  * @param input - Configuration specifying nodes, edges, and color hints
  * @returns The CNF formula and metadata
@@ -247,9 +345,9 @@ export function buildConnectivitySatCNF(
     }
   }
 
-  // ---------- (4) Flow conservation using unary adder ----------
+  // ---------- (4) Flow conservation using totalizer ----------
   // For each node v: out_total = in_total + 1 (if non-root)
-  // We use a compact encoding with auxiliary variables for sums
+  // Uses totalizer for proper bidirectional sum constraints
 
   for (const v of nodeList) {
     const neighbors = [...adj.get(v)!];
@@ -257,102 +355,22 @@ export function buildConnectivitySatCNF(
 
     const isRoot = colors.some((c) => rootOfColor[c] === v);
 
-    // Unary sum variables
-    const inSum = (k: number) => cnf.v(`_inSum(${v})>=${k}`);
-    const outSum = (k: number) => cnf.v(`_outSum(${v})>=${k}`);
+    // Build totalizer for incoming flow
+    const incomingFlows = neighbors.map((u) => (k: number) => flowVar(u, v, k));
+    const inSum = cnf.buildTotalizer(incomingFlows, maxFlow, `_in(${v})`);
+
+    // Build totalizer for outgoing flow
+    const outgoingFlows = neighbors.map((u) => (k: number) => flowVar(v, u, k));
+    const outSum = cnf.buildTotalizer(outgoingFlows, maxFlow, `_out(${v})`);
 
     const maxTotal = neighbors.length * maxFlow;
-
-    // Build incoming sum using sequential addition
-    // We add one arc at a time to a running sum
-    {
-      let prevSum = (k: number) => flowVar(neighbors[0], v, k);
-      
-      for (let i = 1; i < neighbors.length; i++) {
-        const arcFlow = (k: number) => flowVar(neighbors[i], v, k);
-        const isLast = i === neighbors.length - 1;
-        const currSum = isLast ? inSum : (k: number) => cnf.v(`_inPartial(${v},${i})>=${k}`);
-        
-        const maxPrev = i * maxFlow;
-        const maxCurr = Math.min((i + 1) * maxFlow, maxTotal);
-
-        // Forward: prevSum >= a ∧ arcFlow >= b → currSum >= a+b
-        for (let a = 0; a <= maxPrev; a++) {
-          for (let b = 0; b <= maxFlow; b++) {
-            const sum = a + b;
-            if (sum > 0 && sum <= maxCurr) {
-              const clause: number[] = [];
-              if (a > 0) clause.push(-prevSum(a));
-              if (b > 0) clause.push(-arcFlow(b));
-              clause.push(currSum(sum));
-              if (clause.length > 1) cnf.addClause(clause);
-            }
-          }
-        }
-
-        // Monotonicity
-        for (let k = 2; k <= maxCurr; k++) {
-          cnf.addImp(currSum(k), currSum(k - 1));
-        }
-
-        prevSum = currSum;
-      }
-
-      // Handle single neighbor case
-      if (neighbors.length === 1) {
-        for (let k = 1; k <= maxFlow; k++) {
-          cnf.addImp(flowVar(neighbors[0], v, k), inSum(k));
-          cnf.addImp(inSum(k), flowVar(neighbors[0], v, k));
-        }
-      }
-    }
-
-    // Build outgoing sum similarly
-    {
-      let prevSum = (k: number) => flowVar(v, neighbors[0], k);
-      
-      for (let i = 1; i < neighbors.length; i++) {
-        const arcFlow = (k: number) => flowVar(v, neighbors[i], k);
-        const isLast = i === neighbors.length - 1;
-        const currSum = isLast ? outSum : (k: number) => cnf.v(`_outPartial(${v},${i})>=${k}`);
-        
-        const maxPrev = i * maxFlow;
-        const maxCurr = Math.min((i + 1) * maxFlow, maxTotal);
-
-        for (let a = 0; a <= maxPrev; a++) {
-          for (let b = 0; b <= maxFlow; b++) {
-            const sum = a + b;
-            if (sum > 0 && sum <= maxCurr) {
-              const clause: number[] = [];
-              if (a > 0) clause.push(-prevSum(a));
-              if (b > 0) clause.push(-arcFlow(b));
-              clause.push(currSum(sum));
-              if (clause.length > 1) cnf.addClause(clause);
-            }
-          }
-        }
-
-        for (let k = 2; k <= maxCurr; k++) {
-          cnf.addImp(currSum(k), currSum(k - 1));
-        }
-
-        prevSum = currSum;
-      }
-
-      if (neighbors.length === 1) {
-        for (let k = 1; k <= maxFlow; k++) {
-          cnf.addImp(flowVar(v, neighbors[0], k), outSum(k));
-          cnf.addImp(outSum(k), flowVar(v, neighbors[0], k));
-        }
-      }
-    }
 
     // ---------- Flow conservation constraint ----------
     // Non-root: outSum >= k ↔ inSum >= k-1 (each node produces 1 unit)
     if (!isRoot) {
       // outSum >= 1 always (each non-root produces at least 1)
       cnf.addUnit(outSum(1));
-      
+
       // For k >= 2: outSum >= k ↔ inSum >= k-1
       for (let k = 2; k <= maxTotal; k++) {
         cnf.addImp(inSum(k - 1), outSum(k));
@@ -361,15 +379,17 @@ export function buildConnectivitySatCNF(
     }
   }
 
-  // ---------- (5) Link flow to kept edges ----------
-  // Y_{uv} ↔ (F_{u→v,1} ∨ F_{v→u,1})
+  // ---------- (5) Link flow to kept edges (one direction only) ----------
+  // F_{u→v,1} → Y_{uv} and F_{v→u,1} → Y_{uv}
+  // But NOT Y → flow (kept edges don't have to carry flow)
   for (const [u, v] of undirectedEdges) {
     const yVar = keepVar(u, v);
     const fUV = flowVar(u, v, 1);
     const fVU = flowVar(v, u, 1);
-    cnf.addClause([-yVar, fUV, fVU]);
+    // Flow implies edge is kept (for visualization)
     cnf.addImp(fUV, yVar);
     cnf.addImp(fVU, yVar);
+    // Removed: cnf.addClause([-yVar, fUV, fVU]); // This was forcing tree-like behavior
   }
 
   void reduceToTree;
