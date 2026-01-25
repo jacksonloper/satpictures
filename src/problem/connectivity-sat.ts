@@ -392,6 +392,21 @@ export function buildConnectivitySatCNF(
     // Removed: cnf.addClause([-yVar, fUV, fVU]); // This was forcing tree-like behavior
   }
 
+  // ---------- (6) Kept edges must be monochromatic ----------
+  // An edge can only be kept if both endpoints have the same color
+  // Y_{uv} ∧ X_{u,c} → X_{v,c}  and  Y_{uv} ∧ X_{v,c} → X_{u,c}
+  for (const [u, v] of undirectedEdges) {
+    const yVar = keepVar(u, v);
+    for (const c of colors) {
+      const xu = colorVar(u, c);
+      const xv = colorVar(v, c);
+      // If edge is kept and u has color c, then v must have color c
+      cnf.addClause([-yVar, -xu, xv]);
+      // If edge is kept and v has color c, then u must have color c
+      cnf.addClause([-yVar, -xv, xu]);
+    }
+  }
+
   void reduceToTree;
 
   return {
