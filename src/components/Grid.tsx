@@ -286,8 +286,9 @@ export const Grid: React.FC<GridProps> = ({
       nodeKey2: string;
       // Edge index for adjacency lookup
       edgeIndex: number;
-      // Control point for curved edges (set after finding straight-path pairs)
-      controlPoint?: { x: number; y: number };
+      // For curved edges: the vertex the curve should pass through and the control point
+      // The curve will be rendered as a quadratic Bézier that passes through the vertex
+      curveThrough?: { vx: number; vy: number }; // vertex coordinates
     }
     
     const edges: EdgeData[] = [];
@@ -347,8 +348,6 @@ export const Grid: React.FC<GridProps> = ({
     
     // For nodes with 2+ edges, find the pair closest to 180° and curve them
     // This creates smoother visual paths through vertices
-    const CURVE_CONTROL_RATIO = 0.3; // Control point offset ratio from edge midpoint
-    
     for (const [nodeKey, edgeIndices] of nodeEdges.entries()) {
       if (edgeIndices.length < 2) continue;
       
@@ -395,66 +394,22 @@ export const Grid: React.FC<GridProps> = ({
         }
       }
       
-      // Only curve if angle is reasonably close to 180° (at least 120°)
-      if (bestPair && bestAngleDiff >= (2 * Math.PI / 3)) {
+      // Always curve the best pair of edges (no angle threshold)
+      // This ensures smooth transitions even at right angles
+      if (bestPair) {
         const [ea1, ea2] = bestPair;
         const edge1 = edges[ea1.edgeIndex];
         const edge2 = edges[ea2.edgeIndex];
         
-        // Compute direction vectors from node to each edge's other endpoint
-        const dx1 = ea1.otherEndX - node.cx;
-        const dy1 = ea1.otherEndY - node.cy;
-        const dx2 = ea2.otherEndX - node.cx;
-        const dy2 = ea2.otherEndY - node.cy;
-        
-        // Normalize directions
-        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
-        const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-        if (len1 < 0.001 || len2 < 0.001) continue;
-        
-        const ux1 = dx1 / len1;
-        const uy1 = dy1 / len1;
-        const ux2 = dx2 / len2;
-        const uy2 = dy2 / len2;
-        
-        // Compute the shared tangent direction as the bisector of the two directions
-        // Since they're roughly opposite, we rotate one by 180° to get the "through" direction
-        // The tangent should be perpendicular to the angle bisector between the two edges
-        // For a smooth path, we use the direction from edge1's end through the node toward edge2's end
-        // This is essentially: -u1 averaged with u2, normalized
-        const tangentX = ux2 - ux1;
-        const tangentY = uy2 - uy1;
-        const tangentLen = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
-        
-        // If edges are exactly opposite (180°), tangent vector is zero - use perpendicular
-        let tx: number, ty: number;
-        if (tangentLen < 0.001) {
-          // Use perpendicular to edge1 direction
-          tx = -uy1;
-          ty = ux1;
-        } else {
-          tx = tangentX / tangentLen;
-          ty = tangentY / tangentLen;
-        }
-        
-        // Place control points along the shared tangent direction from the node
-        // For edge1: control point is in the direction of the tangent (toward edge2's side)
-        const controlDist1 = len1 * CURVE_CONTROL_RATIO;
-        const ctrl1X = node.cx + tx * controlDist1;
-        const ctrl1Y = node.cy + ty * controlDist1;
-        
-        // For edge2: control point is in the opposite tangent direction (toward edge1's side)
-        const controlDist2 = len2 * CURVE_CONTROL_RATIO;
-        const ctrl2X = node.cx - tx * controlDist2;
-        const ctrl2Y = node.cy - ty * controlDist2;
-        
-        // Only set control point if edge doesn't already have one
+        // Mark each edge to curve through this vertex
+        // The renderer will compute the actual control point to make the curve pass through
+        // Only set if edge doesn't already have a curve point
         // (another node may have already curved this edge)
-        if (!edge1.controlPoint) {
-          edge1.controlPoint = { x: ctrl1X, y: ctrl1Y };
+        if (!edge1.curveThrough) {
+          edge1.curveThrough = { vx: node.cx, vy: node.cy };
         }
-        if (!edge2.controlPoint) {
-          edge2.controlPoint = { x: ctrl2X, y: ctrl2Y };
+        if (!edge2.curveThrough) {
+          edge2.curveThrough = { vx: node.cx, vy: node.cy };
         }
       }
     }
@@ -552,10 +507,16 @@ export const Grid: React.FC<GridProps> = ({
     }
     
     // Helper to render an edge - either as a line or a quadratic Bézier curve
+    // For curved edges, we compute the control point so the curve passes through the vertex
     const renderEdge = (edge: EdgeData, keyPrefix: string, i: number) => {
-      if (edge.controlPoint) {
-        // Render as quadratic Bézier curve
-        const d = `M ${edge.x1} ${edge.y1} Q ${edge.controlPoint.x} ${edge.controlPoint.y} ${edge.x2} ${edge.y2}`;
+      if (edge.curveThrough) {
+        // Render as quadratic Bézier curve that passes through the vertex
+        // For a quadratic Bézier B(t) from P0 to P2 with control point C,
+        // to pass through point V at t=0.5: C = 2*V - 0.5*(P0 + P2)
+        const { vx, vy } = edge.curveThrough;
+        const cx = 2 * vx - 0.5 * (edge.x1 + edge.x2);
+        const cy = 2 * vy - 0.5 * (edge.y1 + edge.y2);
+        const d = `M ${edge.x1} ${edge.y1} Q ${cx} ${cy} ${edge.x2} ${edge.y2}`;
         return (
           <path
             key={`${keyPrefix}-${i}`}
