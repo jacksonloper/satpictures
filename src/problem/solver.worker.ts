@@ -5,7 +5,7 @@
 import { solveForestGridColoring } from "./forest-grid-solver";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "./graph-types";
 
-export type SolverType = "minisat" | "cadical";
+export type SolverType = "minisat" | "cadical" | "dpll";
 
 /**
  * Clear request JSON for the SAT solver.

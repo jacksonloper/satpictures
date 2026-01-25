@@ -15,4 +15,5 @@ export {
   MiniSatSolver,
 } from "./minisat-solver";
 export { CadicalSolver, CadicalFormulaBuilder } from "./cadical-solver";
+export { DPLLSolver, DPLLFormulaBuilder } from "./dpll-solver";
 export type { CadicalClass, CadicalConstructor, CadicalModule } from "./cadical-types";
