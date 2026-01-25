@@ -736,6 +736,7 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       reachLevel: number | null;
       isRoot: boolean;
+      minDistConstraint: number | null;
     }
     
     const octData: OctData[] = [];
@@ -752,8 +753,11 @@ export const Grid: React.FC<GridProps> = ({
         
         // Check if this cell is a root
         const isRoot = isRootCell(row, col);
+        
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
 
-        octData.push({ row, col, cx, cy, path, fill, reachLevel, isRoot });
+        octData.push({ row, col, cx, cy, path, fill, reachLevel, isRoot, minDistConstraint });
       }
     }
 
@@ -1068,6 +1072,37 @@ export const Grid: React.FC<GridProps> = ({
               </g>
             )
           )}
+          
+          {/* Min distance constraint markers */}
+          {octData.map(({ row, col, cx, cy, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={cx - cellSize * 0.25}
+                  y={cy - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -1108,6 +1143,34 @@ export const Grid: React.FC<GridProps> = ({
       col: number;
       path: string;
       fill: string;
+      centroid: [number, number];
+      reachLevel: number | null;
+      isRoot: boolean;
+      minDistConstraint: number | null;
+    }
+    
+    const cairoData: CairoData[] = [];
+    
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const tile = getCairoTile(row, col);
+        const svgTile = tile.map(toSvg);
+        const path = svgTile.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
+        const fill = getCellColor(row, col);
+        const centroid = toSvg(polyCentroid(tile));
+        
+        // Get distance level if available
+        const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
+        
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
+
+        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot, minDistConstraint });
+      }
+    }
       centroid: [number, number];
       reachLevel: number | null;
       isRoot: boolean;
@@ -1277,6 +1340,37 @@ export const Grid: React.FC<GridProps> = ({
               </g>
             )
           )}
+          
+          {/* Fifth pass: render min distance constraint markers */}
+          {cairoData.map(({ row, col, centroid, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={centroid[0] - cellSize * 0.25}
+                  y={centroid[1] - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -1320,6 +1414,7 @@ export const Grid: React.FC<GridProps> = ({
       centroid: [number, number];
       reachLevel: number | null;
       isRoot: boolean;
+      minDistConstraint: number | null;
     }
     
     const cairoData: CairoData[] = [];
@@ -1337,8 +1432,11 @@ export const Grid: React.FC<GridProps> = ({
         
         // Check if this cell is a root
         const isRoot = isRootCell(row, col);
+        
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
 
-        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot });
+        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot, minDistConstraint });
       }
     }
     
@@ -1617,6 +1715,37 @@ export const Grid: React.FC<GridProps> = ({
                   style={{ pointerEvents: "none" }}
                 >
                   R
+                </text>
+              </g>
+            )
+          )}
+          
+          {/* Sixth pass: render min distance constraint markers */}
+          {cairoData.map(({ row, col, centroid, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={centroid[0] - cellSize * 0.25}
+                  y={centroid[1] - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
                 </text>
               </g>
             )

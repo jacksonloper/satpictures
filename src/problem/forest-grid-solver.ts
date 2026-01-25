@@ -159,8 +159,6 @@ export function solveForestGridColoring(
   // Build distLowerBounds from pathlength constraints
   const distLowerBounds: [string, number][] = [];
   for (const constraint of pathlengthConstraints) {
-    if (!constraint.root) continue;
-    
     // For each cell with a min distance requirement, add a lower bound
     for (const [cellKey, minDist] of Object.entries(constraint.minDistances)) {
       if (minDist > 0) {

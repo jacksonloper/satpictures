@@ -43,14 +43,12 @@ export interface Edge {
 
 /**
  * A pathlength lower bound constraint.
- * Specifies that certain cells must be at least a minimum distance from a root cell.
+ * Specifies that certain cells must be at least a minimum distance from their color's root cell.
  * Distance is measured via kept edges (passages, not walls).
  */
 export interface PathlengthConstraint {
   /** Unique identifier for this constraint */
   id: string;
-  /** Root cell position - distance is measured from here */
-  root: GridPoint | null;
   /** Map from cell position key ("row,col") to minimum distance from root */
   minDistances: Record<string, number>;
 }
