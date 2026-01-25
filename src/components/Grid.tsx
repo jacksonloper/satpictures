@@ -396,13 +396,12 @@ export const Grid: React.FC<GridProps> = ({
       }
       
       // Only curve if angle is reasonably close to 180° (at least 120°)
-      if (bestPair && bestAngleDiff > (2 * Math.PI / 3)) {
+      if (bestPair && bestAngleDiff >= (2 * Math.PI / 3)) {
         const [ea1, ea2] = bestPair;
         const edge1 = edges[ea1.edgeIndex];
         const edge2 = edges[ea2.edgeIndex];
         
-        // Compute the "through" direction: average of the two outgoing directions
-        // This gives us the tangent direction at the node for the smooth path
+        // Compute direction vectors from node to each edge's other endpoint
         const dx1 = ea1.otherEndX - node.cx;
         const dy1 = ea1.otherEndY - node.cy;
         const dx2 = ea2.otherEndX - node.cx;
@@ -418,17 +417,36 @@ export const Grid: React.FC<GridProps> = ({
         const ux2 = dx2 / len2;
         const uy2 = dy2 / len2;
         
-        // Control point: place it along the tangent direction from node
-        // at a distance proportional to the edge length
-        // For edge1, use direction toward edge2 (the continuation) to get smooth tangent
-        const controlDist1 = len1 * CURVE_CONTROL_RATIO;
-        const ctrl1X = node.cx + ux2 * controlDist1; // use direction toward other edge
-        const ctrl1Y = node.cy + uy2 * controlDist1;
+        // Compute the shared tangent direction as the bisector of the two directions
+        // Since they're roughly opposite, we rotate one by 180° to get the "through" direction
+        // The tangent should be perpendicular to the angle bisector between the two edges
+        // For a smooth path, we use the direction from edge1's end through the node toward edge2's end
+        // This is essentially: -u1 averaged with u2, normalized
+        const tangentX = ux2 - ux1;
+        const tangentY = uy2 - uy1;
+        const tangentLen = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
         
-        // Similarly for edge2, use direction toward edge1
+        // If edges are exactly opposite (180°), tangent vector is zero - use perpendicular
+        let tx: number, ty: number;
+        if (tangentLen < 0.001) {
+          // Use perpendicular to edge1 direction
+          tx = -uy1;
+          ty = ux1;
+        } else {
+          tx = tangentX / tangentLen;
+          ty = tangentY / tangentLen;
+        }
+        
+        // Place control points along the shared tangent direction from the node
+        // For edge1: control point is in the direction of the tangent (toward edge2's side)
+        const controlDist1 = len1 * CURVE_CONTROL_RATIO;
+        const ctrl1X = node.cx + tx * controlDist1;
+        const ctrl1Y = node.cy + ty * controlDist1;
+        
+        // For edge2: control point is in the opposite tangent direction (toward edge1's side)
         const controlDist2 = len2 * CURVE_CONTROL_RATIO;
-        const ctrl2X = node.cx + ux1 * controlDist2; // use direction toward edge1
-        const ctrl2Y = node.cy + uy1 * controlDist2;
+        const ctrl2X = node.cx - tx * controlDist2;
+        const ctrl2Y = node.cy - ty * controlDist2;
         
         // Only set control point if edge doesn't already have one
         // (another node may have already curved this edge)
