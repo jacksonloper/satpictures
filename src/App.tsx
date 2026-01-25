@@ -116,6 +116,8 @@ function App() {
   // Distance input state for distance tool
   const [distanceInput, setDistanceInput] = useState<string>("");
   const [pendingDistanceCell, setPendingDistanceCell] = useState<{ row: number; col: number } | null>(null);
+  // SAT stats (variables and clauses) - shown during solving and in solution
+  const [satStats, setSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const numColors = 6;
 
   // Web Worker for non-blocking solving
@@ -351,6 +353,7 @@ function App() {
     setSolutionStatus("none");
     setErrorMessage(null);
     setSolveTime(null);
+    setSatStats(null);
 
     const startTime = performance.now();
     
@@ -364,9 +367,22 @@ function App() {
     workerRef.current = worker;
 
     worker.onmessage = (event: MessageEvent<SolverResponse>) => {
+      const { success, solution, error, messageType, stats } = event.data;
+      
+      // Handle progress message (stats before solving)
+      if (messageType === "progress" && stats) {
+        setSatStats(stats);
+        return; // Don't process as final result
+      }
+      
+      // Handle final result
       const endTime = performance.now();
-      const { success, solution, error } = event.data;
       setSolveTime(endTime - startTime);
+      
+      // Update stats from solution if available
+      if (solution?.stats) {
+        setSatStats(solution.stats);
+      }
       
       if (success && solution) {
         setSolution(solution);
@@ -799,6 +815,7 @@ function App() {
                 <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
                   Most recent solver output ({solutionMetadata.width}×{solutionMetadata.height} {solutionMetadata.gridType} grid).
                   {solveTime && ` Solved in ${solveTime.toFixed(0)}ms.`}
+                  {satStats && ` (${satStats.numVars.toLocaleString()} vars, ${satStats.numClauses.toLocaleString()} clauses)`}
                 </p>
                 
                 {/* Solution action buttons */}
@@ -922,7 +939,16 @@ function App() {
                 borderRadius: "4px",
               }}>
                 <p style={{ margin: 0, fontSize: "14px" }}>
-                  {solving ? "⏳ Solving..." : "No solution yet. Click Solve to generate one."}
+                  {solving ? (
+                    <>
+                      ⏳ Solving...
+                      {satStats && (
+                        <span style={{ display: "block", marginTop: "8px", fontSize: "12px" }}>
+                          {satStats.numVars.toLocaleString()} variables, {satStats.numClauses.toLocaleString()} clauses
+                        </span>
+                      )}
+                    </>
+                  ) : "No solution yet. Click Solve to generate one."}
                 </p>
               </div>
             )}

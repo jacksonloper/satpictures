@@ -60,6 +60,16 @@ export interface PathlengthConstraint {
 export type ColorRoots = Record<string, GridPoint>;
 
 /**
+ * SAT problem statistics
+ */
+export interface SATStats {
+  /** Number of SAT variables */
+  numVars: number;
+  /** Number of SAT clauses */
+  numClauses: number;
+}
+
+/**
  * Solution: which edges to keep (no wall) and assigned colors for blank cells
  */
 export interface GridSolution {
@@ -74,4 +84,6 @@ export interface GridSolution {
    * Key is constraint ID, value is 2D array of distances (-1 if unreachable).
    */
   distanceLevels?: Record<string, number[][]> | null;
+  /** SAT problem statistics (variables and clauses) */
+  stats?: SATStats;
 }

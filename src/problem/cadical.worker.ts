@@ -27,6 +27,10 @@ export interface CadicalSolverResponse {
   solution: GridSolution | null;
   error?: string;
   solverType: "cadical";
+  /** Type of message: 'progress' for stats before solving, 'result' for final result */
+  messageType?: "progress" | "result";
+  /** SAT problem stats (sent in progress message before solving) */
+  stats?: { numVars: number; numClauses: number };
 }
 
 // Type definitions for the Emscripten module
@@ -260,7 +264,23 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
     const solver = new CadicalSolver(cadical);
     
     // Solve using CaDiCaL with the forest encoding
-    const solution = solveForestGridColoring(grid, { solver, gridType, pathlengthConstraints, colorRoots });
+    const solution = solveForestGridColoring(grid, { 
+      solver, 
+      gridType, 
+      pathlengthConstraints, 
+      colorRoots,
+      onStatsReady: (stats) => {
+        // Send progress message with stats before solving
+        const progressResponse: CadicalSolverResponse = {
+          success: true,
+          solution: null,
+          solverType: "cadical",
+          messageType: "progress",
+          stats,
+        };
+        self.postMessage(progressResponse);
+      },
+    });
     
     // Clean up
     cadical.release();
@@ -269,6 +289,7 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
       success: true,
       solution,
       solverType: "cadical",
+      messageType: "result",
     };
     self.postMessage(response);
   } catch (error) {
@@ -277,6 +298,7 @@ self.onmessage = async (event: MessageEvent<CadicalSolverRequest>) => {
       solution: null,
       error: formatErrorMessage(error),
       solverType: "cadical",
+      messageType: "result",
     };
     self.postMessage(response);
   }

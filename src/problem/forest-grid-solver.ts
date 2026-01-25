@@ -26,6 +26,8 @@ export interface ForestSolveOptions {
   pathlengthConstraints?: PathlengthConstraint[];
   /** User-specified roots for each color (key is color number as string) */
   colorRoots?: ColorRoots;
+  /** Callback to report stats before solving (e.g., for progress messages) */
+  onStatsReady?: (stats: { numVars: number; numClauses: number }) => void;
 }
 
 /**
@@ -175,6 +177,14 @@ export function solveForestGridColoring(
     rootOfColor,
     distLowerBounds,
   });
+
+  // Report stats before solving (for progress messages)
+  if (options?.onStatsReady) {
+    options.onStatsReady({
+      numVars: cnfResult.numVars,
+      numClauses: cnfResult.clauses.length,
+    });
+  }
 
   // Use provided solver or create a new MiniSat solver
   const solver = options?.solver ?? new MiniSatSolver();
@@ -339,5 +349,14 @@ export function solveForestGridColoring(
     }
   }
 
-  return { keptEdges, wallEdges, assignedColors, distanceLevels };
+  return { 
+    keptEdges, 
+    wallEdges, 
+    assignedColors, 
+    distanceLevels,
+    stats: {
+      numVars: cnfResult.numVars,
+      numClauses: cnfResult.clauses.length,
+    },
+  };
 }

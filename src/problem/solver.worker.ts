@@ -53,6 +53,10 @@ export interface SolverResponse {
   error?: string;
   /** Which solver was used */
   solverType: SolverType;
+  /** Type of message: 'progress' for stats before solving, 'result' for final result */
+  messageType?: "progress" | "result";
+  /** SAT problem stats (sent in progress message before solving) */
+  stats?: { numVars: number; numClauses: number };
 }
 
 /**
@@ -81,11 +85,27 @@ self.onmessage = (event: MessageEvent<SolverRequest>) => {
   const grid: ColorGrid = legacyGrid ?? { width, height, colors };
 
   try {
-    const solution = solveForestGridColoring(grid, { gridType, pathlengthConstraints, colorRoots });
+    const solution = solveForestGridColoring(grid, { 
+      gridType, 
+      pathlengthConstraints, 
+      colorRoots,
+      onStatsReady: (stats) => {
+        // Send progress message with stats before solving
+        const progressResponse: SolverResponse = {
+          success: true,
+          solution: null,
+          solverType: "minisat",
+          messageType: "progress",
+          stats,
+        };
+        self.postMessage(progressResponse);
+      },
+    });
     const response: SolverResponse = {
       success: true,
       solution,
       solverType: "minisat",
+      messageType: "result",
     };
     self.postMessage(response);
   } catch (error) {
@@ -94,6 +114,7 @@ self.onmessage = (event: MessageEvent<SolverRequest>) => {
       solution: null,
       error: formatErrorMessage(error),
       solverType: "minisat",
+      messageType: "result",
     };
     self.postMessage(response);
   }
