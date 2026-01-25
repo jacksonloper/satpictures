@@ -11,7 +11,7 @@ import {
   DEFAULT_WALL_THICKNESS,
 } from "./gridConstants";
 
-type EditorTool = "root" | "distance";
+// Since roots are now set per-color (not per-constraint), this editor only handles distance constraints
 
 interface PathlengthConstraintEditorProps {
   /** The grid being edited */
@@ -94,27 +94,19 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
   onConstraintChange,
   cellSize = 40,
 }) => {
-  const [selectedTool, setSelectedTool] = useState<EditorTool>("root");
+  // Since roots are now set per-color, this editor only handles distance constraints
   const [distanceInput, setDistanceInput] = useState<string>("");
   const [pendingCell, setPendingCell] = useState<{ row: number; col: number } | null>(null);
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
-      if (selectedTool === "root") {
-        // Place root at this cell
-        onConstraintChange({
-          ...constraint,
-          root: { row, col },
-        });
-      } else if (selectedTool === "distance") {
-        // Open distance input for this cell
-        const cellKey = `${row},${col}`;
-        const existingDistance = constraint.minDistances[cellKey];
-        setPendingCell({ row, col });
-        setDistanceInput(existingDistance ? existingDistance.toString() : "");
-      }
+      // Open distance input for this cell
+      const cellKey = `${row},${col}`;
+      const existingDistance = constraint.minDistances[cellKey];
+      setPendingCell({ row, col });
+      setDistanceInput(existingDistance ? existingDistance.toString() : "");
     },
-    [selectedTool, constraint, onConstraintChange]
+    [constraint]
   );
 
   const handleDistanceSubmit = useCallback(() => {
@@ -159,52 +151,16 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
     [handleDistanceSubmit]
   );
 
-  // Create a modified grid showing root and distances
+  // Create a modified grid showing distance constraints
   // We'll overlay this information on top of the regular grid
   const renderOverlay = useMemo(() => {
     const overlays: React.ReactNode[] = [];
-    
-    // Root marker
-    if (constraint.root) {
-      const { row, col } = constraint.root;
-      const centroid = getCellCentroid(row, col, cellSize, gridType, grid.width, grid.height);
-      overlays.push(
-        <div
-          key="root"
-          style={{
-            position: "absolute",
-            left: centroid.x,
-            top: centroid.y,
-            transform: "translate(-50%, -50%)",
-            width: cellSize * 0.6,
-            height: cellSize * 0.6,
-            borderRadius: "50%",
-            backgroundColor: "rgba(46, 204, 113, 0.8)",
-            border: "3px solid white",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: "bold",
-            color: "white",
-            fontSize: "12px",
-            pointerEvents: "none",
-          }}
-        >
-          R
-        </div>
-      );
-    }
 
     // Distance markers
     for (const [cellKey, distance] of Object.entries(constraint.minDistances)) {
       const [rowStr, colStr] = cellKey.split(",");
       const row = parseInt(rowStr, 10);
       const col = parseInt(colStr, 10);
-      
-      // Don't show distance marker on root
-      if (constraint.root && constraint.root.row === row && constraint.root.col === col) {
-        continue;
-      }
 
       const centroid = getCellCentroid(row, col, cellSize, gridType, grid.width, grid.height);
       overlays.push(
@@ -240,44 +196,9 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      {/* Tool selection */}
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <span style={{ fontWeight: "bold", marginRight: "8px" }}>Tool:</span>
-        <button
-          onClick={() => setSelectedTool("root")}
-          style={{
-            padding: "6px 12px",
-            backgroundColor: selectedTool === "root" ? "#2ecc71" : "#bdc3c7",
-            color: selectedTool === "root" ? "white" : "#2c3e50",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontWeight: selectedTool === "root" ? "bold" : "normal",
-          }}
-        >
-          🎯 Root Placer
-        </button>
-        <button
-          onClick={() => setSelectedTool("distance")}
-          style={{
-            padding: "6px 12px",
-            backgroundColor: selectedTool === "distance" ? "#e74c3c" : "#bdc3c7",
-            color: selectedTool === "distance" ? "white" : "#2c3e50",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontWeight: selectedTool === "distance" ? "bold" : "normal",
-          }}
-        >
-          📏 Distance Specifier
-        </button>
-      </div>
-
-      {/* Tool description */}
+      {/* Description */}
       <p style={{ fontSize: "12px", color: "#7f8c8d", margin: 0 }}>
-        {selectedTool === "root"
-          ? "Click on a cell to set it as the root (origin) for distance calculations."
-          : "Click on a cell to specify a minimum distance from the root."}
+        Click on a cell to specify a minimum distance from the color's root.
       </p>
 
       {/* Distance input modal - prominent dialog for mobile compatibility */}
@@ -366,7 +287,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
           gridType={gridType}
           viewMode="sketchpad"
         />
-        {/* Overlay for root and distance markers */}
+        {/* Overlay for distance markers */}
         <div
           style={{
             position: "absolute",
@@ -382,10 +303,7 @@ export const PathlengthConstraintEditor: React.FC<PathlengthConstraintEditorProp
       {/* Summary */}
       <div style={{ fontSize: "12px", color: "#7f8c8d" }}>
         <strong>Constraint Summary:</strong>{" "}
-        {constraint.root
-          ? `Root at (${constraint.root.row}, ${constraint.root.col})`
-          : "No root set"}{" "}
-        | {Object.keys(constraint.minDistances).length} distance requirement(s)
+        {Object.keys(constraint.minDistances).length} distance requirement(s)
       </div>
     </div>
   );

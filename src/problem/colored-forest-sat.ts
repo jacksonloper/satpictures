@@ -264,12 +264,12 @@ export function buildColoredForestSatCNF(
     for (const v of adj.get(u)!) {
       const p = parentVar(u, v);
 
-      // (redundant but fine) preserve color along parent edge
+      // Can only choose a parent with your same color (helps solver prune search)
+      // par(u,v) ∧ col(u)=c → col(v)=c
       for (const c of colors) {
         const cu = colVar(u, c);
         const cv = colVar(v, c);
         cnf.addClause([-p, -cu, cv]);
-        cnf.addClause([-p, -cv, cu]);
       }
 
       // Distance increment constraints:

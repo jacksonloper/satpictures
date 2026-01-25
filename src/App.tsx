@@ -444,8 +444,44 @@ function App() {
               📝 Sketchpad
             </h2>
             
-            {/* View Mode Toggle */}
-            <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
+            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
+              {sketchpadViewMode === "colors" 
+                ? "Click cells to paint colors. Click Solve to generate a solution."
+                : sketchpadViewMode === "roots"
+                ? "Click a colored cell to set it as the root for that color's tree. Each color needs exactly one root."
+                : "Add pathlength lower bound constraints. Each constraint specifies minimum distances from the color's root."}
+            </p>
+            
+            {/* Sketchpad Controls */}
+            <Controls
+              gridWidth={gridWidth}
+              gridHeight={gridHeight}
+              onWidthChange={handleWidthChange}
+              onHeightChange={handleHeightChange}
+              onSolve={handleSolve}
+              onClear={handleClear}
+              onMazeSetup={handleMazeSetup}
+              onCancel={handleCancel}
+              solving={solving}
+              solutionStatus={solutionStatus}
+              errorMessage={errorMessage}
+              solverType={solverType}
+              onSolverTypeChange={setSolverType}
+              solveTime={solveTime}
+              solution={solution}
+              gridType={gridType}
+              onGridTypeChange={handleGridTypeChange}
+              onDownloadColors={handleDownloadSketchpadColors}
+              onUploadColors={handleUploadColors}
+              grid={grid}
+              pathlengthConstraints={pathlengthConstraints}
+              onPathlengthConstraintsChange={setPathlengthConstraints}
+              selectedConstraintId={selectedConstraintId}
+              onSelectedConstraintIdChange={setSelectedConstraintId}
+            />
+
+            {/* View Mode Toggle - underneath upload colors */}
+            <div style={{ display: "flex", gap: "8px", marginTop: "16px", marginBottom: "12px", flexWrap: "wrap" }}>
               <button
                 onClick={() => setSketchpadViewMode("colors")}
                 style={{
@@ -489,42 +525,6 @@ function App() {
                 📏 Pathlength Constraints ({pathlengthConstraints.length})
               </button>
             </div>
-
-            <p style={{ fontSize: "12px", color: "#7f8c8d", margin: "0 0 12px 0" }}>
-              {sketchpadViewMode === "colors" 
-                ? "Click cells to paint colors. Click Solve to generate a solution."
-                : sketchpadViewMode === "roots"
-                ? "Click a colored cell to set it as the root for that color's tree. Each color needs exactly one root."
-                : "Add pathlength lower bound constraints. Each constraint specifies minimum distances from a root cell."}
-            </p>
-            
-            {/* Sketchpad Controls */}
-            <Controls
-              gridWidth={gridWidth}
-              gridHeight={gridHeight}
-              onWidthChange={handleWidthChange}
-              onHeightChange={handleHeightChange}
-              onSolve={handleSolve}
-              onClear={handleClear}
-              onMazeSetup={handleMazeSetup}
-              onCancel={handleCancel}
-              solving={solving}
-              solutionStatus={solutionStatus}
-              errorMessage={errorMessage}
-              solverType={solverType}
-              onSolverTypeChange={setSolverType}
-              solveTime={solveTime}
-              solution={solution}
-              gridType={gridType}
-              onGridTypeChange={handleGridTypeChange}
-              onDownloadColors={handleDownloadSketchpadColors}
-              onUploadColors={handleUploadColors}
-              grid={grid}
-              pathlengthConstraints={pathlengthConstraints}
-              onPathlengthConstraintsChange={setPathlengthConstraints}
-              selectedConstraintId={selectedConstraintId}
-              onSelectedConstraintIdChange={setSelectedConstraintId}
-            />
 
             {sketchpadViewMode === "colors" ? (
               <>

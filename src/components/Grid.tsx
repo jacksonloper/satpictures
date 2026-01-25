@@ -687,6 +687,7 @@ export const Grid: React.FC<GridProps> = ({
       path: string;
       fill: string;
       reachLevel: number | null;
+      isRoot: boolean;
     }
     
     const octData: OctData[] = [];
@@ -700,8 +701,11 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
 
-        octData.push({ row, col, cx, cy, path, fill, reachLevel });
+        octData.push({ row, col, cx, cy, path, fill, reachLevel, isRoot });
       }
     }
 
@@ -987,6 +991,35 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Root indicators (show R when not displaying levels) */}
+          {octData.map(({ row, col, cx, cy, reachLevel, isRoot }) =>
+            isRoot && reachLevel === null && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -1029,6 +1062,7 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       centroid: [number, number];
       reachLevel: number | null;
+      isRoot: boolean;
     }
     
     const cairoData: CairoData[] = [];
@@ -1043,8 +1077,11 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
 
-        cairoData.push({ row, col, path, fill, centroid, reachLevel });
+        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot });
       }
     }
     
@@ -1163,6 +1200,35 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Fourth pass: render root indicators (show R when not displaying levels) */}
+          {cairoData.map(({ row, col, centroid, reachLevel, isRoot }) =>
+            isRoot && reachLevel === null && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={centroid[0]}
+                  cy={centroid[1]}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -1205,6 +1271,7 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       centroid: [number, number];
       reachLevel: number | null;
+      isRoot: boolean;
     }
     
     const cairoData: CairoData[] = [];
@@ -1219,8 +1286,11 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
 
-        cairoData.push({ row, col, path, fill, centroid, reachLevel });
+        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot });
       }
     }
     
@@ -1472,6 +1542,35 @@ export const Grid: React.FC<GridProps> = ({
               >
                 {reachLevel === -1 ? "∞" : reachLevel}
               </text>
+            )
+          )}
+          
+          {/* Fifth pass: render root indicators (show R when not displaying levels) */}
+          {cairoData.map(({ row, col, centroid, reachLevel, isRoot }) =>
+            isRoot && reachLevel === null && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={centroid[0]}
+                  cy={centroid[1]}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
             )
           )}
         </svg>
