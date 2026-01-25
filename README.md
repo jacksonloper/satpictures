@@ -1,6 +1,15 @@
 # SatPictures - Grid Coloring Solver
 
-A web application that uses SAT solving to find valid maze configurations where each color region forms a single connected component.  Live at https://main--taupe-souffle-a1f8fd.netlify.app/
+A web application that uses SAT solving to find valid maze configurations where each color region forms a tree rooted at a designated cell. Live at https://main--taupe-souffle-a1f8fd.netlify.app/
+
+## Purpose
+
+**While purpose-built maze software can solve these problems more efficiently, this project explores how far modern SAT solvers have come by encoding the problem as pure logical constraints.**
+
+The goal is not to create the most efficient maze generator, but rather to assess the current state of SAT solver technology by expressing maze generation purely as a Boolean satisfiability problem. This provides insight into:
+- How well CDCL (Conflict-Driven Clause Learning) solvers handle graph connectivity constraints
+- The trade-offs between different SAT encodings (binary vs unary distance, bounded reachability vs tree structure)
+- Practical limits of WASM-compiled SAT solvers running in the browser
 
 ## Problem Description
 

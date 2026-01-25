@@ -2,8 +2,8 @@
  * Web Worker for running the SAT solver in a background thread
  */
 
-import { solveGridColoring } from "./grid-coloring";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "./graph-types";
+import { solveForestGridColoring } from "./forest-grid-solver";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "./graph-types";
 
 export type SolverType = "minisat" | "cadical";
 
@@ -30,6 +30,11 @@ export interface SolverRequest {
    * Each constraint specifies a root cell and minimum distances from that root.
    */
   pathlengthConstraints: PathlengthConstraint[];
+  /**
+   * Map from color index to root cell for that color.
+   * Each non-hatch color used in the grid must have exactly one root specified.
+   */
+  colorRoots: ColorRoots;
   // Legacy fields (kept for compatibility, will be removed)
   grid?: ColorGrid;
   numColors?: number;
@@ -48,6 +53,10 @@ export interface SolverResponse {
   error?: string;
   /** Which solver was used */
   solverType: SolverType;
+  /** Type of message: 'progress' for stats before solving, 'result' for final result */
+  messageType?: "progress" | "result";
+  /** SAT problem stats (sent in progress message before solving) */
+  stats?: { numVars: number; numClauses: number };
 }
 
 /**
@@ -70,18 +79,33 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = (event: MessageEvent<SolverRequest>) => {
-  const { gridType, width, height, colors, pathlengthConstraints, grid: legacyGrid, numColors } = event.data;
+  const { gridType, width, height, colors, pathlengthConstraints, colorRoots, grid: legacyGrid } = event.data;
 
   // Support both new and legacy request formats
   const grid: ColorGrid = legacyGrid ?? { width, height, colors };
-  const effectiveNumColors = numColors ?? 6;
 
   try {
-    const solution = solveGridColoring(grid, effectiveNumColors, { gridType, pathlengthConstraints });
+    const solution = solveForestGridColoring(grid, { 
+      gridType, 
+      pathlengthConstraints, 
+      colorRoots,
+      onStatsReady: (stats) => {
+        // Send progress message with stats before solving
+        const progressResponse: SolverResponse = {
+          success: true,
+          solution: null,
+          solverType: "minisat",
+          messageType: "progress",
+          stats,
+        };
+        self.postMessage(progressResponse);
+      },
+    });
     const response: SolverResponse = {
       success: true,
       solution,
       solverType: "minisat",
+      messageType: "result",
     };
     self.postMessage(response);
   } catch (error) {
@@ -90,6 +114,7 @@ self.onmessage = (event: MessageEvent<SolverRequest>) => {
       solution: null,
       error: formatErrorMessage(error),
       solverType: "minisat",
+      messageType: "result",
     };
     self.postMessage(response);
   }

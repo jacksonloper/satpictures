@@ -489,155 +489,17 @@ export function solveGridColoring(
   }
 
   // ============================================
-  // 3. PATHLENGTH LOWER BOUND CONSTRAINTS
+  // 3. PATHLENGTH LOWER BOUND CONSTRAINTS (DEPRECATED)
   // ============================================
-  // For each pathlength constraint with a root and minimum distances,
-  // enforce that the path from root to each specified cell is at least the minimum distance.
-  //
-  // We use the standard bounded-reachability SAT encoding:
-  //   R[i][v] = "v is reachable from root using kept edges in at most i steps"
-  //
-  // Constraints:
-  //   Base: R[0][root] = true, R[0][other] = false
-  //   Step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor of v} (R[i-1][u] ∧ edge(u,v))
-  //   Forbidden: For each cell with minDistance d: ¬R[d-1][cell] (not reachable in < d steps)
-  //
-  // This correctly enforces that the shortest-path distance from root to cell is >= d.
+  // Note: The old bounded-reachability encoding no longer supports pathlength constraints
+  // since the root is now managed via colorRoots. Use solveForestGridColoring instead.
+  // The pathlength constraints are silently ignored in this legacy solver.
   
   const pathlengthConstraints = options?.pathlengthConstraints ?? [];
-  
-  // Track distance levels for output (computed via BFS after solving)
+  void pathlengthConstraints; // Unused - constraints require colorRoots which this solver doesn't support
+
+  // Track distance levels for output (none in legacy solver)
   const constraintRoots: { constraintId: string; root: GridPoint }[] = [];
-  
-  for (const constraint of pathlengthConstraints) {
-    if (!constraint.root) {
-      // No root set - skip this constraint
-      continue;
-    }
-    
-    const root = constraint.root;
-    constraintRoots.push({ constraintId: constraint.id, root });
-    
-    // Get all cells with minimum distance requirements
-    const minDistanceEntries = Object.entries(constraint.minDistances);
-    if (minDistanceEntries.length === 0) {
-      // No distance requirements - skip
-      continue;
-    }
-    
-    // Find the maximum K we need to encode (max minDistance - 1)
-    let maxK = 0;
-    for (const [, dist] of minDistanceEntries) {
-      if (dist > 0) {
-        maxK = Math.max(maxK, dist - 1);
-      }
-    }
-    
-    if (maxK === 0) {
-      // All minDistances are 1 or less - no constraints needed
-      continue;
-    }
-    
-    // R[i][row,col] variables: reachable in at most i steps
-    const R: Map<string, number>[] = [];
-    for (let step = 0; step <= maxK; step++) {
-      R.push(new Map<string, number>());
-    }
-    
-    // Create variables for all cells at all steps
-    for (let step = 0; step <= maxK; step++) {
-      for (let row = 0; row < height; row++) {
-        for (let col = 0; col < width; col++) {
-          const key = `${row},${col}`;
-          const varName = `R_${constraint.id}_${step}_${row}_${col}`;
-          R[step].set(key, builder.createNamedVariable(varName));
-        }
-      }
-    }
-    
-    // Base case (step 0): only root is reachable
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        const key = `${row},${col}`;
-        const r0 = R[0].get(key)!;
-        if (row === root.row && col === root.col) {
-          // R[0][root] = true
-          builder.addUnit(r0);
-        } else {
-          // R[0][other] = false
-          builder.addUnit(-r0);
-        }
-      }
-    }
-    
-    // Inductive step: R[i][v] ↔ R[i-1][v] OR ⋁_{u neighbor} (R[i-1][u] ∧ edge(u,v))
-    for (let step = 1; step <= maxK; step++) {
-      for (let row = 0; row < height; row++) {
-        for (let col = 0; col < width; col++) {
-          const key = `${row},${col}`;
-          const rCurr = R[step].get(key)!;
-          const rPrev = R[step - 1].get(key)!;
-          const neighbors = getNeighbors({ row, col }, width, height, gridType);
-          
-          // Collect all "reachable through neighbor" terms
-          const reachThroughNeighbor: number[] = [];
-          
-          for (const n of neighbors) {
-            const nKey = `${n.row},${n.col}`;
-            const rPrevN = R[step - 1].get(nKey)!;
-            const eKey = edgeKey({ row, col }, n);
-            const edgeVar = edgeVars.get(eKey);
-            if (edgeVar === undefined) continue;
-            
-            // Create helper variable: reachThrough = R[i-1][n] ∧ edge(n,v)
-            const reachThrough = builder.createNamedVariable(
-              `reach_${constraint.id}_${step}_${n.row}_${n.col}_to_${row}_${col}`
-            );
-            reachThroughNeighbor.push(reachThrough);
-            
-            // reachThrough → R[i-1][n]
-            builder.solver.addClause([-reachThrough, rPrevN]);
-            // reachThrough → edge
-            builder.solver.addClause([-reachThrough, edgeVar]);
-            // (R[i-1][n] ∧ edge) → reachThrough
-            builder.solver.addClause([-rPrevN, -edgeVar, reachThrough]);
-          }
-          
-          // R[i][v] ↔ R[i-1][v] OR ⋁ reachThroughNeighbor
-          // Forward: (R[i-1][v] OR any reachThrough) → R[i][v]
-          builder.solver.addClause([-rPrev, rCurr]); // R[i-1][v] → R[i][v]
-          for (const rt of reachThroughNeighbor) {
-            builder.solver.addClause([-rt, rCurr]); // reachThrough → R[i][v]
-          }
-          
-          // Backward: R[i][v] → (R[i-1][v] OR ⋁ reachThroughNeighbor)
-          const backwardClause = [-rCurr, rPrev, ...reachThroughNeighbor];
-          builder.solver.addClause(backwardClause);
-        }
-      }
-    }
-    
-    // Constraint: cells with minDistance d must NOT be reachable in < d steps
-    // i.e., ¬R[d-1][cell] for each cell with minDistance d
-    for (const [cellKey, minDist] of minDistanceEntries) {
-      if (minDist <= 1) continue; // minDist of 1 means any distance >= 1 is OK (always satisfied)
-      
-      const [rowStr, colStr] = cellKey.split(',');
-      const row = parseInt(rowStr, 10);
-      const col = parseInt(colStr, 10);
-      
-      // Validate cell is in bounds
-      if (row < 0 || row >= height || col < 0 || col >= width) continue;
-      
-      const stepToForbid = minDist - 1;
-      if (stepToForbid > maxK) continue; // Already covered
-      
-      const rStep = R[stepToForbid].get(cellKey);
-      if (rStep !== undefined) {
-        builder.addUnit(-rStep); // NOT reachable in < minDist steps
-      }
-    }
-  }
 
   // ============================================
   // SOLVE

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import type { ColorGrid, GridSolution, GridType, PathlengthConstraint } from "../problem";
+import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, ColorRoots } from "../problem";
 import { HATCH_COLOR } from "../problem";
 import {
   COLORS,
@@ -66,6 +66,8 @@ interface GridProps {
   showDistanceLevels?: boolean;
   selectedConstraintId?: string | null;
   graphMode?: boolean;
+  colorRoots?: ColorRoots;
+  distanceConstraint?: PathlengthConstraint;
 }
 
 export const Grid: React.FC<GridProps> = ({
@@ -80,6 +82,8 @@ export const Grid: React.FC<GridProps> = ({
   showDistanceLevels = false,
   selectedConstraintId = null,
   graphMode = false,
+  colorRoots = {},
+  distanceConstraint,
 }) => {
   // selectedColor is used by parent for painting, not needed here directly
   void _selectedColor;
@@ -87,6 +91,19 @@ export const Grid: React.FC<GridProps> = ({
 
   // Determine if we should show solution colors (when viewing solution mode and solution exists)
   const showSolutionColors = viewMode === "solution" && solution !== null;
+
+  // Helper to check if a cell is a root for its color
+  const isRootCell = useCallback(
+    (row: number, col: number): boolean => {
+      const cellColor = grid.colors[row][col];
+      if (cellColor === null || cellColor === HATCH_COLOR || cellColor < 0) {
+        return false;
+      }
+      const root = colorRoots[String(cellColor)];
+      return root !== undefined && root.row === row && root.col === col;
+    },
+    [grid.colors, colorRoots]
+  );
 
   // Helper to get distance level for a cell
   const getDistanceLevel = useCallback(
@@ -97,6 +114,18 @@ export const Grid: React.FC<GridProps> = ({
       return solution.distanceLevels[selectedConstraintId][row][col];
     },
     [showDistanceLevels, selectedConstraintId, solution]
+  );
+
+  // Helper to get min distance constraint for a cell (from sketchpad constraint)
+  const getMinDistanceConstraint = useCallback(
+    (row: number, col: number): number | null => {
+      if (!distanceConstraint?.minDistances) {
+        return null;
+      }
+      const cellKey = `${row},${col}`;
+      return distanceConstraint.minDistances[cellKey] ?? null;
+    },
+    [distanceConstraint]
   );
 
   // Create a set of kept edge keys for quick lookup
@@ -474,8 +503,10 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       isBlank: boolean;
       isHatch: boolean;
+      isRoot: boolean;
       walls: { x1: number; y1: number; x2: number; y2: number }[];
       reachLevel: number | null;
+      minDistConstraint: number | null;
     }[] = [];
     
     for (let row = 0; row < grid.height; row++) {
@@ -488,6 +519,7 @@ export const Grid: React.FC<GridProps> = ({
           : inputColor;
         const isBlank = inputColor === null && !showSolutionColors;
         const isHatch = displayColor === HATCH_COLOR;
+        const isRoot = isRootCell(row, col);
         
         let fill: string;
         if (isBlank) {
@@ -522,8 +554,10 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
         
-        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, walls, reachLevel });
+        hexData.push({ row, col, cx, cy, path, fill, isBlank, isHatch, isRoot, walls, reachLevel, minDistConstraint });
       }
     }
     
@@ -601,6 +635,66 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Fourth pass: render root indicators */}
+          {hexData.map(({ row, col, cx, cy, isRoot }) =>
+            isRoot && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
+            )
+          )}
+          
+          {/* Fifth pass: render min distance constraint markers */}
+          {hexData.map(({ row, col, cx, cy, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={cx - cellSize * 0.25}
+                  y={cy - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -641,6 +735,8 @@ export const Grid: React.FC<GridProps> = ({
       path: string;
       fill: string;
       reachLevel: number | null;
+      isRoot: boolean;
+      minDistConstraint: number | null;
     }
     
     const octData: OctData[] = [];
@@ -654,8 +750,14 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
+        
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
 
-        octData.push({ row, col, cx, cy, path, fill, reachLevel });
+        octData.push({ row, col, cx, cy, path, fill, reachLevel, isRoot, minDistConstraint });
       }
     }
 
@@ -941,6 +1043,66 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Root indicators (show R when not displaying levels) */}
+          {octData.map(({ row, col, cx, cy, reachLevel, isRoot }) =>
+            isRoot && reachLevel === null && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
+            )
+          )}
+          
+          {/* Min distance constraint markers */}
+          {octData.map(({ row, col, cx, cy, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={cx - cellSize * 0.25}
+                  y={cy - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -983,6 +1145,8 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       centroid: [number, number];
       reachLevel: number | null;
+      isRoot: boolean;
+      minDistConstraint: number | null;
     }
     
     const cairoData: CairoData[] = [];
@@ -997,8 +1161,14 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
+        
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
 
-        cairoData.push({ row, col, path, fill, centroid, reachLevel });
+        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot, minDistConstraint });
       }
     }
     
@@ -1117,6 +1287,66 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Fourth pass: render root indicators (show R when not displaying levels) */}
+          {cairoData.map(({ row, col, centroid, reachLevel, isRoot }) =>
+            isRoot && reachLevel === null && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={centroid[0]}
+                  cy={centroid[1]}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
+            )
+          )}
+          
+          {/* Fifth pass: render min distance constraint markers */}
+          {cairoData.map(({ row, col, centroid, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={centroid[0] - cellSize * 0.25}
+                  y={centroid[1] - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -1159,6 +1389,8 @@ export const Grid: React.FC<GridProps> = ({
       fill: string;
       centroid: [number, number];
       reachLevel: number | null;
+      isRoot: boolean;
+      minDistConstraint: number | null;
     }
     
     const cairoData: CairoData[] = [];
@@ -1173,8 +1405,14 @@ export const Grid: React.FC<GridProps> = ({
         
         // Get distance level if available
         const reachLevel = getDistanceLevel(row, col);
+        
+        // Check if this cell is a root
+        const isRoot = isRootCell(row, col);
+        
+        // Get min distance constraint if available
+        const minDistConstraint = getMinDistanceConstraint(row, col);
 
-        cairoData.push({ row, col, path, fill, centroid, reachLevel });
+        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot, minDistConstraint });
       }
     }
     
@@ -1428,6 +1666,66 @@ export const Grid: React.FC<GridProps> = ({
               </text>
             )
           )}
+          
+          {/* Fifth pass: render root indicators (show R when not displaying levels) */}
+          {cairoData.map(({ row, col, centroid, reachLevel, isRoot }) =>
+            isRoot && reachLevel === null && (
+              <g key={`root-${row}-${col}`}>
+                <circle
+                  cx={centroid[0]}
+                  cy={centroid[1]}
+                  r={cellSize * 0.2}
+                  fill="white"
+                  stroke="#2c3e50"
+                  strokeWidth="2"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="#2c3e50"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "12px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  R
+                </text>
+              </g>
+            )
+          )}
+          
+          {/* Sixth pass: render min distance constraint markers */}
+          {cairoData.map(({ row, col, centroid, minDistConstraint, isRoot }) =>
+            minDistConstraint !== null && !isRoot && (
+              <g key={`mindist-${row}-${col}`}>
+                <rect
+                  x={centroid[0] - cellSize * 0.25}
+                  y={centroid[1] - cellSize * 0.15}
+                  width={cellSize * 0.5}
+                  height={cellSize * 0.3}
+                  rx={3}
+                  fill="rgba(231, 76, 60, 0.85)"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  style={{ pointerEvents: "none" }}
+                />
+                <text
+                  x={centroid[0]}
+                  y={centroid[1]}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fill="white"
+                  fontWeight="bold"
+                  fontSize={cellSize > 30 ? "10px" : "8px"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ≥{minDistConstraint}
+                </text>
+              </g>
+            )
+          )}
         </svg>
       </div>
     );
@@ -1460,6 +1758,7 @@ export const Grid: React.FC<GridProps> = ({
             : inputColor;
           const isBlank = inputColor === null && !showSolutionColors;
           const isHatch = displayColor === HATCH_COLOR;
+          const isRoot = isRootCell(row, col);
           
           // Determine background
           let bgColor: string;
@@ -1481,6 +1780,8 @@ export const Grid: React.FC<GridProps> = ({
           
           // Get distance level if available
           const reachLevel = getDistanceLevel(row, col);
+          // Get min distance constraint if available
+          const minDistConstraint = getMinDistanceConstraint(row, col);
 
           return (
             <div
@@ -1505,10 +1806,10 @@ export const Grid: React.FC<GridProps> = ({
                 borderBottom: wallBottom
                   ? `${wallThickness}px solid ${WALL_COLOR}`
                   : "none",
-                // Center text for reachability level
-                display: reachLevel !== null ? "flex" : undefined,
-                alignItems: reachLevel !== null ? "center" : undefined,
-                justifyContent: reachLevel !== null ? "center" : undefined,
+                // Center content for reachability level or root indicator
+                display: (reachLevel !== null || isRoot || minDistConstraint !== null) ? "flex" : undefined,
+                alignItems: (reachLevel !== null || isRoot || minDistConstraint !== null) ? "center" : undefined,
+                justifyContent: (reachLevel !== null || isRoot || minDistConstraint !== null) ? "center" : undefined,
               }}
             >
               {reachLevel !== null && (
@@ -1520,6 +1821,45 @@ export const Grid: React.FC<GridProps> = ({
                 }}>
                   {reachLevel === -1 ? "∞" : reachLevel}
                 </span>
+              )}
+              {/* Show root indicator only when not displaying reachability levels.
+                  When levels are shown, the root is implicitly at level 0, so the "R"
+                  marker would be redundant. */}
+              {isRoot && reachLevel === null && (
+                <div style={{
+                  width: cellSize * 0.5,
+                  height: cellSize * 0.5,
+                  borderRadius: "50%",
+                  backgroundColor: "white",
+                  border: "2px solid #2c3e50",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: cellSize > 30 ? "12px" : "8px",
+                  fontWeight: "bold",
+                  color: "#2c3e50",
+                }}>
+                  R
+                </div>
+              )}
+              {/* Show min distance constraint marker when not showing reach level or root */}
+              {minDistConstraint !== null && reachLevel === null && !isRoot && (
+                <div style={{
+                  minWidth: cellSize * 0.5,
+                  height: cellSize * 0.4,
+                  padding: "2px 4px",
+                  borderRadius: "4px",
+                  backgroundColor: "rgba(231, 76, 60, 0.85)",
+                  border: "2px solid white",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "11px",
+                  fontWeight: "bold",
+                  color: "white",
+                }}>
+                  ≥{minDistConstraint}
+                </div>
               )}
             </div>
           );

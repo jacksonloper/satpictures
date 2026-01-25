@@ -43,16 +43,30 @@ export interface Edge {
 
 /**
  * A pathlength lower bound constraint.
- * Specifies that certain cells must be at least a minimum distance from a root cell.
+ * Specifies that certain cells must be at least a minimum distance from their color's root cell.
  * Distance is measured via kept edges (passages, not walls).
  */
 export interface PathlengthConstraint {
   /** Unique identifier for this constraint */
   id: string;
-  /** Root cell position - distance is measured from here */
-  root: GridPoint | null;
   /** Map from cell position key ("row,col") to minimum distance from root */
   minDistances: Record<string, number>;
+}
+
+/**
+ * Map from color index to root cell for that color.
+ * Key is string representation of the color number.
+ */
+export type ColorRoots = Record<string, GridPoint>;
+
+/**
+ * SAT problem statistics
+ */
+export interface SATStats {
+  /** Number of SAT variables */
+  numVars: number;
+  /** Number of SAT clauses */
+  numClauses: number;
 }
 
 /**
@@ -70,4 +84,6 @@ export interface GridSolution {
    * Key is constraint ID, value is 2D array of distances (-1 if unreachable).
    */
   distanceLevels?: Record<string, number[][]> | null;
+  /** SAT problem statistics (variables and clauses) */
+  stats?: SATStats;
 }

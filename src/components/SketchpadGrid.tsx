@@ -1,5 +1,5 @@
 import React from "react";
-import type { ColorGrid, GridSolution, GridType } from "../problem";
+import type { ColorGrid, GridSolution, GridType, ColorRoots, PathlengthConstraint } from "../problem";
 import { Grid } from "./Grid";
 
 interface SketchpadGridProps {
@@ -10,11 +10,14 @@ interface SketchpadGridProps {
   onCellDrag: (row: number, col: number) => void;
   cellSize?: number;
   gridType?: GridType;
+  colorRoots?: ColorRoots;
+  distanceConstraint?: PathlengthConstraint;
 }
 
 /**
  * SketchpadGrid always shows the user's editable colors (sketchpad mode).
  * This is an editable view where users can paint cells.
+ * It shows colors, roots, and distance constraints in a unified view.
  */
 export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
   grid,
@@ -24,6 +27,8 @@ export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
   onCellDrag,
   cellSize = 40,
   gridType = "square",
+  colorRoots,
+  distanceConstraint,
 }) => {
   return (
     <Grid
@@ -35,6 +40,8 @@ export const SketchpadGrid: React.FC<SketchpadGridProps> = ({
       cellSize={cellSize}
       gridType={gridType}
       viewMode="sketchpad"
+      colorRoots={colorRoots}
+      distanceConstraint={distanceConstraint}
     />
   );
 };
