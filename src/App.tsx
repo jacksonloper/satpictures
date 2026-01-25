@@ -584,7 +584,11 @@ function App() {
       <p className="description">
         Set your grid size below, then paint some cells with colors (or leave them blank
         for the solver to decide). Click Solve to find a valid coloring where each
-        color forms a single connected region.
+        color forms a tree rooted at a designated cell.
+      </p>
+      <p className="description" style={{ fontSize: "0.9em", fontStyle: "italic", marginTop: "-8px" }}>
+        <strong>Purpose:</strong> While purpose-built maze software can solve these problems more efficiently,
+        this project explores how far modern SAT solvers have come by encoding the problem as pure logical constraints.
       </p>
 
       {/* Main content area with two panels */}
