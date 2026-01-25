@@ -28,6 +28,11 @@ function createEmptyGrid(width: number, height: number): ColorGrid {
 function ConnectivityApp() {
   const [gridWidth, setGridWidth] = useState(6);
   const [gridHeight, setGridHeight] = useState(6);
+  // Track input values separately for deferred validation
+  const [widthInput, setWidthInput] = useState("6");
+  const [heightInput, setHeightInput] = useState("6");
+  const [widthError, setWidthError] = useState(false);
+  const [heightError, setHeightError] = useState(false);
   const [grid, setGrid] = useState<ColorGrid>(() =>
     createEmptyGrid(gridWidth, gridHeight)
   );
@@ -87,31 +92,81 @@ function ConnectivityApp() {
     [selectedColor]
   );
 
-  const handleWidthChange = useCallback((width: number) => {
-    const clampedWidth = Math.min(Math.max(width, 2), 20);
-    setGridWidth(clampedWidth);
-    setGrid((prev) => {
-      const newColors = Array.from({ length: prev.height }, (_, row) =>
-        Array.from({ length: clampedWidth }, (_, col) =>
-          col < prev.width ? prev.colors[row][col] : null
-        )
-      );
-      return { width: clampedWidth, height: prev.height, colors: newColors };
-    });
+  const handleWidthChange = useCallback((value: string) => {
+    setWidthInput(value);
+    // Check if value is valid for visual feedback
+    const num = parseInt(value, 10);
+    setWidthError(isNaN(num) || num < 2 || num > 20);
   }, []);
 
-  const handleHeightChange = useCallback((height: number) => {
-    const clampedHeight = Math.min(Math.max(height, 2), 20);
-    setGridHeight(clampedHeight);
-    setGrid((prev) => {
-      const newColors = Array.from({ length: clampedHeight }, (_, row) =>
-        Array.from({ length: prev.width }, (_, col) =>
-          row < prev.height ? prev.colors[row][col] : null
-        )
-      );
-      return { width: prev.width, height: clampedHeight, colors: newColors };
-    });
+  const handleWidthBlur = useCallback(() => {
+    const num = parseInt(widthInput, 10);
+    if (isNaN(num) || num < 2 || num > 20) {
+      // Invalid value - clamp and show what we're using
+      const clamped = isNaN(num) ? 6 : Math.min(Math.max(num, 2), 20);
+      setWidthInput(String(clamped));
+      setWidthError(false);
+      setGridWidth(clamped);
+      setGrid((prev) => {
+        const newColors = Array.from({ length: prev.height }, (_, row) =>
+          Array.from({ length: clamped }, (_, col) =>
+            col < prev.width ? prev.colors[row][col] : null
+          )
+        );
+        return { width: clamped, height: prev.height, colors: newColors };
+      });
+    } else {
+      // Valid value - apply it
+      setWidthError(false);
+      setGridWidth(num);
+      setGrid((prev) => {
+        const newColors = Array.from({ length: prev.height }, (_, row) =>
+          Array.from({ length: num }, (_, col) =>
+            col < prev.width ? prev.colors[row][col] : null
+          )
+        );
+        return { width: num, height: prev.height, colors: newColors };
+      });
+    }
+  }, [widthInput]);
+
+  const handleHeightChange = useCallback((value: string) => {
+    setHeightInput(value);
+    // Check if value is valid for visual feedback
+    const num = parseInt(value, 10);
+    setHeightError(isNaN(num) || num < 2 || num > 20);
   }, []);
+
+  const handleHeightBlur = useCallback(() => {
+    const num = parseInt(heightInput, 10);
+    if (isNaN(num) || num < 2 || num > 20) {
+      // Invalid value - clamp and show what we're using
+      const clamped = isNaN(num) ? 6 : Math.min(Math.max(num, 2), 20);
+      setHeightInput(String(clamped));
+      setHeightError(false);
+      setGridHeight(clamped);
+      setGrid((prev) => {
+        const newColors = Array.from({ length: clamped }, (_, row) =>
+          Array.from({ length: prev.width }, (_, col) =>
+            row < prev.height ? prev.colors[row][col] : null
+          )
+        );
+        return { width: prev.width, height: clamped, colors: newColors };
+      });
+    } else {
+      // Valid value - apply it
+      setHeightError(false);
+      setGridHeight(num);
+      setGrid((prev) => {
+        const newColors = Array.from({ length: num }, (_, row) =>
+          Array.from({ length: prev.width }, (_, col) =>
+            row < prev.height ? prev.colors[row][col] : null
+          )
+        );
+        return { width: prev.width, height: num, colors: newColors };
+      });
+    }
+  }, [heightInput]);
 
   const handleSolve = useCallback(() => {
     // Terminate any existing worker
@@ -367,9 +422,16 @@ function ConnectivityApp() {
                   type="number"
                   min="2"
                   max="20"
-                  value={gridWidth}
-                  onChange={(e) => handleWidthChange(parseInt(e.target.value, 10))}
-                  style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc" }}
+                  value={widthInput}
+                  onChange={(e) => handleWidthChange(e.target.value)}
+                  onBlur={handleWidthBlur}
+                  style={{ 
+                    width: "60px", 
+                    padding: "4px 8px", 
+                    borderRadius: "4px", 
+                    border: widthError ? "2px solid #e74c3c" : "1px solid #ccc",
+                    backgroundColor: widthError ? "#fdf2f2" : "white"
+                  }}
                 />
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -378,9 +440,16 @@ function ConnectivityApp() {
                   type="number"
                   min="2"
                   max="20"
-                  value={gridHeight}
-                  onChange={(e) => handleHeightChange(parseInt(e.target.value, 10))}
-                  style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc" }}
+                  value={heightInput}
+                  onChange={(e) => handleHeightChange(e.target.value)}
+                  onBlur={handleHeightBlur}
+                  style={{ 
+                    width: "60px", 
+                    padding: "4px 8px", 
+                    borderRadius: "4px", 
+                    border: heightError ? "2px solid #e74c3c" : "1px solid #ccc",
+                    backgroundColor: heightError ? "#fdf2f2" : "white"
+                  }}
                 />
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
