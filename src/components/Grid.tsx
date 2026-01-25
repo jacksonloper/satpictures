@@ -1171,30 +1171,6 @@ export const Grid: React.FC<GridProps> = ({
         cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot, minDistConstraint });
       }
     }
-      centroid: [number, number];
-      reachLevel: number | null;
-      isRoot: boolean;
-    }
-    
-    const cairoData: CairoData[] = [];
-    
-    for (let row = 0; row < grid.height; row++) {
-      for (let col = 0; col < grid.width; col++) {
-        const tile = getCairoTile(row, col);
-        const svgTile = tile.map(toSvg);
-        const path = svgTile.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ') + ' Z';
-        const fill = getCellColor(row, col);
-        const centroid = toSvg(polyCentroid(tile));
-        
-        // Get distance level if available
-        const reachLevel = getDistanceLevel(row, col);
-        
-        // Check if this cell is a root
-        const isRoot = isRootCell(row, col);
-
-        cairoData.push({ row, col, path, fill, centroid, reachLevel, isRoot });
-      }
-    }
     
     // Pre-compute walls between tiles
     interface CairoWall {
