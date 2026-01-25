@@ -302,6 +302,8 @@ function buildOldEncodingDimacs(
   }
   
   // Bounded reachability for pathlength constraints
+  // IMPORTANT: The real grid-coloring.ts includes ALL cells (including hatch) in R variables
+  // We must replicate this behavior for accurate benchmarking
   for (const constraint of pathlengthConstraints) {
     if (!constraint.root) continue;
     const root = constraint.root;
@@ -315,22 +317,21 @@ function buildOldEncodingDimacs(
     }
     if (maxK === 0) continue;
     
-    // R[step][row,col] variables
+    // R[step][row,col] variables - include ALL cells like the real encoding
     const R: Map<string, number>[] = [];
     for (let step = 0; step <= maxK; step++) {
       R.push(new Map());
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
-          if (isHatchCell(row, col)) continue;
+          // Include ALL cells, including hatch (matches grid-coloring.ts lines 548-556)
           R[step].set(`${row},${col}`, getOrCreateVar(`R_${constraint.id}_${step}_${row}_${col}`));
         }
       }
     }
     
-    // Base: R[0][root] = true, R[0][other] = false
+    // Base: R[0][root] = true, R[0][other] = false (for ALL cells)
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
-        if (isHatchCell(row, col)) continue;
         const r0 = R[0].get(`${row},${col}`);
         if (r0) {
           if (row === root.row && col === root.col) {
@@ -342,11 +343,10 @@ function buildOldEncodingDimacs(
       }
     }
     
-    // Inductive step
+    // Inductive step (for ALL cells)
     for (let step = 1; step <= maxK; step++) {
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
-          if (isHatchCell(row, col)) continue;
           const rCurr = R[step].get(`${row},${col}`);
           const rPrev = R[step - 1].get(`${row},${col}`);
           if (!rCurr || !rPrev) continue;
@@ -355,18 +355,22 @@ function buildOldEncodingDimacs(
           const reachTerms: number[] = [];
           
           for (const n of neighbors) {
-            if (isHatchCell(n.row, n.col)) continue;
             const rPrevN = R[step - 1].get(`${n.row},${n.col}`);
             const eKey = edgeKey({ row, col }, n);
             const edgeVar = edgeVars.get(eKey);
-            if (!rPrevN || !edgeVar) continue;
+            // Edge var may not exist if it crosses hatch boundary - skip reach-through in that case
+            if (!rPrevN) continue;
             
-            const reachThrough = getOrCreateVar(`reach_${constraint.id}_${step}_${n.row}_${n.col}_to_${row}_${col}`);
-            reachTerms.push(reachThrough);
-            
-            addClause([-reachThrough, rPrevN]);
-            addClause([-reachThrough, edgeVar]);
-            addClause([-rPrevN, -edgeVar, reachThrough]);
+            if (edgeVar) {
+              // Non-hatch to non-hatch edge: can reach through if edge is kept
+              const reachThrough = getOrCreateVar(`reach_${constraint.id}_${step}_${n.row}_${n.col}_to_${row}_${col}`);
+              reachTerms.push(reachThrough);
+              
+              addClause([-reachThrough, rPrevN]);
+              addClause([-reachThrough, edgeVar]);
+              addClause([-rPrevN, -edgeVar, reachThrough]);
+            }
+            // If no edge var (hatch boundary), we can't reach through this neighbor
           }
           
           // Forward: rPrev or any reachThrough => rCurr
