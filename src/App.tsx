@@ -84,7 +84,7 @@ function createMazeSetupGrid(
 
 /** Generate a unique ID for a new pathlength constraint */
 function generateConstraintId(): string {
-  return `plc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `plc_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 }
 
 function App() {
