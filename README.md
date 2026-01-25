@@ -13,7 +13,14 @@ The goal is not to create the most efficient maze generator, but rather to asses
 Given a finite 4-neighbor grid where each point has an assigned color, the solver determines which edges to keep (passages) and which to block (walls) such that:
 
 1. **Different colors are disconnected**: No edge exists between cells of different colors
-2. **Same colors are connected**: All cells of the same color form exactly one connected component (a tree rooted at a designated root cell specified per color)
+2. **Same colors are connected**: All cells of the same color form exactly one connected component (a tree rooted at a designated root cell)
+
+### Input Parameters
+
+- **Nodes and edges**: The graph structure (typically a grid with 4-connectivity)
+- **Node color hints**: Optional color assignments for nodes (-1 means "any color")
+- **Root of each color** (required): Each color must have a designated root node that serves as the tree root for that color's connected component
+- **Distance lower bounds** (optional): Constraints of the form `[node, minDistance]` that require certain nodes to be at least a minimum distance from their tree's root
 
 The connectivity constraint is encoded using a spanning tree formulation with parent variables and unary distance variables.
 
@@ -48,9 +55,12 @@ The unary distance variables form a decreasing chain: `dist(u)>=d → dist(u)>=(
 
 The codebase has a clean separation between:
 
-- **SAT Solver Abstraction** (`src/sat/`): Generic interface that can be swapped between solvers
-- **MiniSat Implementation**: Uses `logic-solver` npm package (MiniSat compiled to WASM via Emscripten)
-- **Grid Coloring Encoder** (`src/solver/`): Translates the grid problem to SAT clauses
+- **SAT Solver Abstraction** (`src/solvers/`): Generic interface (`SATSolver`) and formula builders that can be swapped between different solver implementations
+- **Solver Implementations** (`src/solvers/`):
+  - **CaDiCaL**: High-performance solver compiled to WASM via Emscripten
+  - **MiniSat**: Uses `logic-solver` npm package (MiniSat compiled to JavaScript)
+  - **DPLL**: Simple reference implementation for educational purposes
+- **Problem Encoding** (`src/problem/`): Translates the colored forest problem to SAT clauses using UNARY distance encoding
 - **React UI** (`src/components/`): Interactive grid editor and visualization
 
 ## Getting Started
@@ -75,9 +85,10 @@ npm run build
 
 ## Swapping SAT Solvers
 
-The `SATSolver` interface in `src/sat/types.ts` defines the contract for any SAT solver implementation. To add a new solver:
+The `SATSolver` interface in `src/solvers/types.ts` defines the contract for any SAT solver implementation. The codebase already includes three solver implementations:
 
-1. Implement the `SATSolver` interface
-2. Update the solver instantiation in `src/solver/grid-coloring.ts`
+1. **CaDiCaL** (`src/solvers/cadical-solver.ts`): High-performance WASM solver
+2. **MiniSat** (`src/solvers/minisat-solver.ts`): JavaScript-compiled solver via `logic-solver` package
+3. **DPLL** (`src/solvers/dpll-solver.ts`): Educational reference implementation
 
-This makes it easy to swap in CaDiCaL (compiled to WASM) or other solvers in the future.
+To add a new solver, implement the `SATSolver` interface and update the solver instantiation in the worker files.
