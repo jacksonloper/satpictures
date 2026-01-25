@@ -166,6 +166,10 @@ export class DPLLSolver implements SATSolver {
 
   /**
    * Unit propagation: if a clause has only one literal, assign it
+   * 
+   * NOTE: This method modifies the clauses array in-place for efficiency.
+   * The caller should be aware that the input array will be updated
+   * to contain only the simplified (non-satisfied) clauses.
    */
   private unitPropagation(
     clauses: Clause[],
