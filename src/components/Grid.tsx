@@ -281,6 +281,13 @@ export const Grid: React.FC<GridProps> = ({
       // For octagon/cairobridge: track if this is a diagonal edge and its type
       isDiagonal?: boolean;
       isDownSlant?: boolean; // true = down-slant (NW-SE), false = up-slant (NE-SW)
+      // Node keys to identify endpoints for adjacency tracking
+      nodeKey1: string;
+      nodeKey2: string;
+      // Edge index for adjacency lookup
+      edgeIndex: number;
+      // Control point for curved edges (set after finding straight-path pairs)
+      controlPoint?: { x: number; y: number };
     }
     
     const edges: EdgeData[] = [];
@@ -306,6 +313,8 @@ export const Grid: React.FC<GridProps> = ({
       if (node1 && node2) {
         const diagonal = isDiagonalEdge(edge);
         const downSlant = diagonal ? isDownSlantDiagonal(edge) : undefined;
+        const nodeKey1 = `${edge.u.row},${edge.u.col}`;
+        const nodeKey2 = `${edge.v.row},${edge.v.col}`;
         
         edges.push({
           x1: node1.cx,
@@ -315,7 +324,120 @@ export const Grid: React.FC<GridProps> = ({
           color: node1.color,
           isDiagonal: diagonal,
           isDownSlant: downSlant,
+          nodeKey1,
+          nodeKey2,
+          edgeIndex: edges.length,
         });
+      }
+    }
+    
+    // Build adjacency list: for each node, list of edges connected to it
+    const nodeEdges = new Map<string, number[]>(); // nodeKey -> list of edge indices
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i];
+      if (!nodeEdges.has(edge.nodeKey1)) {
+        nodeEdges.set(edge.nodeKey1, []);
+      }
+      if (!nodeEdges.has(edge.nodeKey2)) {
+        nodeEdges.set(edge.nodeKey2, []);
+      }
+      nodeEdges.get(edge.nodeKey1)!.push(i);
+      nodeEdges.get(edge.nodeKey2)!.push(i);
+    }
+    
+    // For nodes with 2+ edges, find the pair closest to 180° and curve them
+    // This creates smoother visual paths through vertices
+    const CURVE_CONTROL_RATIO = 0.3; // Control point offset ratio from edge midpoint
+    
+    for (const [nodeKey, edgeIndices] of nodeEdges.entries()) {
+      if (edgeIndices.length < 2) continue;
+      
+      const node = nodeMap.get(nodeKey);
+      if (!node) continue;
+      
+      // Compute angle for each edge from this node's perspective
+      interface EdgeAngle {
+        edgeIndex: number;
+        angle: number; // angle in radians, relative to positive x-axis
+        otherEndX: number;
+        otherEndY: number;
+      }
+      
+      const edgeAngles: EdgeAngle[] = edgeIndices.map(idx => {
+        const e = edges[idx];
+        // Determine which end is this node and which is the other
+        const isNode1 = e.nodeKey1 === nodeKey;
+        const otherEndX = isNode1 ? e.x2 : e.x1;
+        const otherEndY = isNode1 ? e.y2 : e.y1;
+        const dx = otherEndX - node.cx;
+        const dy = otherEndY - node.cy;
+        const angle = Math.atan2(dy, dx);
+        return { edgeIndex: idx, angle, otherEndX, otherEndY };
+      });
+      
+      // Find the pair of edges with angles closest to 180° apart (straightest path)
+      let bestPair: [EdgeAngle, EdgeAngle] | null = null;
+      let bestAngleDiff = 0; // Looking for diff closest to PI
+      
+      for (let i = 0; i < edgeAngles.length; i++) {
+        for (let j = i + 1; j < edgeAngles.length; j++) {
+          const a1 = edgeAngles[i].angle;
+          const a2 = edgeAngles[j].angle;
+          // Compute absolute angle difference, normalized to [0, PI]
+          let diff = Math.abs(a1 - a2);
+          if (diff > Math.PI) diff = 2 * Math.PI - diff;
+          
+          // We want diff closest to PI (180°)
+          if (bestPair === null || Math.abs(diff - Math.PI) < Math.abs(bestAngleDiff - Math.PI)) {
+            bestPair = [edgeAngles[i], edgeAngles[j]];
+            bestAngleDiff = diff;
+          }
+        }
+      }
+      
+      // Only curve if angle is reasonably close to 180° (at least 120°)
+      if (bestPair && bestAngleDiff > (2 * Math.PI / 3)) {
+        const [ea1, ea2] = bestPair;
+        const edge1 = edges[ea1.edgeIndex];
+        const edge2 = edges[ea2.edgeIndex];
+        
+        // Compute the "through" direction: average of the two outgoing directions
+        // This gives us the tangent direction at the node for the smooth path
+        const dx1 = ea1.otherEndX - node.cx;
+        const dy1 = ea1.otherEndY - node.cy;
+        const dx2 = ea2.otherEndX - node.cx;
+        const dy2 = ea2.otherEndY - node.cy;
+        
+        // Normalize directions
+        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        if (len1 < 0.001 || len2 < 0.001) continue;
+        
+        const ux1 = dx1 / len1;
+        const uy1 = dy1 / len1;
+        const ux2 = dx2 / len2;
+        const uy2 = dy2 / len2;
+        
+        // Control point: place it along the tangent direction from node
+        // at a distance proportional to the edge length
+        // For edge1, use direction toward edge2 (the continuation) to get smooth tangent
+        const controlDist1 = len1 * CURVE_CONTROL_RATIO;
+        const ctrl1X = node.cx + ux2 * controlDist1; // use direction toward other edge
+        const ctrl1Y = node.cy + uy2 * controlDist1;
+        
+        // Similarly for edge2, use direction toward edge1
+        const controlDist2 = len2 * CURVE_CONTROL_RATIO;
+        const ctrl2X = node.cx + ux1 * controlDist2; // use direction toward edge1
+        const ctrl2Y = node.cy + uy1 * controlDist2;
+        
+        // Only set control point if edge doesn't already have one
+        // (another node may have already curved this edge)
+        if (!edge1.controlPoint) {
+          edge1.controlPoint = { x: ctrl1X, y: ctrl1Y };
+        }
+        if (!edge2.controlPoint) {
+          edge2.controlPoint = { x: ctrl2X, y: ctrl2Y };
+        }
       }
     }
     
@@ -411,6 +533,38 @@ export const Grid: React.FC<GridProps> = ({
       }
     }
     
+    // Helper to render an edge - either as a line or a quadratic Bézier curve
+    const renderEdge = (edge: EdgeData, keyPrefix: string, i: number) => {
+      if (edge.controlPoint) {
+        // Render as quadratic Bézier curve
+        const d = `M ${edge.x1} ${edge.y1} Q ${edge.controlPoint.x} ${edge.controlPoint.y} ${edge.x2} ${edge.y2}`;
+        return (
+          <path
+            key={`${keyPrefix}-${i}`}
+            d={d}
+            stroke={edge.color}
+            strokeWidth={edgeWidth}
+            strokeLinecap="round"
+            fill="none"
+          />
+        );
+      } else {
+        // Render as straight line
+        return (
+          <line
+            key={`${keyPrefix}-${i}`}
+            x1={edge.x1}
+            y1={edge.y1}
+            x2={edge.x2}
+            y2={edge.y2}
+            stroke={edge.color}
+            strokeWidth={edgeWidth}
+            strokeLinecap="round"
+          />
+        );
+      }
+    };
+    
     return (
       <div
         className="grid-container"
@@ -421,32 +575,10 @@ export const Grid: React.FC<GridProps> = ({
       >
         <svg width={svgWidth} height={svgHeight} style={{ display: "block", backgroundColor: "#f5f5f5" }}>
           {/* Layer 1: Regular edges (non-diagonal) */}
-          {regularEdges.map((edge, i) => (
-            <line
-              key={`regular-edge-${i}`}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              stroke={edge.color}
-              strokeWidth={edgeWidth}
-              strokeLinecap="round"
-            />
-          ))}
+          {regularEdges.map((edge, i) => renderEdge(edge, "regular-edge", i))}
           
           {/* Layer 2: Down-slant diagonal edges (go "under") */}
-          {downSlantEdges.map((edge, i) => (
-            <line
-              key={`down-edge-${i}`}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              stroke={edge.color}
-              strokeWidth={edgeWidth}
-              strokeLinecap="round"
-            />
-          ))}
+          {downSlantEdges.map((edge, i) => renderEdge(edge, "down-edge", i))}
           
           {/* Layer 3: White bridges for up-slant edges */}
           {bridges.map((bridge, i) => (
@@ -459,18 +591,7 @@ export const Grid: React.FC<GridProps> = ({
           ))}
           
           {/* Layer 4: Up-slant diagonal edges (go "over") */}
-          {upSlantEdges.map((edge, i) => (
-            <line
-              key={`up-edge-${i}`}
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              stroke={edge.color}
-              strokeWidth={edgeWidth}
-              strokeLinecap="round"
-            />
-          ))}
+          {upSlantEdges.map((edge, i) => renderEdge(edge, "up-edge", i))}
           
           {/* Layer 5: Render nodes as small dots on top */}
           {nodes.map(({ row, col, cx, cy, color }) => (
