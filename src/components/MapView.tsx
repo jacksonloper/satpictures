@@ -63,7 +63,7 @@ const BRIDGE_RAILING_COLOR = "#5c4033"; // Dark brown for railings
 
 /**
  * Kid-friendly "map view" that renders the solution graph as roads
- * - Edges become roomy roads with dotted center lines
+ * - Edges become roomy roads with dashed center lines
  * - 2-degree nodes become gentle curves
  * - 3+ degree nodes become traffic circles
  * - Crossing edges show isometric bridges
