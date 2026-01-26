@@ -20,6 +20,7 @@ import {
   polyCentroid,
   calculateGridDimensions,
   DEFAULT_WALL_THICKNESS,
+  COLORS,
 } from "./gridConstants";
 
 interface KidFriendlyMapViewProps {
@@ -33,6 +34,7 @@ interface KidFriendlyMapViewProps {
 const ROAD_COLOR = "#c0c0c0"; // Light gray road
 const ROAD_BORDER_COLOR = "#ffffff"; // White border
 const SVG_BACKGROUND_COLOR = "#f5f5f5"; // Match SVG background
+const COLOR_TINT_STRENGTH = 0.15; // How much to tint roads with their color (0-1)
 
 // Dilation parameters - control the "road" thickness
 const DILATION_RADIUS = 6; // Pixels to dilate in each direction
@@ -41,6 +43,26 @@ const BORDER_THICKNESS = 3; // White border thickness
 // Line width and node size ratios (as fraction of cellSize)
 const EDGE_LINE_WIDTH_RATIO = 0.06;
 const NODE_RADIUS_RATIO = 0.06;
+
+// Helper to blend two colors
+function blendColors(baseColor: string, tintColor: string, tintStrength: number): string {
+  // Parse base color
+  const baseR = parseInt(baseColor.slice(1, 3), 16);
+  const baseG = parseInt(baseColor.slice(3, 5), 16);
+  const baseB = parseInt(baseColor.slice(5, 7), 16);
+  
+  // Parse tint color
+  const tintR = parseInt(tintColor.slice(1, 3), 16);
+  const tintG = parseInt(tintColor.slice(3, 5), 16);
+  const tintB = parseInt(tintColor.slice(5, 7), 16);
+  
+  // Blend
+  const r = Math.round(baseR * (1 - tintStrength) + tintR * tintStrength);
+  const g = Math.round(baseG * (1 - tintStrength) + tintG * tintStrength);
+  const b = Math.round(baseB * (1 - tintStrength) + tintB * tintStrength);
+  
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
 
 export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
   grid,
@@ -134,6 +156,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
     y2: number;
     isDiagonal: boolean;
     isDownSlant: boolean;
+    color: number; // Color index of the edge (from node colors)
   }
 
   // Helper to check if two line segments intersect (excluding endpoints)
@@ -171,6 +194,8 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       if (node1 && node2) {
         const diagonal = isDiagonalEdge(edge);
         const downSlant = diagonal ? isDownSlantDiagonal(edge) : false;
+        // Get color from the assigned colors (use node1's color)
+        const edgeColor = solution.assignedColors[node1.row]?.[node1.col] ?? 0;
         
         allEdges.push({
           x1: node1.cx,
@@ -179,6 +204,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
           y2: node2.cy,
           isDiagonal: diagonal,
           isDownSlant: downSlant,
+          color: edgeColor,
         });
       }
     }
@@ -235,7 +261,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       // For simple grids, all edges are non-crossing
       return { nonCrossingEdges: allEdges, crossingEdges: [] };
     }
-  }, [solution.keptEdges, nodeMap, gridType]);
+  }, [solution.keptEdges, solution.assignedColors, nodeMap, gridType]);
 
   // Render the kid-friendly map
   useEffect(() => {
@@ -335,7 +361,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       return dilatedData;
     };
 
-    // Function to render a road layer with border
+    // Function to render a road layer with border - now with color tinting
     const renderRoadLayer = (
       targetCtx: CanvasRenderingContext2D,
       edges: EdgeData[],
@@ -393,23 +419,56 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
         targetCtx.drawImage(whiteFillCanvas, 0, 0);
       }
       
-      // Create a canvas for the gray road
+      // Create a canvas for the gray road with color tinting
       const roadCanvas = document.createElement("canvas");
       roadCanvas.width = width;
       roadCanvas.height = height;
       const roadCtx = roadCanvas.getContext("2d");
       if (!roadCtx) return;
       
+      // First, draw the base gray road
       roadCtx.putImageData(roadData, 0, 0);
       roadCtx.globalCompositeOperation = "source-in";
       roadCtx.fillStyle = ROAD_COLOR;
       roadCtx.fillRect(0, 0, width, height);
       
       targetCtx.drawImage(roadCanvas, 0, 0);
+      
+      // Now draw tinted roads on top for each edge color
+      // Group edges by color
+      const edgesByColor = new Map<number, EdgeData[]>();
+      for (const edge of edges) {
+        const colorEdges = edgesByColor.get(edge.color) ?? [];
+        colorEdges.push(edge);
+        edgesByColor.set(edge.color, colorEdges);
+      }
+      
+      // Draw each color group with its tint
+      for (const [colorIndex, colorEdges] of edgesByColor) {
+        const edgeColor = COLORS[colorIndex % COLORS.length];
+        const tintedRoadColor = blendColors(ROAD_COLOR, edgeColor, COLOR_TINT_STRENGTH);
+        
+        // Create dilated image for just these edges
+        const colorRoadData = createRoadLayer(colorEdges);
+        if (!colorRoadData) continue;
+        
+        const colorRoadCanvas = document.createElement("canvas");
+        colorRoadCanvas.width = width;
+        colorRoadCanvas.height = height;
+        const colorRoadCtx = colorRoadCanvas.getContext("2d");
+        if (!colorRoadCtx) continue;
+        
+        colorRoadCtx.putImageData(colorRoadData, 0, 0);
+        colorRoadCtx.globalCompositeOperation = "source-in";
+        colorRoadCtx.fillStyle = tintedRoadColor;
+        colorRoadCtx.fillRect(0, 0, width, height);
+        
+        targetCtx.drawImage(colorRoadCanvas, 0, 0);
+      }
     };
 
-    // Function to draw a gray rectangle for a crossing edge (Page B)
-    const drawCrossingEdgeRectangle = (
+    // Function to draw a bridge (crossing edge) with white lines on sides only
+    const drawBridge = (
       targetCtx: CanvasRenderingContext2D,
       edge: EdgeData
     ) => {
@@ -419,36 +478,35 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       
       if (len < 0.001) return;
       
-      // Rectangle dimensions - similar to road width
-      const rectWidth = (DILATION_RADIUS + BORDER_THICKNESS) * 2;
+      // Get tinted color for this edge
+      const edgeColor = COLORS[edge.color % COLORS.length];
+      const tintedRoadColor = blendColors(ROAD_COLOR, edgeColor, COLOR_TINT_STRENGTH);
+      
+      // Bridge dimensions
+      const bridgeWidth = DILATION_RADIUS * 2; // Inner road width
+      const borderWidth = BORDER_THICKNESS; // White border on each side
+      const totalWidth = bridgeWidth + borderWidth * 2;
       
       targetCtx.save();
       targetCtx.translate((edge.x1 + edge.x2) / 2, (edge.y1 + edge.y2) / 2);
       targetCtx.rotate(Math.atan2(dy, dx));
-      targetCtx.fillStyle = ROAD_COLOR;
-      targetCtx.fillRect(-len / 2, -rectWidth / 2, len, rectWidth);
+      
+      // Draw white border lines on sides only (top and bottom, not start/end)
+      targetCtx.fillStyle = ROAD_BORDER_COLOR;
+      // Top border line
+      targetCtx.fillRect(-len / 2, -totalWidth / 2, len, borderWidth);
+      // Bottom border line
+      targetCtx.fillRect(-len / 2, totalWidth / 2 - borderWidth, len, borderWidth);
+      
+      // Draw gray (tinted) road in the middle
+      targetCtx.fillStyle = tintedRoadColor;
+      targetCtx.fillRect(-len / 2, -bridgeWidth / 2, len, bridgeWidth);
+      
       targetCtx.restore();
     };
 
     // Render based on whether we have crossing edges
     if (crossingEdges.length > 0) {
-      // Page B: Draw gray rectangles for crossing edges (rendered first, underneath)
-      const pageBCanvas = document.createElement("canvas");
-      pageBCanvas.width = width;
-      pageBCanvas.height = height;
-      const pageBCtx = pageBCanvas.getContext("2d");
-      
-      if (pageBCtx) {
-        pageBCtx.clearRect(0, 0, width, height);
-        
-        for (const edge of crossingEdges) {
-          drawCrossingEdgeRectangle(pageBCtx, edge);
-        }
-        
-        // Render Page B to main canvas
-        ctx.drawImage(pageBCanvas, 0, 0);
-      }
-      
       // Page A: Draw non-crossing edges with dilation, white border, transparent background
       const pageACanvas = document.createElement("canvas");
       pageACanvas.width = width;
@@ -459,8 +517,13 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
         pageACtx.clearRect(0, 0, width, height);
         renderRoadLayer(pageACtx, nonCrossingEdges, true);
         
-        // Render Page A on top of Page B
+        // Render Page A to main canvas first
         ctx.drawImage(pageACanvas, 0, 0);
+      }
+      
+      // Draw bridges ON TOP of Page A
+      for (const edge of crossingEdges) {
+        drawBridge(ctx, edge);
       }
     } else {
       // No crossing edges - render all edges normally
