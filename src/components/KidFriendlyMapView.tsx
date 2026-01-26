@@ -467,8 +467,8 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       }
     };
 
-    // Function to draw a bridge (crossing edge) with white lines on sides only
-    const drawBridge = (
+    // Function to draw bridge white lines on top (only central 70% of length)
+    const drawBridgeLines = (
       targetCtx: CanvasRenderingContext2D,
       edge: EdgeData
     ) => {
@@ -478,56 +478,38 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       
       if (len < 0.001) return;
       
-      // Get tinted color for this edge
-      const edgeColor = COLORS[edge.color % COLORS.length];
-      const tintedRoadColor = blendColors(ROAD_COLOR, edgeColor, COLOR_TINT_STRENGTH);
-      
-      // Bridge dimensions
+      // Bridge dimensions - match the dilated road width
       const bridgeWidth = DILATION_RADIUS * 2; // Inner road width
       const borderWidth = BORDER_THICKNESS; // White border on each side
       const totalWidth = bridgeWidth + borderWidth * 2;
+      
+      // White lines only cover central 70% of the bridge length
+      const lineLength = len * 0.7;
       
       targetCtx.save();
       targetCtx.translate((edge.x1 + edge.x2) / 2, (edge.y1 + edge.y2) / 2);
       targetCtx.rotate(Math.atan2(dy, dx));
       
-      // Draw white border lines on sides only (top and bottom, not start/end)
+      // Draw white border lines on sides only (central 70%)
       targetCtx.fillStyle = ROAD_BORDER_COLOR;
       // Top border line
-      targetCtx.fillRect(-len / 2, -totalWidth / 2, len, borderWidth);
+      targetCtx.fillRect(-lineLength / 2, -totalWidth / 2, lineLength, borderWidth);
       // Bottom border line
-      targetCtx.fillRect(-len / 2, totalWidth / 2 - borderWidth, len, borderWidth);
-      
-      // Draw gray (tinted) road in the middle
-      targetCtx.fillStyle = tintedRoadColor;
-      targetCtx.fillRect(-len / 2, -bridgeWidth / 2, len, bridgeWidth);
+      targetCtx.fillRect(-lineLength / 2, totalWidth / 2 - borderWidth, lineLength, borderWidth);
       
       targetCtx.restore();
     };
 
-    // Render based on whether we have crossing edges
-    if (crossingEdges.length > 0) {
-      // Page A: Draw non-crossing edges with dilation, white border, transparent background
-      const pageACanvas = document.createElement("canvas");
-      pageACanvas.width = width;
-      pageACanvas.height = height;
-      const pageACtx = pageACanvas.getContext("2d");
-      
-      if (pageACtx) {
-        pageACtx.clearRect(0, 0, width, height);
-        renderRoadLayer(pageACtx, nonCrossingEdges, true);
-        
-        // Render Page A to main canvas first
-        ctx.drawImage(pageACanvas, 0, 0);
-      }
-      
-      // Draw bridges ON TOP of Page A
-      for (const edge of crossingEdges) {
-        drawBridge(ctx, edge);
-      }
-    } else {
-      // No crossing edges - render all edges normally
-      renderRoadLayer(ctx, nonCrossingEdges, true);
+    // Simplified rendering: render ALL edges first, then draw bridge lines on top
+    // Combine all edges for the base layer
+    const allEdges = [...nonCrossingEdges, ...crossingEdges];
+    
+    // Render all edges with dilation and white border
+    renderRoadLayer(ctx, allEdges, true);
+    
+    // Draw bridge white lines on top for crossing edges only
+    for (const edge of crossingEdges) {
+      drawBridgeLines(ctx, edge);
     }
 
     // Draw small dots at nodes (optional, for visual clarity)
