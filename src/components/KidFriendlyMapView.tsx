@@ -32,11 +32,17 @@ interface KidFriendlyMapViewProps {
 // Colors for the kid-friendly map
 const ROAD_COLOR = "#c0c0c0"; // Light gray road
 const ROAD_BORDER_COLOR = "#ffffff"; // White border
-const BACKGROUND_COLOR = "transparent";
+const SVG_BACKGROUND_COLOR = "#f5f5f5"; // Match SVG background
 
 // Dilation parameters - control the "road" thickness
 const DILATION_RADIUS = 6; // Pixels to dilate in each direction
 const BORDER_THICKNESS = 3; // White border thickness
+
+// Line width and node size ratios (as fraction of cellSize)
+const EDGE_LINE_WIDTH_RATIO = 0.06;
+const NODE_RADIUS_RATIO = 0.06;
+const BRIDGE_GAP_WIDTH_MULTIPLIER = 2.5;
+const BRIDGE_GAP_LENGTH_RATIO = 0.3;
 
 export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
   grid,
@@ -206,7 +212,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
     ctx.clearRect(0, 0, width, height);
 
     // Edge line width for initial drawing (before dilation)
-    const baseLineWidth = cellSize * 0.06;
+    const baseLineWidth = cellSize * EDGE_LINE_WIDTH_RATIO;
 
     // Function to draw edges on a canvas context
     const drawEdges = (targetCtx: CanvasRenderingContext2D, edges: EdgeData[], color: string) => {
@@ -378,11 +384,10 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
         const bridgeGapCtx = bridgeGapCanvas.getContext("2d");
         if (bridgeGapCtx) {
           bridgeGapCtx.clearRect(0, 0, width, height);
-          bridgeGapCtx.fillStyle = BACKGROUND_COLOR === "transparent" ? "rgba(255,255,255,0)" : BACKGROUND_COLOR;
           
           // Create bridge gaps at midpoints of up-slant edges
-          const bridgeWidth = (DILATION_RADIUS + BORDER_THICKNESS) * 2.5;
-          const bridgeLength = cellSize * 0.3;
+          const bridgeWidth = (DILATION_RADIUS + BORDER_THICKNESS) * BRIDGE_GAP_WIDTH_MULTIPLIER;
+          const bridgeLength = cellSize * BRIDGE_GAP_LENGTH_RATIO;
           
           for (const upEdge of upSlantEdges) {
             const midX = (upEdge.x1 + upEdge.x2) / 2;
@@ -395,11 +400,11 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
             
             if (len < 0.001) continue;
             
-            // Draw white/transparent rectangle at crossing
+            // Draw background rectangle at crossing
             bridgeGapCtx.save();
             bridgeGapCtx.translate(midX, midY);
             bridgeGapCtx.rotate(Math.atan2(dy, dx));
-            bridgeGapCtx.fillStyle = "#f5f5f5"; // Match SVG background
+            bridgeGapCtx.fillStyle = SVG_BACKGROUND_COLOR;
             bridgeGapCtx.fillRect(-bridgeLength / 2, -bridgeWidth / 2, bridgeLength, bridgeWidth);
             bridgeGapCtx.restore();
           }
@@ -417,7 +422,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
     }
 
     // Draw small dots at nodes (optional, for visual clarity)
-    const nodeRadius = cellSize * 0.06;
+    const nodeRadius = cellSize * NODE_RADIUS_RATIO;
     ctx.fillStyle = ROAD_COLOR;
     for (const node of nodes) {
       ctx.beginPath();
@@ -433,7 +438,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       style={{
         position: "relative",
         userSelect: "none",
-        backgroundColor: "#f5f5f5",
+        backgroundColor: SVG_BACKGROUND_COLOR,
         borderRadius: "4px",
       }}
     >
