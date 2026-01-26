@@ -41,8 +41,6 @@ const BORDER_THICKNESS = 3; // White border thickness
 // Line width and node size ratios (as fraction of cellSize)
 const EDGE_LINE_WIDTH_RATIO = 0.06;
 const NODE_RADIUS_RATIO = 0.06;
-const BRIDGE_GAP_WIDTH_MULTIPLIER = 2.5;
-const BRIDGE_GAP_LENGTH_RATIO = 0.3;
 
 export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
   grid,
@@ -138,7 +136,22 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
     isDownSlant: boolean;
   }
 
-  const { regularEdges, downSlantEdges, upSlantEdges } = useMemo(() => {
+  // Helper to check if two line segments intersect (excluding endpoints)
+  const segmentsIntersect = (
+    x1: number, y1: number, x2: number, y2: number,
+    x3: number, y3: number, x4: number, y4: number
+  ): boolean => {
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 0.0001) return false; // Parallel lines
+    
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+    const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+    
+    // Check if intersection is strictly between endpoints (not at endpoints)
+    return t > 0.01 && t < 0.99 && u > 0.01 && u < 0.99;
+  };
+
+  const { nonCrossingEdges, crossingEdges } = useMemo(() => {
     const allEdges: EdgeData[] = [];
     
     const isDiagonalEdge = (e: { u: { row: number; col: number }; v: { row: number; col: number } }) => {
@@ -170,28 +183,58 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       }
     }
     
-    // Separate edges based on grid type
-    const regular: EdgeData[] = [];
-    const downSlant: EdgeData[] = [];
-    const upSlant: EdgeData[] = [];
-    
+    // For grids with potential crossings (octagon, cairobridge), find actual crossing pairs
     if (gridType === "octagon" || gridType === "cairobridge") {
-      for (const edge of allEdges) {
-        if (edge.isDiagonal) {
-          if (edge.isDownSlant) {
-            downSlant.push(edge);
-          } else {
-            upSlant.push(edge);
+      // Find all pairs of edges that actually cross
+      const crossingPairs: [number, number][] = [];
+      
+      for (let i = 0; i < allEdges.length; i++) {
+        for (let j = i + 1; j < allEdges.length; j++) {
+          const e1 = allEdges[i];
+          const e2 = allEdges[j];
+          
+          if (segmentsIntersect(e1.x1, e1.y1, e1.x2, e1.y2, e2.x1, e2.y1, e2.x2, e2.y2)) {
+            crossingPairs.push([i, j]);
           }
-        } else {
-          regular.push(edge);
         }
       }
+      
+      // For each crossing pair, put one edge in the "under" bucket (crossing edges)
+      // and leave the other in the non-crossing set
+      const crossingEdgeIndices = new Set<number>();
+      
+      for (const [i, j] of crossingPairs) {
+        // Put the down-slant edge in the crossing bucket (rendered as rectangle underneath)
+        // If both are same slant, just pick one
+        const e1 = allEdges[i];
+        const e2 = allEdges[j];
+        
+        if (e1.isDownSlant && !e2.isDownSlant) {
+          crossingEdgeIndices.add(i);
+        } else if (!e1.isDownSlant && e2.isDownSlant) {
+          crossingEdgeIndices.add(j);
+        } else {
+          // Both same slant - pick the first one
+          crossingEdgeIndices.add(i);
+        }
+      }
+      
+      const nonCrossing: EdgeData[] = [];
+      const crossing: EdgeData[] = [];
+      
+      for (let i = 0; i < allEdges.length; i++) {
+        if (crossingEdgeIndices.has(i)) {
+          crossing.push(allEdges[i]);
+        } else {
+          nonCrossing.push(allEdges[i]);
+        }
+      }
+      
+      return { nonCrossingEdges: nonCrossing, crossingEdges: crossing };
     } else {
-      regular.push(...allEdges);
+      // For simple grids, all edges are non-crossing
+      return { nonCrossingEdges: allEdges, crossingEdges: [] };
     }
-    
-    return { regularEdges: regular, downSlantEdges: downSlant, upSlantEdges: upSlant };
   }, [solution.keptEdges, nodeMap, gridType]);
 
   // Render the kid-friendly map
@@ -365,60 +408,63 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       targetCtx.drawImage(roadCanvas, 0, 0);
     };
 
-    // For grids with crossing edges (octagon, cairobridge), render in layers
-    const hasCrossingEdges = gridType === "octagon" || gridType === "cairobridge";
-    
-    if (hasCrossingEdges && (downSlantEdges.length > 0 || upSlantEdges.length > 0)) {
-      // Layer 1: Regular (non-diagonal) edges
-      renderRoadLayer(ctx, regularEdges, true);
+    // Function to draw a gray rectangle for a crossing edge (Page B)
+    const drawCrossingEdgeRectangle = (
+      targetCtx: CanvasRenderingContext2D,
+      edge: EdgeData
+    ) => {
+      const dx = edge.x2 - edge.x1;
+      const dy = edge.y2 - edge.y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
       
-      // Layer 2: Down-slant edges (go "under")
-      renderRoadLayer(ctx, downSlantEdges, true);
+      if (len < 0.001) return;
       
-      // Layer 3: "Bridge" gap - we need to create white gaps where up-slant crosses down-slant
-      // Create white rectangles at crossing points
-      if (upSlantEdges.length > 0 && downSlantEdges.length > 0) {
-        const bridgeGapCanvas = document.createElement("canvas");
-        bridgeGapCanvas.width = width;
-        bridgeGapCanvas.height = height;
-        const bridgeGapCtx = bridgeGapCanvas.getContext("2d");
-        if (bridgeGapCtx) {
-          bridgeGapCtx.clearRect(0, 0, width, height);
-          
-          // Create bridge gaps at midpoints of up-slant edges
-          const bridgeWidth = (DILATION_RADIUS + BORDER_THICKNESS) * BRIDGE_GAP_WIDTH_MULTIPLIER;
-          const bridgeLength = cellSize * BRIDGE_GAP_LENGTH_RATIO;
-          
-          for (const upEdge of upSlantEdges) {
-            const midX = (upEdge.x1 + upEdge.x2) / 2;
-            const midY = (upEdge.y1 + upEdge.y2) / 2;
-            
-            // Direction of edge (used for rotation)
-            const dx = upEdge.x2 - upEdge.x1;
-            const dy = upEdge.y2 - upEdge.y1;
-            const len = Math.sqrt(dx * dx + dy * dy);
-            
-            if (len < 0.001) continue;
-            
-            // Draw background rectangle at crossing
-            bridgeGapCtx.save();
-            bridgeGapCtx.translate(midX, midY);
-            bridgeGapCtx.rotate(Math.atan2(dy, dx));
-            bridgeGapCtx.fillStyle = SVG_BACKGROUND_COLOR;
-            bridgeGapCtx.fillRect(-bridgeLength / 2, -bridgeWidth / 2, bridgeLength, bridgeWidth);
-            bridgeGapCtx.restore();
-          }
-          
-          ctx.drawImage(bridgeGapCanvas, 0, 0);
+      // Rectangle dimensions - similar to road width
+      const rectWidth = (DILATION_RADIUS + BORDER_THICKNESS) * 2;
+      
+      targetCtx.save();
+      targetCtx.translate((edge.x1 + edge.x2) / 2, (edge.y1 + edge.y2) / 2);
+      targetCtx.rotate(Math.atan2(dy, dx));
+      targetCtx.fillStyle = ROAD_COLOR;
+      targetCtx.fillRect(-len / 2, -rectWidth / 2, len, rectWidth);
+      targetCtx.restore();
+    };
+
+    // Render based on whether we have crossing edges
+    if (crossingEdges.length > 0) {
+      // Page B: Draw gray rectangles for crossing edges (rendered first, underneath)
+      const pageBCanvas = document.createElement("canvas");
+      pageBCanvas.width = width;
+      pageBCanvas.height = height;
+      const pageBCtx = pageBCanvas.getContext("2d");
+      
+      if (pageBCtx) {
+        pageBCtx.clearRect(0, 0, width, height);
+        
+        for (const edge of crossingEdges) {
+          drawCrossingEdgeRectangle(pageBCtx, edge);
         }
+        
+        // Render Page B to main canvas
+        ctx.drawImage(pageBCanvas, 0, 0);
       }
       
-      // Layer 4: Up-slant edges (go "over") 
-      renderRoadLayer(ctx, upSlantEdges, true);
+      // Page A: Draw non-crossing edges with dilation, white border, transparent background
+      const pageACanvas = document.createElement("canvas");
+      pageACanvas.width = width;
+      pageACanvas.height = height;
+      const pageACtx = pageACanvas.getContext("2d");
+      
+      if (pageACtx) {
+        pageACtx.clearRect(0, 0, width, height);
+        renderRoadLayer(pageACtx, nonCrossingEdges, true);
+        
+        // Render Page A on top of Page B
+        ctx.drawImage(pageACanvas, 0, 0);
+      }
     } else {
-      // For simple grids, render all edges in one layer
-      const allEdges = [...regularEdges, ...downSlantEdges, ...upSlantEdges];
-      renderRoadLayer(ctx, allEdges, true);
+      // No crossing edges - render all edges normally
+      renderRoadLayer(ctx, nonCrossingEdges, true);
     }
 
     // Draw small dots at nodes (optional, for visual clarity)
@@ -430,7 +476,7 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       ctx.fill();
     }
 
-  }, [totalWidth, totalHeight, cellSize, gridType, nodes, regularEdges, downSlantEdges, upSlantEdges]);
+  }, [totalWidth, totalHeight, cellSize, gridType, nodes, nonCrossingEdges, crossingEdges]);
 
   return (
     <div
