@@ -467,8 +467,8 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       }
     };
 
-    // Function to draw bridge white lines on top (only central 70% of length)
-    const drawBridgeLines = (
+    // Function to draw bridge: gray rectangle + short white lines on sides
+    const drawBridge = (
       targetCtx: CanvasRenderingContext2D,
       edge: EdgeData
     ) => {
@@ -483,14 +483,18 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
       const borderWidth = BORDER_THICKNESS; // White border on each side
       const totalWidth = bridgeWidth + borderWidth * 2;
       
-      // White lines only cover central 70% of the bridge length
-      const lineLength = len * 0.7;
+      // White lines only cover central 50% of the bridge length (shorter)
+      const lineLength = len * 0.5;
       
       targetCtx.save();
       targetCtx.translate((edge.x1 + edge.x2) / 2, (edge.y1 + edge.y2) / 2);
       targetCtx.rotate(Math.atan2(dy, dx));
       
-      // Draw white border lines on sides only (central 70%)
+      // First draw gray rectangle to set the bridge color
+      targetCtx.fillStyle = ROAD_COLOR;
+      targetCtx.fillRect(-len / 2, -bridgeWidth / 2, len, bridgeWidth);
+      
+      // Draw white border lines on sides only (central 50%)
       targetCtx.fillStyle = ROAD_BORDER_COLOR;
       // Top border line
       targetCtx.fillRect(-lineLength / 2, -totalWidth / 2, lineLength, borderWidth);
@@ -507,9 +511,9 @@ export const KidFriendlyMapView: React.FC<KidFriendlyMapViewProps> = ({
     // Render all edges with dilation and white border
     renderRoadLayer(ctx, allEdges, true);
     
-    // Draw bridge white lines on top for crossing edges only
+    // Draw bridges on top for crossing edges only
     for (const edge of crossingEdges) {
-      drawBridgeLines(ctx, edge);
+      drawBridge(ctx, edge);
     }
 
     // Draw small dots at nodes (optional, for visual clarity)
