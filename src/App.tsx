@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, downloadSolutionSVG } from "./components";
+import { ColorPalette, Controls, SketchpadGrid, SolutionGrid, KidFriendlyMapView, downloadSolutionSVG } from "./components";
 import type { ColorGrid, GridSolution, GridType, PathlengthConstraint, SolverRequest, SolverResponse, SolverType, ColorRoots } from "./problem";
 import { HATCH_COLOR } from "./problem";
 import SolverWorker from "./problem/solver.worker?worker";
@@ -105,6 +105,7 @@ function App() {
   const [solveTime, setSolveTime] = useState<number | null>(null);
   const [gridType, setGridType] = useState<GridType>("square");
   const [graphMode, setGraphMode] = useState(false);
+  const [kidFriendlyMode, setKidFriendlyMode] = useState(false);
   // Pathlength constraints state - now a single constraint (simplified)
   const [pathlengthConstraints, setPathlengthConstraints] = useState<PathlengthConstraint[]>([]);
   const [selectedConstraintId, setSelectedConstraintId] = useState<string | null>(null);
@@ -914,32 +915,69 @@ function App() {
                     </select>
                   )}
                   <button
-                    onClick={() => setGraphMode(!graphMode)}
+                    onClick={() => {
+                      if (graphMode) {
+                        setGraphMode(false);
+                      } else {
+                        setGraphMode(true);
+                        setKidFriendlyMode(false);
+                      }
+                    }}
                     style={{
                       padding: "6px 12px",
                       backgroundColor: graphMode ? "#3498db" : "#95a5a6",
                       color: "white",
                       border: "none",
-                      borderRadius: "4px",
+                      borderRadius: "4px 0 0 4px",
                       cursor: "pointer",
                       fontSize: "13px",
                     }}
                   >
                     {graphMode ? "Tile View" : "Graph View"}
                   </button>
+                  <button
+                    onClick={() => {
+                      if (kidFriendlyMode) {
+                        setKidFriendlyMode(false);
+                      } else {
+                        setKidFriendlyMode(true);
+                        setGraphMode(false);
+                      }
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: kidFriendlyMode ? "#27ae60" : "#95a5a6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "0 4px 4px 0",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {kidFriendlyMode ? "Tile View" : "Kid Map"}
+                  </button>
                 </div>
                 
                 {/* Solution Grid */}
                 <div style={{ marginTop: "12px" }}>
-                  <SolutionGrid
-                    grid={solutionDisplayGrid!}
-                    solution={solution}
-                    cellSize={40}
-                    gridType={solutionMetadata.gridType}
-                    showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
-                    selectedConstraintId={selectedLevelConstraintId}
-                    graphMode={graphMode}
-                  />
+                  {kidFriendlyMode ? (
+                    <KidFriendlyMapView
+                      grid={solutionDisplayGrid!}
+                      solution={solution}
+                      cellSize={40}
+                      gridType={solutionMetadata.gridType}
+                    />
+                  ) : (
+                    <SolutionGrid
+                      grid={solutionDisplayGrid!}
+                      solution={solution}
+                      cellSize={40}
+                      gridType={solutionMetadata.gridType}
+                      showDistanceLevels={!!selectedLevelConstraintId && !graphMode}
+                      selectedConstraintId={selectedLevelConstraintId}
+                      graphMode={graphMode}
+                    />
+                  )}
                 </div>
               </>
             ) : (
