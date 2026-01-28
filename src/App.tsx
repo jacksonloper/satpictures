@@ -148,8 +148,9 @@ function App() {
       }
     }
 
-    setColorRoots((prevRoots) => {
-      const newRoots = { ...prevRoots };
+    // Compute expected roots
+    const computeExpectedRoots = (prevRoots: ColorRoots): { roots: ColorRoots; changed: boolean } => {
+      const newRoots: ColorRoots = { ...prevRoots };
       let changed = false;
 
       // Remove roots for colors no longer used
@@ -202,7 +203,14 @@ function App() {
         }
       }
 
-      return changed ? newRoots : prevRoots;
+      return { roots: newRoots, changed };
+    };
+
+    // Update roots via callback to check against current state
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- This is derived state that must sync with grid
+    setColorRoots((prevRoots) => {
+      const { roots, changed } = computeExpectedRoots(prevRoots);
+      return changed ? roots : prevRoots;
     });
   }, [grid.colors, grid.width, grid.height]);
 
@@ -599,6 +607,13 @@ function App() {
         <strong>Purpose:</strong> While purpose-built maze software can solve these problems more efficiently,
         this project explores how far modern SAT solvers have come by encoding the problem as pure logical constraints.
       </p>
+
+      {/* Navigation link to tiling solver */}
+      <div style={{ marginBottom: "16px" }}>
+        <a href="#/tiling" style={{ color: "#3498db", textDecoration: "none" }}>
+          🧩 Try the Tiling Solver →
+        </a>
+      </div>
 
       {/* Main content area with two panels */}
       <div style={{ display: "flex", gap: "40px", flexWrap: "wrap", alignItems: "flex-start" }}>

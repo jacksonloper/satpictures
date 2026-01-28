@@ -35,3 +35,14 @@ export type { ColoredForestInput, ColoredForestCNFResult } from "./colored-fores
 
 // Worker types
 export type { SolverRequest, SolverResponse, SolverType } from "./solver.worker";
+
+// Tiling solver
+export { solveTiling, colorGridToTile, normalizeTile } from "./tiling-solver";
+export type { TilingSolveOptions } from "./tiling-solver";
+
+// Tiling SAT encoder
+export { buildTilingSatCNF, extractTilingSolution } from "./tiling-sat";
+export type { TilePoint, Placement, TilingSatInput, TilingSatResult, TilingSolution } from "./tiling-sat";
+
+// Tiling worker types
+export type { TilingSolverRequest, TilingSolverResponse } from "./tiling.worker";
