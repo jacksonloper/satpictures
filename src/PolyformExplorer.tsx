@@ -2,7 +2,6 @@ import React, { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import "./App.css";
 import type { TilingResult, Placement } from "./problem/polyomino-tiling";
 import type { HexTilingResult, HexPlacement } from "./problem/polyhex-tiling";
-import { axialToOffset } from "./problem/polyhex-tiling";
 
 /** Polyform type - determines the grid geometry */
 type PolyformType = "polyomino" | "polyhex" | "polyiamond";
@@ -1684,131 +1683,168 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   svgRef,
   highlightedPlacement 
 }) => {
-  // Hex geometry calculations for POINTY-TOP orientation (matching HexGrid component)
+  // Hex geometry for POINTY-TOP orientation
+  // Using standard axial → pixel conversion:
+  // x = size * sqrt(3) * (q + r/2)
+  // y = size * 3/2 * r
   const hexSize = cellSize * 0.5;
-  const hexWidth = Math.sqrt(3) * hexSize;
-  const horizSpacing = hexWidth;
-  const vertSpacing = hexSize * 1.5; // 3/2 * size for pointy-top
   
-  // Convert axial coords to offset coords and find bounds
-  const { outerBounds, cellToPlacement, offsetCells } = useMemo(() => {
-    // Start with the inner grid bounds (offset coords)
-    let minRow = 0, maxRow = height - 1;
-    let minCol = 0, maxCol = width - 1;
-    
+  // Build axial coordinate maps and find bounds
+  const { axialBounds, cellToPlacement, allAxialCells } = useMemo(() => {
+    // Track all axial coordinates and which placement owns them
     const map = new Map<string, number>();
-    const allOffsetCells: Array<{ placementIndex: number; row: number; col: number }> = [];
+    const cells: Array<{ placementIndex: number; q: number; r: number }> = [];
     
+    // Find bounds in axial space
+    let minQ = 0, maxQ = width - 1;
+    let minR = 0, maxR = height - 1;
+    
+    // Add inner grid cells (convert offset bounds to axial bounds)
+    for (let r = 0; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        // Convert offset to axial: q = col - floor(row/2)
+        const q = c - Math.floor(r / 2);
+        minQ = Math.min(minQ, q);
+        maxQ = Math.max(maxQ, q);
+      }
+    }
+    
+    // Process placements - these are already in axial coordinates
     placements.forEach((p, index) => {
       for (const cell of p.cells) {
-        const offset = axialToOffset(cell.q, cell.r);
-        const key = `${offset.row},${offset.col}`;
+        const key = `${cell.q},${cell.r}`;
         map.set(key, index);
-        allOffsetCells.push({ placementIndex: index, row: offset.row, col: offset.col });
-        minRow = Math.min(minRow, offset.row);
-        maxRow = Math.max(maxRow, offset.row);
-        minCol = Math.min(minCol, offset.col);
-        maxCol = Math.max(maxCol, offset.col);
+        cells.push({ placementIndex: index, q: cell.q, r: cell.r });
+        minQ = Math.min(minQ, cell.q);
+        maxQ = Math.max(maxQ, cell.q);
+        minR = Math.min(minR, cell.r);
+        maxR = Math.max(maxR, cell.r);
       }
     });
     
     return {
-      outerBounds: { minRow, maxRow, minCol, maxCol },
+      axialBounds: { minQ, maxQ, minR, maxR },
       cellToPlacement: map,
-      offsetCells: allOffsetCells,
+      allAxialCells: cells,
     };
   }, [placements, width, height]);
   
-  const outerWidth = outerBounds.maxCol - outerBounds.minCol + 1;
-  const outerHeight = outerBounds.maxRow - outerBounds.minRow + 1;
+  // Calculate pixel position from axial coordinates (pointy-top)
+  const axialToPixel = useCallback((q: number, r: number) => {
+    // Standard pointy-top conversion:
+    // x = size * sqrt(3) * (q + r/2)
+    // y = size * 3/2 * r
+    const x = hexSize * Math.sqrt(3) * (q + r / 2);
+    const y = hexSize * 1.5 * r;
+    return { x, y };
+  }, [hexSize]);
   
-  // Offset to convert from logical coordinates to SVG coordinates
-  const offsetCol = -outerBounds.minCol;
-  const offsetRow = -outerBounds.minRow;
+  // Calculate SVG offset to center everything with padding
+  const svgOffset = useMemo(() => {
+    const minPixel = axialToPixel(axialBounds.minQ, axialBounds.minR);
+    return {
+      x: -minPixel.x + hexSize * Math.sqrt(3) / 2 + 5,
+      y: -minPixel.y + hexSize + 5,
+    };
+  }, [axialBounds, axialToPixel, hexSize]);
   
   // Calculate SVG dimensions
-  const svgWidth = outerWidth * horizSpacing + horizSpacing / 2 + 10;
-  const svgHeight = outerHeight * vertSpacing + hexSize + 10;
+  const svgDimensions = useMemo(() => {
+    const minPixel = axialToPixel(axialBounds.minQ, axialBounds.minR);
+    const maxPixel = axialToPixel(axialBounds.maxQ, axialBounds.maxR);
+    return {
+      width: maxPixel.x - minPixel.x + hexSize * Math.sqrt(3) + 15,
+      height: maxPixel.y - minPixel.y + hexSize * 2 + 15,
+    };
+  }, [axialBounds, axialToPixel, hexSize]);
   
-  // Create hexagon path for a given center position - POINTY-TOP orientation
-  const createHexPath = (cx: number, cy: number): string => {
+  // Create hexagon path for pointy-top orientation
+  const createHexPath = useCallback((cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
+      // Pointy-top: first vertex at top (90°)
+      const angle = (Math.PI / 3) * i + Math.PI / 2;
       const x = cx + hexSize * Math.cos(angle);
       const y = cy + hexSize * Math.sin(angle);
       points.push(`${x},${y}`);
     }
     return `M ${points.join(" L ")} Z`;
-  };
+  }, [hexSize]);
   
-  // Get hex center position for offset coordinates
-  const getHexCenter = (row: number, col: number): { cx: number; cy: number } => {
-    const svgRow = row + offsetRow;
-    const svgCol = col + offsetCol;
-    const isOddRow = svgRow % 2 === 1;
-    const cx = svgCol * horizSpacing + horizSpacing / 2 + (isOddRow ? horizSpacing / 2 : 0) + 5;
-    const cy = svgRow * vertSpacing + hexSize + 5;
-    return { cx, cy };
-  };
+  // Get hex center in SVG coordinates from axial
+  const getHexCenter = useCallback((q: number, r: number): { cx: number; cy: number } => {
+    const pixel = axialToPixel(q, r);
+    return {
+      cx: pixel.x + svgOffset.x,
+      cy: pixel.y + svgOffset.y,
+    };
+  }, [axialToPixel, svgOffset]);
   
-  // Get hex vertices for a given center position - POINTY-TOP orientation
-  const getHexVertices = (cx: number, cy: number): Array<{ x: number; y: number }> => {
+  // Get hex vertices for border drawing
+  const getHexVertices = useCallback((cx: number, cy: number): Array<{ x: number; y: number }> => {
     const vertices: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
+      const angle = (Math.PI / 3) * i + Math.PI / 2;
       vertices.push({
         x: cx + hexSize * Math.cos(angle),
         y: cy + hexSize * Math.sin(angle),
       });
     }
     return vertices;
-  };
+  }, [hexSize]);
   
-  // Get hex neighbors in offset coordinates (odd-r) for POINTY-TOP
-  // In pointy-top with vertices starting at top (90°):
-  // - vertex 0 at top, vertex 1 at upper-right, vertex 2 at lower-right, etc.
-  // - edge 0 is between vertices 0-1 (upper-right edge)
-  // - edge 1 is between vertices 1-2 (right edge)
-  // - etc.
-  const getHexNeighbors = (row: number, col: number): Array<{ row: number; col: number; edgeIndex: number }> => {
-    const isOddRow = row % 2 === 1;
-    if (isOddRow) {
-      return [
-        { row: row - 1, col: col, edgeIndex: 5 },     // NW -> edge 5-0 (upper-left)
-        { row: row - 1, col: col + 1, edgeIndex: 0 }, // NE -> edge 0-1 (upper-right)
-        { row: row, col: col + 1, edgeIndex: 1 },     // E -> edge 1-2 (right)
-        { row: row + 1, col: col + 1, edgeIndex: 2 }, // SE -> edge 2-3 (lower-right)
-        { row: row + 1, col: col, edgeIndex: 3 },     // SW -> edge 3-4 (lower-left)
-        { row: row, col: col - 1, edgeIndex: 4 },     // W -> edge 4-5 (left)
-      ];
-    } else {
-      return [
-        { row: row - 1, col: col - 1, edgeIndex: 5 }, // NW -> edge 5-0 (upper-left)
-        { row: row - 1, col: col, edgeIndex: 0 },     // NE -> edge 0-1 (upper-right)
-        { row: row, col: col + 1, edgeIndex: 1 },     // E -> edge 1-2 (right)
-        { row: row + 1, col: col, edgeIndex: 2 },     // SE -> edge 2-3 (lower-right)
-        { row: row + 1, col: col - 1, edgeIndex: 3 }, // SW -> edge 3-4 (lower-left)
-        { row: row, col: col - 1, edgeIndex: 4 },     // W -> edge 4-5 (left)
-      ];
-    }
-  };
+  // Get 6 axial neighbors with edge indices for border drawing
+  // Neighbors in axial: (q+1,r), (q,r+1), (q-1,r+1), (q-1,r), (q,r-1), (q+1,r-1)
+  // Edge indices match the vertex indices for pointy-top (vertex 0 at top)
+  const getAxialNeighbors = useCallback((q: number, r: number): Array<{ q: number; r: number; edgeIndex: number }> => {
+    return [
+      { q: q + 1, r: r - 1, edgeIndex: 0 }, // Upper-right (NE)
+      { q: q + 1, r: r, edgeIndex: 1 },     // Right (E)
+      { q: q, r: r + 1, edgeIndex: 2 },     // Lower-right (SE)
+      { q: q - 1, r: r + 1, edgeIndex: 3 }, // Lower-left (SW)
+      { q: q - 1, r: r, edgeIndex: 4 },     // Left (W)
+      { q: q, r: r - 1, edgeIndex: 5 },     // Upper-left (NW)
+    ];
+  }, []);
   
-  // Generate all cells to render (including empty cells in the outer bounds)
+  // Check if axial coord is in inner grid (need to convert to offset and check bounds)
+  const isInInnerGrid = useCallback((q: number, r: number): boolean => {
+    // Convert axial to offset: row = r, col = q + floor(r/2)
+    const row = r;
+    const col = q + Math.floor(r / 2);
+    return row >= 0 && row < height && col >= 0 && col < width;
+  }, [width, height]);
+  
+  // Generate all cells to render
   const allCells = useMemo(() => {
-    const cells: Array<{ row: number; col: number; placementIndex: number | undefined; isInner: boolean }> = [];
+    const cells: Array<{ q: number; r: number; placementIndex: number | undefined; isInner: boolean }> = [];
+    const seen = new Set<string>();
     
-    for (let r = outerBounds.minRow; r <= outerBounds.maxRow; r++) {
-      for (let c = outerBounds.minCol; c <= outerBounds.maxCol; c++) {
-        const key = `${r},${c}`;
-        const placementIndex = cellToPlacement.get(key);
-        const isInner = r >= 0 && r < height && c >= 0 && c < width;
-        cells.push({ row: r, col: c, placementIndex, isInner });
+    // Add all placement cells
+    for (const { q, r, placementIndex } of allAxialCells) {
+      const key = `${q},${r}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        cells.push({ q, r, placementIndex, isInner: isInInnerGrid(q, r) });
+      }
+    }
+    
+    // Add empty inner grid cells
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const q = col - Math.floor(row / 2);
+        const r = row;
+        const key = `${q},${r}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const placementIndex = cellToPlacement.get(key);
+          cells.push({ q, r, placementIndex, isInner: true });
+        }
       }
     }
     
     return cells;
-  }, [outerBounds, cellToPlacement, width, height]);
+  }, [allAxialCells, cellToPlacement, width, height, isInInnerGrid]);
   
   return (
     <div style={{ 
@@ -1820,8 +1856,8 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     }}>
       <svg
         ref={svgRef}
-        width={svgWidth}
-        height={svgHeight}
+        width={svgDimensions.width}
+        height={svgDimensions.height}
         style={{ display: "block" }}
         role="img"
         aria-label={`Hex tiling solution showing ${placements.length} tile placements on a ${width}×${height} grid`}
@@ -1829,8 +1865,8 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
         <title>Hex Tiling Solution Visualization</title>
         
         {/* Layer 1: Draw all hex cell fills */}
-        {allCells.map(({ row, col, placementIndex, isInner }) => {
-          const { cx, cy } = getHexCenter(row, col);
+        {allCells.map(({ q, r, placementIndex, isInner }) => {
+          const { cx, cy } = getHexCenter(q, r);
           
           let fill: string;
           if (placementIndex !== undefined) {
@@ -1843,7 +1879,7 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           
           return (
             <path
-              key={`fill-${row},${col}`}
+              key={`fill-${q},${r}`}
               d={createHexPath(cx, cy)}
               fill={fill}
               stroke={fill}
@@ -1855,27 +1891,27 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
         {/* Layer 1.5: Draw overlay on cells outside the inner grid */}
         {allCells
           .filter(({ isInner }) => !isInner)
-          .map(({ row, col }) => {
-            const { cx, cy } = getHexCenter(row, col);
+          .map(({ q, r }) => {
+            const { cx, cy } = getHexCenter(q, r);
             return (
               <path
-                key={`overlay-${row},${col}`}
+                key={`overlay-${q},${r}`}
                 d={createHexPath(cx, cy)}
                 fill="rgba(255, 255, 255, 0.35)"
               />
             );
           })}
         
-        {/* Layer 2: Draw interior edges (thin gray lines between cells within same tile) */}
-        {offsetCells.map(({ placementIndex, row, col }) => {
-          const { cx, cy } = getHexCenter(row, col);
+        {/* Layer 2: Draw interior edges (thin lines between cells in same tile) */}
+        {allAxialCells.map(({ placementIndex, q, r }) => {
+          const { cx, cy } = getHexCenter(q, r);
           const vertices = getHexVertices(cx, cy);
-          const neighbors = getHexNeighbors(row, col);
+          const neighbors = getAxialNeighbors(q, r);
           
           const interiorEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
           
           for (const neighbor of neighbors) {
-            const neighborKey = `${neighbor.row},${neighbor.col}`;
+            const neighborKey = `${neighbor.q},${neighbor.r}`;
             const neighborPlacement = cellToPlacement.get(neighborKey);
             
             if (neighborPlacement === placementIndex) {
@@ -1896,7 +1932,7 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           
           return interiorEdges.map((edge, edgeIndex) => (
             <line
-              key={`interior-${row},${col}-${edgeIndex}`}
+              key={`interior-${q},${r}-${edgeIndex}`}
               x1={edge.x1}
               y1={edge.y1}
               x2={edge.x2}
@@ -1907,20 +1943,18 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           ));
         })}
         
-        {/* Layer 3: Draw inner grid boundary (approximate with individual hex borders) */}
+        {/* Layer 3: Draw inner grid boundary */}
         {allCells
           .filter(({ isInner }) => isInner)
-          .map(({ row, col }) => {
-            const { cx, cy } = getHexCenter(row, col);
+          .map(({ q, r }) => {
+            const { cx, cy } = getHexCenter(q, r);
             const vertices = getHexVertices(cx, cy);
-            const neighbors = getHexNeighbors(row, col);
+            const neighbors = getAxialNeighbors(q, r);
             
             const boundaryEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
             
             for (const neighbor of neighbors) {
-              const isNeighborInner = neighbor.row >= 0 && neighbor.row < height && 
-                                      neighbor.col >= 0 && neighbor.col < width;
-              if (!isNeighborInner) {
+              if (!isInInnerGrid(neighbor.q, neighbor.r)) {
                 // This edge is on the boundary
                 const v1 = vertices[neighbor.edgeIndex];
                 const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
@@ -1930,7 +1964,7 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
             
             return boundaryEdges.map((edge, edgeIndex) => (
               <line
-                key={`boundary-${row},${col}-${edgeIndex}`}
+                key={`boundary-${q},${r}-${edgeIndex}`}
                 x1={edge.x1}
                 y1={edge.y1}
                 x2={edge.x2}
@@ -1942,19 +1976,19 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           })}
         
         {/* Layer 4: Draw tile boundaries (thicker lines between different tiles) */}
-        {offsetCells.map(({ placementIndex, row, col }) => {
-          const { cx, cy } = getHexCenter(row, col);
+        {allAxialCells.map(({ placementIndex, q, r }) => {
+          const { cx, cy } = getHexCenter(q, r);
           const vertices = getHexVertices(cx, cy);
-          const neighbors = getHexNeighbors(row, col);
+          const neighbors = getAxialNeighbors(q, r);
           
           const boundaryEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
           
           for (const neighbor of neighbors) {
-            const neighborKey = `${neighbor.row},${neighbor.col}`;
+            const neighborKey = `${neighbor.q},${neighbor.r}`;
             const neighborPlacement = cellToPlacement.get(neighborKey);
             
+            // Draw boundary if neighbor is different tile or empty
             if (neighborPlacement !== placementIndex) {
-              // Boundary edge - draw thick line
               const v1 = vertices[neighbor.edgeIndex];
               const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
               boundaryEdges.push({ x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y });
@@ -1963,13 +1997,13 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           
           return boundaryEdges.map((edge, edgeIndex) => (
             <line
-              key={`tile-boundary-${row},${col}-${edgeIndex}`}
+              key={`tileBoundary-${q},${r}-${edgeIndex}`}
               x1={edge.x1}
               y1={edge.y1}
               x2={edge.x2}
               y2={edge.y2}
               stroke="#2c3e50"
-              strokeWidth={2}
+              strokeWidth={1.5}
             />
           ));
         })}
