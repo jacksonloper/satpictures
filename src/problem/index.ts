@@ -35,3 +35,7 @@ export type { ColoredForestInput, ColoredForestCNFResult } from "./colored-fores
 
 // Worker types
 export type { SolverRequest, SolverResponse, SolverType } from "./solver.worker";
+
+// Tiling solver types
+export type { PolyformType, Placement, TilingSolverResult, Cell } from "./tiling-solver";
+export type { TilingSolverRequest, TilingSolverResponse } from "./tiling.worker";
