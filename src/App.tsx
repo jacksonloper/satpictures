@@ -148,8 +148,9 @@ function App() {
       }
     }
 
-    setColorRoots((prevRoots) => {
-      const newRoots = { ...prevRoots };
+    // Compute expected roots
+    const computeExpectedRoots = (prevRoots: ColorRoots): { roots: ColorRoots; changed: boolean } => {
+      const newRoots: ColorRoots = { ...prevRoots };
       let changed = false;
 
       // Remove roots for colors no longer used
@@ -202,7 +203,14 @@ function App() {
         }
       }
 
-      return changed ? newRoots : prevRoots;
+      return { roots: newRoots, changed };
+    };
+
+    // Update roots via callback to check against current state
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- This is derived state that must sync with grid
+    setColorRoots((prevRoots) => {
+      const { roots, changed } = computeExpectedRoots(prevRoots);
+      return changed ? roots : prevRoots;
     });
   }, [grid.colors, grid.width, grid.height]);
 
