@@ -1301,26 +1301,24 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   
-  // Hex geometry calculations:
+  // Hex geometry calculations for POINTY-TOP orientation:
   // - hexSize: radius from center to vertex (0.5 * cellSize for spacing)
-  // - hexWidth: flat-to-flat width = sqrt(3) * radius (standard hex geometry)
-  // - hexHeight: point-to-point height = 2 * radius
-  // - vertSpacing: 0.75 of height because hexes overlap vertically by 1/4
+  // - For pointy-top: hexWidth = sqrt(3) * size, hexHeight = 2 * size
+  // - Pointy-top axial → pixel: x = size * sqrt(3) * (q + r/2), y = size * 3/2 * r
   const hexSize = cellSize * 0.5;
   const hexWidth = Math.sqrt(3) * hexSize;
-  const hexHeight = 2 * hexSize;
   const horizSpacing = hexWidth;
-  const vertSpacing = hexHeight * 0.75;
+  const vertSpacing = hexSize * 1.5; // 3/2 * size for pointy-top
   
   const svgWidth = width * horizSpacing + horizSpacing / 2 + 10;
   const svgHeight = height * vertSpacing + hexSize + 10;
   
-  // Create hexagon path - 6 vertices at 60° (PI/3) intervals
-  // Starting offset of -PI/6 (-30°) creates a flat-top orientation
+  // Create hexagon path - POINTY-TOP orientation
+  // Starting at angle PI/2 (90°) creates pointy-top orientation
   const createHexPath = (cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
       const x = cx + hexSize * Math.cos(angle);
       const y = cy + hexSize * Math.sin(angle);
       points.push(`${x},${y}`);
@@ -1336,7 +1334,7 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
     >
       {cells.map((row, rowIdx) =>
         row.map((filled, colIdx) => {
-          // Odd-r offset: odd rows are shifted right by half a hex width
+          // Odd-r offset for pointy-top: odd rows are shifted right by half a hex width
           const isOddRow = rowIdx % 2 === 1;
           const cx = colIdx * horizSpacing + horizSpacing / 2 + (isOddRow ? horizSpacing / 2 : 0) + 5;
           const cy = rowIdx * vertSpacing + hexSize + 5;
@@ -1686,11 +1684,11 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   svgRef,
   highlightedPlacement 
 }) => {
-  // Hex geometry calculations (matching HexGrid component)
+  // Hex geometry calculations for POINTY-TOP orientation (matching HexGrid component)
   const hexSize = cellSize * 0.5;
   const hexWidth = Math.sqrt(3) * hexSize;
   const horizSpacing = hexWidth;
-  const vertSpacing = hexSize * 1.5; // 0.75 * hexHeight where hexHeight = 2 * hexSize
+  const vertSpacing = hexSize * 1.5; // 3/2 * size for pointy-top
   
   // Convert axial coords to offset coords and find bounds
   const { outerBounds, cellToPlacement, offsetCells } = useMemo(() => {
@@ -1732,11 +1730,11 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   const svgWidth = outerWidth * horizSpacing + horizSpacing / 2 + 10;
   const svgHeight = outerHeight * vertSpacing + hexSize + 10;
   
-  // Create hexagon path for a given center position
+  // Create hexagon path for a given center position - POINTY-TOP orientation
   const createHexPath = (cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
       const x = cx + hexSize * Math.cos(angle);
       const y = cy + hexSize * Math.sin(angle);
       points.push(`${x},${y}`);
@@ -1754,11 +1752,11 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     return { cx, cy };
   };
   
-  // Get hex vertices for a given center position
+  // Get hex vertices for a given center position - POINTY-TOP orientation
   const getHexVertices = (cx: number, cy: number): Array<{ x: number; y: number }> => {
     const vertices: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
       vertices.push({
         x: cx + hexSize * Math.cos(angle),
         y: cy + hexSize * Math.sin(angle),
@@ -1767,26 +1765,31 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     return vertices;
   };
   
-  // Get hex neighbors in offset coordinates (odd-r)
+  // Get hex neighbors in offset coordinates (odd-r) for POINTY-TOP
+  // In pointy-top with vertices starting at top (90°):
+  // - vertex 0 at top, vertex 1 at upper-right, vertex 2 at lower-right, etc.
+  // - edge 0 is between vertices 0-1 (upper-right edge)
+  // - edge 1 is between vertices 1-2 (right edge)
+  // - etc.
   const getHexNeighbors = (row: number, col: number): Array<{ row: number; col: number; edgeIndex: number }> => {
     const isOddRow = row % 2 === 1;
     if (isOddRow) {
       return [
-        { row: row - 1, col: col, edgeIndex: 0 },     // NW -> edge 0-1
-        { row: row - 1, col: col + 1, edgeIndex: 1 }, // NE -> edge 1-2
-        { row: row, col: col + 1, edgeIndex: 2 },     // E -> edge 2-3
-        { row: row + 1, col: col + 1, edgeIndex: 3 }, // SE -> edge 3-4
-        { row: row + 1, col: col, edgeIndex: 4 },     // SW -> edge 4-5
-        { row: row, col: col - 1, edgeIndex: 5 },     // W -> edge 5-0
+        { row: row - 1, col: col, edgeIndex: 5 },     // NW -> edge 5-0 (upper-left)
+        { row: row - 1, col: col + 1, edgeIndex: 0 }, // NE -> edge 0-1 (upper-right)
+        { row: row, col: col + 1, edgeIndex: 1 },     // E -> edge 1-2 (right)
+        { row: row + 1, col: col + 1, edgeIndex: 2 }, // SE -> edge 2-3 (lower-right)
+        { row: row + 1, col: col, edgeIndex: 3 },     // SW -> edge 3-4 (lower-left)
+        { row: row, col: col - 1, edgeIndex: 4 },     // W -> edge 4-5 (left)
       ];
     } else {
       return [
-        { row: row - 1, col: col - 1, edgeIndex: 0 }, // NW -> edge 0-1
-        { row: row - 1, col: col, edgeIndex: 1 },     // NE -> edge 1-2
-        { row: row, col: col + 1, edgeIndex: 2 },     // E -> edge 2-3
-        { row: row + 1, col: col, edgeIndex: 3 },     // SE -> edge 3-4
-        { row: row + 1, col: col - 1, edgeIndex: 4 }, // SW -> edge 4-5
-        { row: row, col: col - 1, edgeIndex: 5 },     // W -> edge 5-0
+        { row: row - 1, col: col - 1, edgeIndex: 5 }, // NW -> edge 5-0 (upper-left)
+        { row: row - 1, col: col, edgeIndex: 0 },     // NE -> edge 0-1 (upper-right)
+        { row: row, col: col + 1, edgeIndex: 1 },     // E -> edge 1-2 (right)
+        { row: row + 1, col: col, edgeIndex: 2 },     // SE -> edge 2-3 (lower-right)
+        { row: row + 1, col: col - 1, edgeIndex: 3 }, // SW -> edge 3-4 (lower-left)
+        { row: row, col: col - 1, edgeIndex: 4 },     // W -> edge 4-5 (left)
       ];
     }
   };
