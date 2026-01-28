@@ -600,6 +600,13 @@ function App() {
         this project explores how far modern SAT solvers have come by encoding the problem as pure logical constraints.
       </p>
 
+      {/* Navigation link to tiling solver */}
+      <div style={{ marginBottom: "16px" }}>
+        <a href="#/tiling" style={{ color: "#3498db", textDecoration: "none" }}>
+          🧩 Try the Tiling Solver →
+        </a>
+      </div>
+
       {/* Main content area with two panels */}
       <div style={{ display: "flex", gap: "40px", flexWrap: "wrap", alignItems: "flex-start" }}>
         
