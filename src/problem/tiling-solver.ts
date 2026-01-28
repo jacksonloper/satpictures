@@ -183,16 +183,14 @@ function axialToOffset(q: number, r: number): { row: number; col: number } {
 function rotateHex60(cells: Cell[]): Cell[] {
   const rotated = cells.map(c => {
     const { q, r } = offsetToAxial(c.row, c.col);
-    // Convert axial to cube: x=q, z=r, y=-x-z
+    // Convert axial to cube: x=q, z=r, y=-x-z (y is implied by x+y+z=0)
     const x = q;
     const z = r;
-    const y = -x - z;
     // Rotate 60° CW: (x,y,z) -> (-z,-x,-y)
+    // Since y = -x-z, we have: newX = -z, newZ = -(-x-z) = x+z
     const newX = -z;
-    const newY = -x;
-    const newZ = -y;
-    // Convert back to axial: q=x, r=z
-    void newY; // y is implied by x+y+z=0
+    const newZ = x + z;
+    // Convert back to axial: q=newX, r=newZ
     const newQ = newX;
     const newR = newZ;
     // Convert axial to offset
@@ -433,7 +431,8 @@ function getAllTransforms(cells: Cell[], polyformType: PolyformType): Cell[][] {
 }
 
 /**
- * Generate all valid placements of the tile in the target grid
+ * Generate all valid placements of the tile in the target grid.
+ * Only placements where ALL cells are fully inside the target grid are included.
  */
 function generatePlacements(
   transforms: Cell[][],
@@ -444,10 +443,8 @@ function generatePlacements(
 ): Placement[] {
   const placements: Placement[] = [];
   
-  // Extended grid range: we need to consider placements that may only
-  // partially overlap with the target grid. The tile can start from
-  // position -(tileWidth-1) to targetWidth-1 (similarly for height)
-  // to ensure we cover all positions in the target grid.
+  // Iterate over all possible offset positions. We use an extended range
+  // to check all positions, but only keep placements where all cells fit.
   const minOffsetRow = -(tileHeight - 1);
   const maxOffsetRow = targetHeight - 1;
   const minOffsetCol = -(tileWidth - 1);

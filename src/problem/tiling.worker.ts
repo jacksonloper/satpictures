@@ -174,11 +174,12 @@ class Cadical implements CadicalClass {
  */
 function formatErrorMessage(error: unknown): string {
   const errorMessage = error instanceof Error ? error.message : String(error);
+  const lowerMessage = errorMessage.toLowerCase();
   
   if (
     errorMessage.includes("Cannot enlarge memory arrays") ||
-    errorMessage.includes("memory") ||
-    errorMessage.includes("Out of memory") ||
+    lowerMessage.includes("out of memory") ||
+    lowerMessage.includes("memory allocation") ||
     errorMessage.includes("abort()")
   ) {
     return "Out of memory - the tiling problem is too complex. Try a smaller grid or simpler tile.";
@@ -248,23 +249,25 @@ self.onmessage = async (event: MessageEvent<TilingSolverRequest>) => {
     // Create a new CaDiCaL instance
     const cadical = new Cadical(module);
     
-    // Create solver
-    const solver = new CadicalSolver(cadical);
-    
-    // Solve the tiling problem
-    const result = solveTiling(tileCells, polyformType, targetWidth, targetHeight, solver);
-    
-    // Clean up
-    cadical.release();
-    
-    const response: TilingSolverResponse = {
-      success: true,
-      satisfiable: result.satisfiable,
-      placements: result.placements,
-      stats: result.stats,
-      messageType: "result",
-    };
-    self.postMessage(response);
+    try {
+      // Create solver
+      const solver = new CadicalSolver(cadical);
+      
+      // Solve the tiling problem
+      const result = solveTiling(tileCells, polyformType, targetWidth, targetHeight, solver);
+      
+      const response: TilingSolverResponse = {
+        success: true,
+        satisfiable: result.satisfiable,
+        placements: result.placements,
+        stats: result.stats,
+        messageType: "result",
+      };
+      self.postMessage(response);
+    } finally {
+      // Clean up - always release cadical resources
+      cadical.release();
+    }
   } catch (error) {
     const response: TilingSolverResponse = {
       success: false,

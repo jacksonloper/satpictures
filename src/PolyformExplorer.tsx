@@ -366,6 +366,8 @@ export function PolyformExplorer() {
       numPlacements: number;
       numTransforms: number;
     };
+    targetWidth: number;
+    targetHeight: number;
   } | null>(null);
   const [solverError, setSolverError] = useState<string | null>(null);
   
@@ -625,6 +627,8 @@ export function PolyformExplorer() {
         satisfiable: response.satisfiable,
         placements: response.placements,
         stats: response.stats,
+        targetWidth,
+        targetHeight,
       });
     };
     
@@ -919,7 +923,7 @@ export function PolyformExplorer() {
                 borderRadius: "4px",
                 color: "#856404",
               }}>
-                <strong>No solution found.</strong> The tile cannot tile a {targetWidthInput}×{targetHeightInput} grid.
+                <strong>No solution found.</strong> The tile cannot tile a {solverResult.targetWidth}×{solverResult.targetHeight} grid.
               </div>
             ) : (
               <div>
@@ -944,22 +948,22 @@ export function PolyformExplorer() {
                   {polyformType === "polyomino" && (
                     <TilingResultSquareGrid
                       placements={solverResult.placements}
-                      targetWidth={parseInt(targetWidthInput, 10)}
-                      targetHeight={parseInt(targetHeightInput, 10)}
+                      targetWidth={solverResult.targetWidth}
+                      targetHeight={solverResult.targetHeight}
                     />
                   )}
                   {polyformType === "polyhex" && (
                     <TilingResultHexGrid
                       placements={solverResult.placements}
-                      targetWidth={parseInt(targetWidthInput, 10)}
-                      targetHeight={parseInt(targetHeightInput, 10)}
+                      targetWidth={solverResult.targetWidth}
+                      targetHeight={solverResult.targetHeight}
                     />
                   )}
                   {polyformType === "polyiamond" && (
                     <TilingResultTriangleGrid
                       placements={solverResult.placements}
-                      targetWidth={parseInt(targetWidthInput, 10)}
-                      targetHeight={parseInt(targetHeightInput, 10)}
+                      targetWidth={solverResult.targetWidth}
+                      targetHeight={solverResult.targetHeight}
                     />
                   )}
                 </div>
