@@ -151,20 +151,21 @@ function rotateSquare(p: TilePoint, times: number): TilePoint {
 
 /**
  * Rotate a point 60 degrees clockwise around origin for hex grid.
- * Uses axial coordinates where the hex grid has "odd-r" offset.
- * For simplicity, we convert to cube coordinates, rotate, and convert back.
+ * Uses odd-r offset coordinates and converts to cube coordinates for rotation.
+ * Reference: https://www.redblobgames.com/grids/hexagons/#conversions-offset
  */
 function rotateHex(p: TilePoint, times: number): TilePoint {
-  // Convert offset coordinates to cube coordinates
-  // Using "odd-r" offset: col = x, row = z + (x - (x&1)) / 2
-  // x = col, z = row - (col - (col&1)) / 2, y = -x - z
-  let x = p.col;
-  let z = p.row - Math.floor((p.col - (p.col & 1)) / 2);
+  // Convert odd-r offset coordinates to cube coordinates
+  // cube_x = col - (row - (row & 1)) / 2
+  // cube_z = row
+  // cube_y = -cube_x - cube_z
+  let x = p.col - Math.floor((p.row - (p.row & 1)) / 2);
+  let z = p.row;
   let y = -x - z;
 
   // Rotate 60 degrees clockwise, `times` times
+  // 60° CW in cube coords: (x, y, z) -> (-z, -x, -y)
   for (let i = 0; i < times; i++) {
-    // 60 degree clockwise in cube coords: (x, y, z) -> (-z, -x, -y)
     const newX = -z;
     const newY = -x;
     const newZ = -y;
@@ -173,9 +174,11 @@ function rotateHex(p: TilePoint, times: number): TilePoint {
     z = newZ;
   }
 
-  // Convert back to offset coordinates
-  const col = x;
-  const row = z + Math.floor((x - (x & 1)) / 2);
+  // Convert back to odd-r offset coordinates
+  // col = cube_x + (cube_z - (cube_z & 1)) / 2
+  // row = cube_z
+  const col = x + Math.floor((z - (z & 1)) / 2);
+  const row = z;
   return { row, col };
 }
 
