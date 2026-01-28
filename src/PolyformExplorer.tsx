@@ -362,6 +362,26 @@ export function PolyformExplorer() {
   const [tilingError, setTilingError] = useState<string | null>(null);
   const [tilingStats, setTilingStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  const tilingSvgRef = useRef<SVGSVGElement | null>(null);
+  
+  // Download SVG function
+  const handleDownloadSvg = useCallback(() => {
+    if (!tilingSvgRef.current) return;
+    
+    const svgElement = tilingSvgRef.current;
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svgElement);
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `tiling-${tilingWidth}x${tilingHeight}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [tilingWidth, tilingHeight]);
   
   // Cleanup worker on unmount
   useEffect(() => {
@@ -941,7 +961,23 @@ export function PolyformExplorer() {
                   width={tilingWidth}
                   height={tilingHeight}
                   placements={tilingResult.placements || []}
+                  svgRef={tilingSvgRef}
                 />
+                <button
+                  onClick={handleDownloadSvg}
+                  style={{
+                    marginTop: "12px",
+                    padding: "8px 16px",
+                    backgroundColor: "#6c757d",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                  }}
+                >
+                  💾 Save as SVG
+                </button>
               </>
             ) : (
               <div style={{ 
@@ -1142,6 +1178,7 @@ interface TilingViewerProps {
   height: number;
   placements: Placement[];
   cellSize?: number;
+  svgRef?: React.RefObject<SVGSVGElement | null>;
 }
 
 // Generate a set of distinct colors for the placements
@@ -1155,7 +1192,8 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
   width, 
   height, 
   placements, 
-  cellSize = 30 
+  cellSize = 30,
+  svgRef 
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -1196,15 +1234,16 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
       display: "inline-block",
     }}>
       <svg
-        width={outerWidth * cellSize + 2}
-        height={outerHeight * cellSize + 2}
+        ref={svgRef}
+        width={outerWidth * cellSize}
+        height={outerHeight * cellSize}
         style={{ display: "block" }}
         role="img"
         aria-label={`Tiling solution showing ${placements.length} tile placements on a ${width}×${height} grid with overhangs`}
       >
         <title>Tiling Solution Visualization</title>
         
-        {/* Layer 1: Draw all cell fills (no strokes yet) */}
+        {/* Layer 1: Draw all cell fills - cells fully tile with no gaps */}
         {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
           Array.from({ length: outerWidth }, (_, svgColIdx) => {
             // Convert SVG coordinates back to logical coordinates
@@ -1230,11 +1269,13 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             return (
               <rect
                 key={key}
-                x={svgColIdx * cellSize + 1}
-                y={svgRowIdx * cellSize + 1}
-                width={cellSize - 1}
-                height={cellSize - 1}
+                x={svgColIdx * cellSize}
+                y={svgRowIdx * cellSize}
+                width={cellSize}
+                height={cellSize}
                 fill={fill}
+                stroke={fill}
+                strokeWidth={0.5}
               />
             );
           })
@@ -1254,10 +1295,10 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             return (
               <rect
                 key={`overlay-${logicalRow},${logicalCol}`}
-                x={svgColIdx * cellSize + 1}
-                y={svgRowIdx * cellSize + 1}
-                width={cellSize - 1}
-                height={cellSize - 1}
+                x={svgColIdx * cellSize}
+                y={svgRowIdx * cellSize}
+                width={cellSize}
+                height={cellSize}
                 fill="rgba(255, 255, 255, 0.35)"
               />
             );
@@ -1272,27 +1313,25 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
           for (const cell of p.cells) {
             const svgCol = cell.col + offsetCol;
             const svgRow = cell.row + offsetRow;
-            const x = svgCol * cellSize + 1;
-            const y = svgRow * cellSize + 1;
+            const x = svgCol * cellSize;
+            const y = svgRow * cellSize;
             
             // Only draw interior edges (where neighbor is same placement)
             // Right edge - only if neighbor to the right is same tile
             const rightKey = `${cell.row},${cell.col + 1}`;
             if (cellToPlacement.get(rightKey) === pIndex) {
               // Vertical line: shorten by 10% on each end
-              const lineLen = cellSize - 1;
-              const startY = y + lineLen * 0.1;
-              const endY = y + lineLen * 0.9;
-              interiorEdges.push({ x1: x + cellSize - 1, y1: startY, x2: x + cellSize - 1, y2: endY });
+              const startY = y + cellSize * 0.1;
+              const endY = y + cellSize * 0.9;
+              interiorEdges.push({ x1: x + cellSize, y1: startY, x2: x + cellSize, y2: endY });
             }
             // Bottom edge - only if neighbor below is same tile
             const bottomKey = `${cell.row + 1},${cell.col}`;
             if (cellToPlacement.get(bottomKey) === pIndex) {
               // Horizontal line: shorten by 10% on each end
-              const lineLen = cellSize - 1;
-              const startX = x + lineLen * 0.1;
-              const endX = x + lineLen * 0.9;
-              interiorEdges.push({ x1: startX, y1: y + cellSize - 1, x2: endX, y2: y + cellSize - 1 });
+              const startX = x + cellSize * 0.1;
+              const endX = x + cellSize * 0.9;
+              interiorEdges.push({ x1: startX, y1: y + cellSize, x2: endX, y2: y + cellSize });
             }
           }
           
@@ -1311,10 +1350,10 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
         
         {/* Layer 3: Draw inner grid boundary (thick red border to distinguish from tile boundaries) */}
         <rect
-          x={offsetCol * cellSize + 1}
-          y={offsetRow * cellSize + 1}
-          width={width * cellSize - 1}
-          height={height * cellSize - 1}
+          x={offsetCol * cellSize}
+          y={offsetRow * cellSize}
+          width={width * cellSize}
+          height={height * cellSize}
           fill="none"
           stroke="#e74c3c"
           strokeWidth={3}
@@ -1327,29 +1366,29 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
           for (const cell of p.cells) {
             const svgCol = cell.col + offsetCol;
             const svgRow = cell.row + offsetRow;
-            const x = svgCol * cellSize + 1;
-            const y = svgRow * cellSize + 1;
+            const x = svgCol * cellSize;
+            const y = svgRow * cellSize;
             
             // Check each edge - draw if neighbor is different placement or empty
             // Top edge
             const topKey = `${cell.row - 1},${cell.col}`;
             if (cellToPlacement.get(topKey) !== pIndex) {
-              edges.push({ x1: x, y1: y, x2: x + cellSize - 1, y2: y });
+              edges.push({ x1: x, y1: y, x2: x + cellSize, y2: y });
             }
             // Bottom edge
             const bottomKey = `${cell.row + 1},${cell.col}`;
             if (cellToPlacement.get(bottomKey) !== pIndex) {
-              edges.push({ x1: x, y1: y + cellSize - 1, x2: x + cellSize - 1, y2: y + cellSize - 1 });
+              edges.push({ x1: x, y1: y + cellSize, x2: x + cellSize, y2: y + cellSize });
             }
             // Left edge
             const leftKey = `${cell.row},${cell.col - 1}`;
             if (cellToPlacement.get(leftKey) !== pIndex) {
-              edges.push({ x1: x, y1: y, x2: x, y2: y + cellSize - 1 });
+              edges.push({ x1: x, y1: y, x2: x, y2: y + cellSize });
             }
             // Right edge
             const rightKey = `${cell.row},${cell.col + 1}`;
             if (cellToPlacement.get(rightKey) !== pIndex) {
-              edges.push({ x1: x + cellSize - 1, y1: y, x2: x + cellSize - 1, y2: y + cellSize - 1 });
+              edges.push({ x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize });
             }
           }
           
