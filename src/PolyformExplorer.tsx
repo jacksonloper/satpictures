@@ -1,5 +1,7 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import "./App.css";
+import type { TilingSolverRequest, TilingSolverResponse, Placement } from "./problem";
+import TilingWorker from "./problem/tiling.worker?worker";
 
 /** Polyform type - determines the grid geometry */
 type PolyformType = "polyomino" | "polyhex" | "polyiamond";
@@ -349,6 +351,36 @@ export function PolyformExplorer() {
   const [widthError, setWidthError] = useState(false);
   const [heightError, setHeightError] = useState(false);
   
+  // Tiling solver state
+  const [targetWidthInput, setTargetWidthInput] = useState("6");
+  const [targetHeightInput, setTargetHeightInput] = useState("6");
+  const [targetWidthError, setTargetWidthError] = useState(false);
+  const [targetHeightError, setTargetHeightError] = useState(false);
+  const [solving, setSolving] = useState(false);
+  const [solverResult, setSolverResult] = useState<{
+    satisfiable: boolean;
+    placements: Placement[];
+    stats?: {
+      numVars: number;
+      numClauses: number;
+      numPlacements: number;
+      numTransforms: number;
+    };
+  } | null>(null);
+  const [solverError, setSolverError] = useState<string | null>(null);
+  
+  // Worker reference
+  const workerRef = useRef<Worker | null>(null);
+  
+  // Cleanup worker on unmount
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+      }
+    };
+  }, []);
+  
   // Validate and apply width on blur
   const handleWidthBlur = useCallback(() => {
     const parsed = parseInt(widthInput, 10);
@@ -519,6 +551,97 @@ export function PolyformExplorer() {
     }
     return count;
   }, [cells]);
+  
+  // Validate target width
+  const validateTargetWidth = useCallback((value: string): number | null => {
+    const parsed = parseInt(value, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 50) {
+      return parsed;
+    }
+    return null;
+  }, []);
+  
+  // Validate target height
+  const validateTargetHeight = useCallback((value: string): number | null => {
+    const parsed = parseInt(value, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 50) {
+      return parsed;
+    }
+    return null;
+  }, []);
+  
+  // Solve tiling
+  const handleSolve = useCallback(() => {
+    // Validate inputs
+    const targetWidth = validateTargetWidth(targetWidthInput);
+    const targetHeight = validateTargetHeight(targetHeightInput);
+    
+    if (targetWidth === null) {
+      setTargetWidthError(true);
+      return;
+    }
+    if (targetHeight === null) {
+      setTargetHeightError(true);
+      return;
+    }
+    
+    // Check that tile has at least one cell
+    if (filledCount === 0) {
+      setSolverError("Please draw a tile with at least one cell.");
+      return;
+    }
+    
+    // Start solving
+    setSolving(true);
+    setSolverResult(null);
+    setSolverError(null);
+    
+    // Terminate existing worker if any
+    if (workerRef.current) {
+      workerRef.current.terminate();
+    }
+    
+    // Create new worker
+    const worker = new TilingWorker();
+    workerRef.current = worker;
+    
+    worker.onmessage = (event: MessageEvent<TilingSolverResponse>) => {
+      const response = event.data;
+      
+      if (response.messageType === "progress") {
+        // Progress update - ignore for now
+        return;
+      }
+      
+      // Result received
+      setSolving(false);
+      
+      if (!response.success) {
+        setSolverError(response.error ?? "Unknown error occurred");
+        return;
+      }
+      
+      setSolverResult({
+        satisfiable: response.satisfiable,
+        placements: response.placements,
+        stats: response.stats,
+      });
+    };
+    
+    worker.onerror = (error) => {
+      setSolving(false);
+      setSolverError(`Worker error: ${error.message}`);
+    };
+    
+    // Send request
+    const request: TilingSolverRequest = {
+      tileCells: cells,
+      polyformType,
+      targetWidth,
+      targetHeight,
+    };
+    worker.postMessage(request);
+  }, [cells, polyformType, targetWidthInput, targetHeightInput, filledCount, validateTargetWidth, validateTargetHeight]);
   
   return (
     <div className="app">
@@ -697,16 +820,161 @@ export function PolyformExplorer() {
         )}
       </div>
       
-      {/* Placeholder for future tiling solve feature */}
+      {/* Tiling Solver Section */}
       <div style={{ 
         marginTop: "24px", 
         padding: "16px", 
         backgroundColor: "#f5f5f5", 
         borderRadius: "8px",
-        color: "#7f8c8d",
-        fontSize: "14px",
       }}>
-        <em>🔮 Tiling solver coming soon...</em>
+        <h3 style={{ marginTop: 0, marginBottom: "16px" }}>🔮 Tiling Solver</h3>
+        
+        {/* Target grid dimensions */}
+        <div style={{ marginBottom: "16px", display: "flex", gap: "20px", flexWrap: "wrap", alignItems: "center" }}>
+          <div>
+            <label style={{ marginRight: "8px" }}>Target Width:</label>
+            <input
+              type="text"
+              value={targetWidthInput}
+              onChange={(e) => {
+                setTargetWidthInput(e.target.value);
+                setTargetWidthError(false);
+              }}
+              style={{
+                width: "60px",
+                padding: "8px",
+                fontSize: "14px",
+                borderRadius: "4px",
+                border: targetWidthError ? "2px solid #e74c3c" : "1px solid #bdc3c7",
+                backgroundColor: targetWidthError ? "#fdecea" : "white",
+              }}
+            />
+            {targetWidthError && (
+              <span style={{ color: "#e74c3c", marginLeft: "8px", fontSize: "12px" }}>
+                Enter an integer (1-50)
+              </span>
+            )}
+          </div>
+          <div>
+            <label style={{ marginRight: "8px" }}>Target Height:</label>
+            <input
+              type="text"
+              value={targetHeightInput}
+              onChange={(e) => {
+                setTargetHeightInput(e.target.value);
+                setTargetHeightError(false);
+              }}
+              style={{
+                width: "60px",
+                padding: "8px",
+                fontSize: "14px",
+                borderRadius: "4px",
+                border: targetHeightError ? "2px solid #e74c3c" : "1px solid #bdc3c7",
+                backgroundColor: targetHeightError ? "#fdecea" : "white",
+              }}
+            />
+            {targetHeightError && (
+              <span style={{ color: "#e74c3c", marginLeft: "8px", fontSize: "12px" }}>
+                Enter an integer (1-50)
+              </span>
+            )}
+          </div>
+          <button
+            onClick={handleSolve}
+            disabled={solving || filledCount === 0}
+            style={{
+              padding: "8px 24px",
+              backgroundColor: solving ? "#95a5a6" : "#27ae60",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: solving || filledCount === 0 ? "not-allowed" : "pointer",
+              fontWeight: "bold",
+            }}
+          >
+            {solving ? "Solving..." : "Solve Tiling"}
+          </button>
+        </div>
+        
+        {/* Error message */}
+        {solverError && (
+          <div style={{ 
+            padding: "12px", 
+            backgroundColor: "#fdecea", 
+            borderRadius: "4px",
+            color: "#e74c3c",
+            marginBottom: "16px",
+          }}>
+            {solverError}
+          </div>
+        )}
+        
+        {/* Solver result */}
+        {solverResult && (
+          <div style={{ marginTop: "16px" }}>
+            {!solverResult.satisfiable ? (
+              <div style={{ 
+                padding: "12px", 
+                backgroundColor: "#fff3cd", 
+                borderRadius: "4px",
+                color: "#856404",
+              }}>
+                <strong>No solution found.</strong> The tile cannot tile a {targetWidthInput}×{targetHeightInput} grid.
+              </div>
+            ) : (
+              <div>
+                <div style={{ 
+                  padding: "12px", 
+                  backgroundColor: "#d4edda", 
+                  borderRadius: "4px",
+                  color: "#155724",
+                  marginBottom: "16px",
+                }}>
+                  <strong>Solution found!</strong> {solverResult.placements.length} tile(s) placed.
+                </div>
+                
+                {/* Solution grid viewer */}
+                <div style={{ 
+                  padding: "16px", 
+                  backgroundColor: "#f8f9fa", 
+                  borderRadius: "8px",
+                  border: "2px solid #27ae60",
+                  display: "inline-block",
+                }}>
+                  {polyformType === "polyomino" && (
+                    <TilingResultSquareGrid
+                      placements={solverResult.placements}
+                      targetWidth={parseInt(targetWidthInput, 10)}
+                      targetHeight={parseInt(targetHeightInput, 10)}
+                    />
+                  )}
+                  {polyformType === "polyhex" && (
+                    <TilingResultHexGrid
+                      placements={solverResult.placements}
+                      targetWidth={parseInt(targetWidthInput, 10)}
+                      targetHeight={parseInt(targetHeightInput, 10)}
+                    />
+                  )}
+                  {polyformType === "polyiamond" && (
+                    <TilingResultTriangleGrid
+                      placements={solverResult.placements}
+                      targetWidth={parseInt(targetWidthInput, 10)}
+                      targetHeight={parseInt(targetHeightInput, 10)}
+                    />
+                  )}
+                </div>
+                
+                {/* Stats */}
+                {solverResult.stats && (
+                  <div style={{ marginTop: "12px", color: "#7f8c8d", fontSize: "12px" }}>
+                    SAT: {solverResult.stats.numVars} variables, {solverResult.stats.numClauses} clauses | 
+                    Transforms: {solverResult.stats.numTransforms} | Placements: {solverResult.stats.numPlacements}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -878,6 +1146,213 @@ const TriangleGrid: React.FC<TriangleGridProps> = ({ cells, onCellClick, cellSiz
             onClick={() => onCellClick(rowIdx, colIdx)}
           />
         ))
+      )}
+    </svg>
+  );
+};
+
+// ============ TILING RESULT VIEWER COMPONENTS ============
+
+/** Color palette for different tile placements */
+const TILE_COLORS = [
+  "#3498db", "#e74c3c", "#27ae60", "#9b59b6", "#f39c12",
+  "#1abc9c", "#e67e22", "#2ecc71", "#8e44ad", "#16a085",
+  "#d35400", "#c0392b", "#2980b9", "#7f8c8d", "#34495e",
+];
+
+function getTileColor(placementIndex: number): string {
+  return TILE_COLORS[placementIndex % TILE_COLORS.length];
+}
+
+/** Props for tiling result grids */
+interface TilingResultGridProps {
+  placements: Placement[];
+  targetWidth: number;
+  targetHeight: number;
+  cellSize?: number;
+}
+
+/** Square grid result viewer for polyomino tiling */
+const TilingResultSquareGrid: React.FC<TilingResultGridProps> = ({
+  placements,
+  targetWidth,
+  targetHeight,
+  cellSize = 30,
+}) => {
+  // Build a map of which cell is covered by which placement
+  const cellToPlacement = new Map<string, number>();
+  for (let i = 0; i < placements.length; i++) {
+    for (const cell of placements[i].coveredCells) {
+      if (cell.row >= 0 && cell.row < targetHeight &&
+          cell.col >= 0 && cell.col < targetWidth) {
+        cellToPlacement.set(`${cell.row},${cell.col}`, i);
+      }
+    }
+  }
+  
+  return (
+    <svg
+      width={targetWidth * cellSize + 2}
+      height={targetHeight * cellSize + 2}
+      style={{ display: "block" }}
+    >
+      {Array.from({ length: targetHeight }, (_, rowIdx) =>
+        Array.from({ length: targetWidth }, (_, colIdx) => {
+          const key = `${rowIdx},${colIdx}`;
+          const placementIdx = cellToPlacement.get(key);
+          const fill = placementIdx !== undefined ? getTileColor(placementIdx) : "#ecf0f1";
+          
+          return (
+            <rect
+              key={key}
+              x={colIdx * cellSize + 1}
+              y={rowIdx * cellSize + 1}
+              width={cellSize - 1}
+              height={cellSize - 1}
+              fill={fill}
+              stroke="#2c3e50"
+              strokeWidth={1}
+            />
+          );
+        })
+      )}
+    </svg>
+  );
+};
+
+/** Hex grid result viewer for polyhex tiling */
+const TilingResultHexGrid: React.FC<TilingResultGridProps> = ({
+  placements,
+  targetWidth,
+  targetHeight,
+  cellSize = 30,
+}) => {
+  // Build a map of which cell is covered by which placement
+  const cellToPlacement = new Map<string, number>();
+  for (let i = 0; i < placements.length; i++) {
+    for (const cell of placements[i].coveredCells) {
+      if (cell.row >= 0 && cell.row < targetHeight &&
+          cell.col >= 0 && cell.col < targetWidth) {
+        cellToPlacement.set(`${cell.row},${cell.col}`, i);
+      }
+    }
+  }
+  
+  const hexSize = cellSize * 0.5;
+  const hexWidth = Math.sqrt(3) * hexSize;
+  const hexHeight = 2 * hexSize;
+  const horizSpacing = hexWidth;
+  const vertSpacing = hexHeight * 0.75;
+  
+  const svgWidth = targetWidth * horizSpacing + horizSpacing / 2 + 10;
+  const svgHeight = targetHeight * vertSpacing + hexSize + 10;
+  
+  const createHexPath = (cx: number, cy: number): string => {
+    const points: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const x = cx + hexSize * Math.cos(angle);
+      const y = cy + hexSize * Math.sin(angle);
+      points.push(`${x},${y}`);
+    }
+    return `M ${points.join(" L ")} Z`;
+  };
+  
+  return (
+    <svg
+      width={svgWidth}
+      height={svgHeight}
+      style={{ display: "block" }}
+    >
+      {Array.from({ length: targetHeight }, (_, rowIdx) =>
+        Array.from({ length: targetWidth }, (_, colIdx) => {
+          const key = `${rowIdx},${colIdx}`;
+          const placementIdx = cellToPlacement.get(key);
+          const fill = placementIdx !== undefined ? getTileColor(placementIdx) : "#ecf0f1";
+          
+          const isOddRow = rowIdx % 2 === 1;
+          const cx = colIdx * horizSpacing + horizSpacing / 2 + (isOddRow ? horizSpacing / 2 : 0) + 5;
+          const cy = rowIdx * vertSpacing + hexSize + 5;
+          
+          return (
+            <path
+              key={key}
+              d={createHexPath(cx, cy)}
+              fill={fill}
+              stroke="#2c3e50"
+              strokeWidth={1}
+            />
+          );
+        })
+      )}
+    </svg>
+  );
+};
+
+/** Triangle grid result viewer for polyiamond tiling */
+const TilingResultTriangleGrid: React.FC<TilingResultGridProps> = ({
+  placements,
+  targetWidth,
+  targetHeight,
+  cellSize = 30,
+}) => {
+  // Build a map of which cell is covered by which placement
+  const cellToPlacement = new Map<string, number>();
+  for (let i = 0; i < placements.length; i++) {
+    for (const cell of placements[i].coveredCells) {
+      if (cell.row >= 0 && cell.row < targetHeight &&
+          cell.col >= 0 && cell.col < targetWidth) {
+        cellToPlacement.set(`${cell.row},${cell.col}`, i);
+      }
+    }
+  }
+  
+  const triWidth = cellSize;
+  const triHeight = cellSize * Math.sqrt(3) / 2;
+  
+  const svgWidth = (targetWidth + 1) * (triWidth / 2) + 10;
+  const svgHeight = targetHeight * triHeight + 10;
+  
+  const createTriPath = (row: number, col: number): string => {
+    const isUp = (row + col) % 2 === 0;
+    const x = col * (triWidth / 2) + 5;
+    const y = row * triHeight + 5;
+    
+    if (isUp) {
+      const p1 = `${x + triWidth / 2},${y}`;
+      const p2 = `${x},${y + triHeight}`;
+      const p3 = `${x + triWidth},${y + triHeight}`;
+      return `M ${p1} L ${p2} L ${p3} Z`;
+    } else {
+      const p1 = `${x},${y}`;
+      const p2 = `${x + triWidth},${y}`;
+      const p3 = `${x + triWidth / 2},${y + triHeight}`;
+      return `M ${p1} L ${p2} L ${p3} Z`;
+    }
+  };
+  
+  return (
+    <svg
+      width={svgWidth}
+      height={svgHeight}
+      style={{ display: "block" }}
+    >
+      {Array.from({ length: targetHeight }, (_, rowIdx) =>
+        Array.from({ length: targetWidth }, (_, colIdx) => {
+          const key = `${rowIdx},${colIdx}`;
+          const placementIdx = cellToPlacement.get(key);
+          const fill = placementIdx !== undefined ? getTileColor(placementIdx) : "#ecf0f1";
+          
+          return (
+            <path
+              key={key}
+              d={createTriPath(rowIdx, colIdx)}
+              fill={fill}
+              stroke="#2c3e50"
+              strokeWidth={1}
+            />
+          );
+        })
       )}
     </svg>
   );
