@@ -94,84 +94,226 @@ function rotatePolyhex(cells: boolean[][]): boolean[][] {
 
 /**
  * Rotate polyiamond (triangle grid) 60° clockwise.
+ * Correct implementation via rotating each triangle's lattice vertices.
  */
 function rotatePolyiamond(cells: boolean[][]): boolean[][] {
+  return transformPolyiamond(cells, "rot60");
+}
+
+type PolyhexTransform = "flipH" | "flipV";
+type PolyiamondTransform = "flipH" | "flipV" | "rot60";
+
+/**
+ * Convert polyhex (odd-r offset) filled cells -> axial (q,r),
+ * apply a transform, then rasterize back to odd-r offset grid.
+ *
+ * These reflections are defined to match screen axes:
+ * - Horizontal flip: mirror across a vertical screen line (x -> -x), keep r
+ * - Vertical flip: mirror across a horizontal screen line (y -> -y), r -> -r
+ *
+ * Using pointy-top axial pixel relation: x ~ q + r/2, y ~ r.
+ */
+function transformPolyhex(cells: boolean[][], t: PolyhexTransform): boolean[][] {
   const height = cells.length;
+  if (height === 0) return cells;
   const width = cells[0]?.length ?? 0;
-  
-  // Find all filled triangles with their orientation
-  const filledTriangles: { row: number; col: number; up: boolean }[] = [];
+  if (width === 0) return cells;
+
+  const filled: { q: number; r: number }[] = [];
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
-      if (cells[row][col]) {
-        // Triangle pointing up if (row + col) is even
-        const up = (row + col) % 2 === 0;
-        filledTriangles.push({ row, col, up });
-      }
+      if (!cells[row][col]) continue;
+      // odd-r -> axial(q,r) with r=row
+      const q = col - Math.floor(row / 2);
+      const r = row;
+      filled.push({ q, r });
     }
   }
-  
-  if (filledTriangles.length === 0) return cells;
-  
-  // For triangular grid rotation, we use a coordinate transform
-  // Rotate 60° clockwise using skewed coordinates
-  const rotated = filledTriangles.map(({ row, col, up }) => {
-    // Convert to a coordinate system where rotation is simpler
-    // Using trilinear-ish coordinates
-    const x = col;
-    const y = row;
-    
-    // 60° clockwise rotation for triangle grid
-    // New coordinates after rotation
-    const newX = Math.floor((x + y + (up ? 0 : 1)) / 2);
-    const newY = y - Math.floor((x - (up ? 0 : 1)) / 2);
-    const newUp = !up; // Orientation flips
-    
-    return { row: newY, col: newX, up: newUp };
+  if (filled.length === 0) return cells;
+
+  const transformed = filled.map(({ q, r }) => {
+    if (t === "flipH") {
+      // x' = -(q + r/2), y' = r  => q' = -q - r, r' = r
+      return { q: -q - r, r };
+    } else {
+      // y' = -r, x' same => q' = q + r, r' = -r
+      return { q: q + r, r: -r };
+    }
   });
-  
-  // Normalize to positive coordinates
-  let minRow = Infinity, minCol = Infinity, maxRow = -Infinity, maxCol = -Infinity;
-  for (const t of rotated) {
-    minRow = Math.min(minRow, t.row);
-    maxRow = Math.max(maxRow, t.row);
-    minCol = Math.min(minCol, t.col);
-    maxCol = Math.max(maxCol, t.col);
+
+  // Bounding in axial (q,r)
+  let minQ = Infinity, maxQ = -Infinity, minR = Infinity, maxR = -Infinity;
+  for (const coord of transformed) {
+    minQ = Math.min(minQ, coord.q);
+    maxQ = Math.max(maxQ, coord.q);
+    minR = Math.min(minR, coord.r);
+    maxR = Math.max(maxR, coord.r);
   }
-  
-  const newHeight = maxRow - minRow + 1;
-  const newWidth = maxCol - minCol + 1;
-  
-  const newCells: boolean[][] = Array.from({ length: newHeight }, () =>
+
+  const newHeight = maxR - minR + 1;
+  const newWidth = (maxQ - minQ + 1) + Math.floor(newHeight / 2);
+
+  const out: boolean[][] = Array.from({ length: newHeight }, () =>
     Array.from({ length: newWidth }, () => false)
   );
-  
-  for (const t of rotated) {
-    const row = t.row - minRow;
-    const col = t.col - minCol;
+
+  for (const { q, r } of transformed) {
+    const row = r - minR;
+    const col = (q - minQ) + Math.floor(row / 2);
     if (row >= 0 && row < newHeight && col >= 0 && col < newWidth) {
-      newCells[row][col] = true;
+      out[row][col] = true;
     }
   }
-  
-  return newCells;
+
+  return out;
 }
 
 /**
- * Flip the polyform horizontally.
- * Note: For polyhex and polyiamond, this is a simple array flip which
- * visually mirrors the shape but may not preserve exact geometric relationships
- * on offset grids. For most use cases, this produces intuitive results.
+ * Polyiamond transforms via lattice-vertex representation.
+ *
+ * We treat each small triangle as having 3 vertices on the triangular lattice.
+ * Use lattice coords (u,v) where physical x = u + v/2 and y = v*(sqrt3/2).
+ *
+ * Vertex conversions:
+ *   X = 2x (in half-edge units) = 2u + v
+ *   Y = v
+ * so u = (X - Y)/2, v = Y
+ *
+ * Transforms (matching screen axes used by the renderer):
+ *   rot60 CW: (u,v) -> (u+v, -u)
+ *   flipH:    x -> -x => (u,v) -> (-u - v, v)
+ *   flipV:    y -> -y => (u,v) -> (u+v, -v)
+ */
+function transformPolyiamond(cells: boolean[][], t: PolyiamondTransform): boolean[][] {
+  const height = cells.length;
+  if (height === 0) return cells;
+  const width = cells[0]?.length ?? 0;
+  if (width === 0) return cells;
+
+  type Vertex = { X: number; Y: number }; // integer "half-edge" coords (X step = half base, Y step = row)
+  type UV = { u: number; v: number };
+
+  const toUV = (p: Vertex): UV => {
+    // Convert half-edge coords to lattice coords
+    return { u: (p.X - p.Y) / 2, v: p.Y };
+  };
+
+  const fromUV = (p: UV): Vertex => {
+    return { X: 2 * p.u + p.v, Y: p.v };
+  };
+
+  const applyUV = (p: UV): UV => {
+    if (t === "rot60") return { u: p.u + p.v, v: -p.u };
+    if (t === "flipH") return { u: -p.u - p.v, v: p.v };
+    // flipV
+    return { u: p.u + p.v, v: -p.v };
+  };
+
+  // Build triangle list as 3 vertices each
+  const tris: Vertex[][] = [];
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      if (!cells[row][col]) continue;
+
+      const isUp = (row + col) % 2 === 0;
+
+      // Using the renderer geometry in integer half-edge coords:
+      // x = col*(base/2) => X = col
+      // y = row*(height) => Y = row
+      if (isUp) {
+        // Up triangle vertices: (col+1,row), (col,row+1), (col+2,row+1)
+        tris.push([
+          { X: col + 1, Y: row },
+          { X: col, Y: row + 1 },
+          { X: col + 2, Y: row + 1 },
+        ]);
+      } else {
+        // Down triangle vertices: (col,row), (col+2,row), (col+1,row+1)
+        tris.push([
+          { X: col, Y: row },
+          { X: col + 2, Y: row },
+          { X: col + 1, Y: row + 1 },
+        ]);
+      }
+    }
+  }
+
+  if (tris.length === 0) return cells;
+
+  // Transform all triangles
+  const transformedTris: Vertex[][] = tris.map((verts) =>
+    verts.map((vtx) => fromUV(applyUV(toUV(vtx))))
+  );
+
+  // Convert transformed triangles back into (row,col) cells
+  const cellsOut: { row: number; col: number }[] = [];
+
+  for (const verts of transformedTris) {
+    const Ys = verts.map((p) => p.Y);
+    const minY = Math.min(...Ys);
+    const maxY = Math.max(...Ys);
+
+    // Each elementary triangle spans exactly 1 in Y in this coordinate system
+    if (maxY - minY !== 1) continue;
+
+    const low = verts.filter((p) => p.Y === minY);
+    const high = verts.filter((p) => p.Y === maxY);
+
+    if (low.length === 1 && high.length === 2) {
+      // Up triangle: base at maxY, col = minX among base vertices, row = minY
+      const col = Math.min(high[0].X, high[1].X);
+      const row = minY;
+      cellsOut.push({ row, col });
+    } else if (low.length === 2 && high.length === 1) {
+      // Down triangle: base at minY, col = minX among base vertices, row = minY
+      const col = Math.min(low[0].X, low[1].X);
+      const row = minY;
+      cellsOut.push({ row, col });
+    }
+  }
+
+  if (cellsOut.length === 0) return cells;
+
+  // Normalize to positive row/col bounding box
+  let minRow = Infinity, maxRow = -Infinity, minCol = Infinity, maxCol = -Infinity;
+  for (const p of cellsOut) {
+    minRow = Math.min(minRow, p.row);
+    maxRow = Math.max(maxRow, p.row);
+    minCol = Math.min(minCol, p.col);
+    maxCol = Math.max(maxCol, p.col);
+  }
+
+  const newHeight = maxRow - minRow + 1;
+  const newWidth = maxCol - minCol + 1;
+
+  const out: boolean[][] = Array.from({ length: newHeight }, () =>
+    Array.from({ length: newWidth }, () => false)
+  );
+
+  for (const p of cellsOut) {
+    const r = p.row - minRow;
+    const c = p.col - minCol;
+    if (r >= 0 && r < newHeight && c >= 0 && c < newWidth) {
+      out[r][c] = true;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Flip the polyform horizontally (simple array reverse).
+ * Used for polyomino (square) grids where array reversal produces correct results.
+ * For polyhex and polyiamond, use the geometry-correct transform functions instead.
  */
 function flipHorizontal(cells: boolean[][]): boolean[][] {
   return cells.map(row => [...row].reverse());
 }
 
 /**
- * Flip the polyform vertically.
- * Note: For polyhex and polyiamond, this is a simple array flip which
- * visually mirrors the shape but may not preserve exact geometric relationships
- * on offset grids. For most use cases, this produces intuitive results.
+ * Flip the polyform vertically (simple array reverse).
+ * Used for polyomino (square) grids where array reversal produces correct results.
+ * For polyhex and polyiamond, use the geometry-correct transform functions instead.
  */
 function flipVertical(cells: boolean[][]): boolean[][] {
   return [...cells].reverse();
@@ -280,15 +422,67 @@ export function PolyformExplorer() {
     });
   }, [polyformType]);
   
-  // Flip horizontally
+  // Flip horizontally (geometry-correct per polyform type)
   const handleFlipH = useCallback(() => {
-    setCells(prev => flipHorizontal(prev));
-  }, []);
+    setCells(prev => {
+      let next: boolean[][];
+      switch (polyformType) {
+        case "polyomino":
+          next = flipHorizontal(prev);
+          break;
+        case "polyhex":
+          next = transformPolyhex(prev, "flipH");
+          break;
+        case "polyiamond":
+          next = transformPolyiamond(prev, "flipH");
+          break;
+        default:
+          next = prev;
+      }
+
+      const newHeight = Math.min(next.length, 50);
+      const newWidth = Math.min(next[0]?.length ?? 0, 50);
+      setGridHeight(newHeight);
+      setGridWidth(newWidth);
+      setHeightInput(String(newHeight));
+      setWidthInput(String(newWidth));
+      setWidthError(false);
+      setHeightError(false);
+
+      return next;
+    });
+  }, [polyformType]);
   
-  // Flip vertically
+  // Flip vertically (geometry-correct per polyform type)
   const handleFlipV = useCallback(() => {
-    setCells(prev => flipVertical(prev));
-  }, []);
+    setCells(prev => {
+      let next: boolean[][];
+      switch (polyformType) {
+        case "polyomino":
+          next = flipVertical(prev);
+          break;
+        case "polyhex":
+          next = transformPolyhex(prev, "flipV");
+          break;
+        case "polyiamond":
+          next = transformPolyiamond(prev, "flipV");
+          break;
+        default:
+          next = prev;
+      }
+
+      const newHeight = Math.min(next.length, 50);
+      const newWidth = Math.min(next[0]?.length ?? 0, 50);
+      setGridHeight(newHeight);
+      setGridWidth(newWidth);
+      setHeightInput(String(newHeight));
+      setWidthInput(String(newWidth));
+      setWidthError(false);
+      setHeightError(false);
+
+      return next;
+    });
+  }, [polyformType]);
   
   // Clear the grid
   const handleClear = useCallback(() => {
