@@ -1,16 +1,19 @@
 /**
- * Web Worker for running the Polyomino Tiling SAT solver in a background thread
+ * Web Worker for running the Polyomino/Polyhex Tiling SAT solver in a background thread
  * 
  * This worker loads the CaDiCaL WASM module and uses it for SAT solving
- * of polyomino tiling problems.
+ * of polyomino and polyhex tiling problems.
  */
 
 /// <reference lib="webworker" />
 
-import { solvePolyominoTiling } from "./polyomino-tiling";
+import { solvePolyominoTiling, solvePolyhexTiling } from "./polyomino-tiling";
 import type { TilingResult, Placement } from "./polyomino-tiling";
 import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
+
+/** Polyform type - determines the grid geometry */
+export type PolyformType = "polyomino" | "polyhex" | "polyiamond";
 
 export interface PolyominoTilingSolverRequest {
   /** The tile cells (boolean grid) */
@@ -19,6 +22,8 @@ export interface PolyominoTilingSolverRequest {
   tilingWidth: number;
   /** Height of the tiling grid */
   tilingHeight: number;
+  /** Type of polyform (defaults to "polyomino" for backwards compatibility) */
+  polyformType?: PolyformType;
 }
 
 export interface PolyominoTilingSolverResponse {
@@ -250,7 +255,7 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
-  const { cells, tilingWidth, tilingHeight } = event.data;
+  const { cells, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
 
   try {
     // Load the module (cached after first load)
@@ -262,23 +267,26 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
     // Create solver
     const solver = new CadicalSolver(cadical);
     
-    // Solve the tiling problem
-    const result = solvePolyominoTiling(
-      cells,
-      tilingWidth,
-      tilingHeight,
-      solver,
-      (stats) => {
-        // Send progress message with stats before solving
-        const progressResponse: PolyominoTilingSolverResponse = {
-          success: true,
-          result: null,
-          messageType: "progress",
-          stats,
-        };
-        self.postMessage(progressResponse);
-      }
-    );
+    // Progress callback
+    const onStatsReady = (stats: { numVars: number; numClauses: number }) => {
+      // Send progress message with stats before solving
+      const progressResponse: PolyominoTilingSolverResponse = {
+        success: true,
+        result: null,
+        messageType: "progress",
+        stats,
+      };
+      self.postMessage(progressResponse);
+    };
+    
+    // Solve the tiling problem based on polyform type
+    let result: TilingResult;
+    if (polyformType === "polyhex") {
+      result = solvePolyhexTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+    } else {
+      // Default to polyomino
+      result = solvePolyominoTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+    }
     
     // Clean up
     cadical.release();

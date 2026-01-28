@@ -416,9 +416,9 @@ export function PolyformExplorer() {
   
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
-    // Only support polyomino for now
-    if (polyformType !== "polyomino") {
-      setTilingError("Tiling solver currently only supports polyomino (square) tiles.");
+    // Only support polyomino and polyhex for now
+    if (polyformType !== "polyomino" && polyformType !== "polyhex") {
+      setTilingError("Tiling solver currently only supports polyomino (square) and polyhex (hexagon) tiles.");
       return;
     }
     
@@ -466,11 +466,12 @@ export function PolyformExplorer() {
       workerRef.current = null;
     };
     
-    // Send request
+    // Send request with polyform type
     worker.postMessage({
       cells,
       tilingWidth,
       tilingHeight,
+      polyformType,
     });
   }, [cells, tilingWidth, tilingHeight, polyformType]);
   
@@ -833,9 +834,9 @@ export function PolyformExplorer() {
         <h3 style={{ marginTop: 0, marginBottom: "12px" }}>🧩 Tiling Solver</h3>
         <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "16px" }}>
           Try to tile a grid of the specified size using rotations, translations, and flips of your polyform.
-          {polyformType !== "polyomino" && (
+          {polyformType === "polyiamond" && (
             <span style={{ color: "#e74c3c", display: "block", marginTop: "8px" }}>
-              ⚠️ Currently only polyomino (square) tiling is supported.
+              ⚠️ Polyiamond (triangle) tiling is not yet supported.
             </span>
           )}
         </p>
@@ -896,14 +897,14 @@ export function PolyformExplorer() {
           </div>
           <button
             onClick={handleSolveTiling}
-            disabled={solving || polyformType !== "polyomino"}
+            disabled={solving || polyformType === "polyiamond"}
             style={{
               padding: "8px 20px",
               backgroundColor: solving ? "#95a5a6" : "#27ae60",
               color: "white",
               border: "none",
               borderRadius: "4px",
-              cursor: solving || polyformType !== "polyomino" ? "not-allowed" : "pointer",
+              cursor: solving || polyformType === "polyiamond" ? "not-allowed" : "pointer",
               fontWeight: "bold",
             }}
           >
@@ -957,12 +958,21 @@ export function PolyformExplorer() {
                     ({tilingResult.stats.numPlacements.toLocaleString()} total possible placements, {tilingResult.stats.numVariables.toLocaleString()} vars, {tilingResult.stats.numClauses.toLocaleString()} clauses)
                   </span>
                 </div>
-                <TilingViewer
-                  width={tilingWidth}
-                  height={tilingHeight}
-                  placements={tilingResult.placements || []}
-                  svgRef={tilingSvgRef}
-                />
+                {polyformType === "polyhex" ? (
+                  <HexTilingViewer
+                    width={tilingWidth}
+                    height={tilingHeight}
+                    placements={tilingResult.placements || []}
+                    svgRef={tilingSvgRef}
+                  />
+                ) : (
+                  <TilingViewer
+                    width={tilingWidth}
+                    height={tilingHeight}
+                    placements={tilingResult.placements || []}
+                    svgRef={tilingSvgRef}
+                  />
+                )}
                 <button
                   onClick={handleDownloadSvg}
                   style={{
@@ -1389,6 +1399,241 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             const rightKey = `${cell.row},${cell.col + 1}`;
             if (cellToPlacement.get(rightKey) !== pIndex) {
               edges.push({ x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize });
+            }
+          }
+          
+          return edges.map((edge, edgeIndex) => (
+            <line
+              key={`${pIndex}-${edgeIndex}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke="#2c3e50"
+              strokeWidth={2}
+            />
+          ));
+        })}
+      </svg>
+    </div>
+  );
+};
+
+/** HexTilingViewer - displays the solved hex tiling */
+interface HexTilingViewerProps {
+  width: number;
+  height: number;
+  placements: Placement[];
+  cellSize?: number;
+  svgRef?: React.RefObject<SVGSVGElement | null>;
+}
+
+const HexTilingViewer: React.FC<HexTilingViewerProps> = ({ 
+  width, 
+  height, 
+  placements, 
+  cellSize = 30,
+  svgRef 
+}) => {
+  // Hex geometry calculations (matching HexGrid)
+  const hexSize = cellSize * 0.5;
+  const hexWidth = Math.sqrt(3) * hexSize;
+  const hexHeight = 2 * hexSize;
+  const horizSpacing = hexWidth;
+  const vertSpacing = hexHeight * 0.75;
+  
+  // Calculate the bounds of the outer grid (including all tile overhangs)
+  const { outerBounds, cellToPlacement } = useMemo(() => {
+    let minRow = 0, maxRow = height - 1;
+    let minCol = 0, maxCol = width - 1;
+    
+    const map = new Map<string, number>();
+    
+    placements.forEach((p, index) => {
+      for (const cell of p.cells) {
+        map.set(`${cell.row},${cell.col}`, index);
+        minRow = Math.min(minRow, cell.row);
+        maxRow = Math.max(maxRow, cell.row);
+        minCol = Math.min(minCol, cell.col);
+        maxCol = Math.max(maxCol, cell.col);
+      }
+    });
+    
+    return {
+      outerBounds: { minRow, maxRow, minCol, maxCol },
+      cellToPlacement: map,
+    };
+  }, [placements, width, height]);
+  
+  const outerWidth = outerBounds.maxCol - outerBounds.minCol + 1;
+  const outerHeight = outerBounds.maxRow - outerBounds.minRow + 1;
+  
+  // Offset to convert from logical coordinates to SVG coordinates
+  const offsetCol = -outerBounds.minCol;
+  const offsetRow = -outerBounds.minRow;
+  
+  // SVG dimensions
+  const svgWidth = outerWidth * horizSpacing + horizSpacing / 2 + 10;
+  const svgHeight = outerHeight * vertSpacing + hexSize + 10;
+  
+  // Create hexagon path - 6 vertices at 60° (PI/3) intervals
+  // Starting offset of -PI/6 (-30°) creates a flat-top orientation
+  const createHexPath = (cx: number, cy: number): string => {
+    const points: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const x = cx + hexSize * Math.cos(angle);
+      const y = cy + hexSize * Math.sin(angle);
+      points.push(`${x},${y}`);
+    }
+    return `M ${points.join(" L ")} Z`;
+  };
+  
+  // Calculate hex center from logical row/col
+  const getHexCenter = (logicalRow: number, logicalCol: number): { cx: number; cy: number } => {
+    const svgRowIdx = logicalRow + offsetRow;
+    const svgColIdx = logicalCol + offsetCol;
+    const isOddRow = logicalRow % 2 === 1;
+    const cx = svgColIdx * horizSpacing + horizSpacing / 2 + (isOddRow ? horizSpacing / 2 : 0) + 5;
+    const cy = svgRowIdx * vertSpacing + hexSize + 5;
+    return { cx, cy };
+  };
+  
+  return (
+    <div style={{ 
+      padding: "16px", 
+      backgroundColor: "white", 
+      borderRadius: "8px",
+      border: "1px solid #dee2e6",
+      display: "inline-block",
+    }}>
+      <svg
+        ref={svgRef}
+        width={svgWidth}
+        height={svgHeight}
+        style={{ display: "block" }}
+        role="img"
+        aria-label={`Hex tiling solution showing ${placements.length} tile placements on a ${width}×${height} grid`}
+      >
+        <title>Hex Tiling Solution Visualization</title>
+        
+        {/* Layer 1: Draw all hex cell fills */}
+        {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
+          Array.from({ length: outerWidth }, (_, svgColIdx) => {
+            const logicalRow = svgRowIdx - offsetRow;
+            const logicalCol = svgColIdx - offsetCol;
+            const key = `${logicalRow},${logicalCol}`;
+            const placementIndex = cellToPlacement.get(key);
+            
+            // Determine if this cell is in the inner grid
+            const isInnerGrid = logicalRow >= 0 && logicalRow < height && 
+                               logicalCol >= 0 && logicalCol < width;
+            
+            // Determine fill color
+            let fill: string;
+            if (placementIndex !== undefined) {
+              fill = getPlacementColor(placementIndex);
+            } else if (isInnerGrid) {
+              fill = "#ecf0f1"; // Empty inner cell
+            } else {
+              fill = "#f8f9fa"; // Empty outer cell
+            }
+            
+            const { cx, cy } = getHexCenter(logicalRow, logicalCol);
+            
+            return (
+              <path
+                key={key}
+                d={createHexPath(cx, cy)}
+                fill={fill}
+                stroke={fill}
+                strokeWidth={0.5}
+              />
+            );
+          })
+        )}
+        
+        {/* Layer 1.5: Draw low-contrast overlay on cells outside the inner grid */}
+        {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
+          Array.from({ length: outerWidth }, (_, svgColIdx) => {
+            const logicalRow = svgRowIdx - offsetRow;
+            const logicalCol = svgColIdx - offsetCol;
+            const isInnerGrid = logicalRow >= 0 && logicalRow < height && 
+                               logicalCol >= 0 && logicalCol < width;
+            
+            if (isInnerGrid) return null;
+            
+            const { cx, cy } = getHexCenter(logicalRow, logicalCol);
+            
+            return (
+              <path
+                key={`overlay-${logicalRow},${logicalCol}`}
+                d={createHexPath(cx, cy)}
+                fill="rgba(255, 255, 255, 0.35)"
+              />
+            );
+          })
+        )}
+        
+        {/* Layer 2: Draw inner grid boundary - outline hexes in the inner grid with red */}
+        {Array.from({ length: height }, (_, row) =>
+          Array.from({ length: width }, (_, col) => {
+            const { cx, cy } = getHexCenter(row, col);
+            return (
+              <path
+                key={`boundary-${row},${col}`}
+                d={createHexPath(cx, cy)}
+                fill="none"
+                stroke="#e74c3c"
+                strokeWidth={2}
+              />
+            );
+          })
+        )}
+        
+        {/* Layer 3: Draw tile boundaries (hex edges between different tiles) */}
+        {placements.map((p, pIndex) => {
+          const edges: { x1: number; y1: number; x2: number; y2: number }[] = [];
+          
+          for (const cell of p.cells) {
+            const { cx, cy } = getHexCenter(cell.row, cell.col);
+            const isOddRow = cell.row % 2 === 1;
+            
+            // For each hex, check all 6 neighbors
+            // Neighbor offsets depend on whether we're in an odd or even row (odd-r offset)
+            const neighbors = isOddRow ? [
+              { dr: -1, dc: 0, edgeStart: 0 },   // NE
+              { dr: -1, dc: 1, edgeStart: 1 },   // E (actually NW but shifted)
+              { dr: 0, dc: 1, edgeStart: 2 },    // SE
+              { dr: 1, dc: 1, edgeStart: 3 },    // SW (but shifted)
+              { dr: 1, dc: 0, edgeStart: 4 },    // W
+              { dr: 0, dc: -1, edgeStart: 5 },   // NW
+            ] : [
+              { dr: -1, dc: -1, edgeStart: 0 },  // NE
+              { dr: -1, dc: 0, edgeStart: 1 },   // E
+              { dr: 0, dc: 1, edgeStart: 2 },    // SE
+              { dr: 1, dc: 0, edgeStart: 3 },    // SW
+              { dr: 1, dc: -1, edgeStart: 4 },   // W
+              { dr: 0, dc: -1, edgeStart: 5 },   // NW
+            ];
+            
+            for (const { dr, dc, edgeStart } of neighbors) {
+              const neighborRow = cell.row + dr;
+              const neighborCol = cell.col + dc;
+              const neighborKey = `${neighborRow},${neighborCol}`;
+              
+              // Draw edge if neighbor is not the same tile
+              if (cellToPlacement.get(neighborKey) !== pIndex) {
+                // Calculate the two vertices that form this edge
+                const angle1 = (Math.PI / 3) * edgeStart - Math.PI / 6;
+                const angle2 = (Math.PI / 3) * ((edgeStart + 1) % 6) - Math.PI / 6;
+                const x1 = cx + hexSize * Math.cos(angle1);
+                const y1 = cy + hexSize * Math.sin(angle1);
+                const x2 = cx + hexSize * Math.cos(angle2);
+                const y2 = cy + hexSize * Math.sin(angle2);
+                
+                edges.push({ x1, y1, x2, y2 });
+              }
             }
           }
           
