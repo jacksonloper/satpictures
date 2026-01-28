@@ -27,7 +27,7 @@ export interface Placement {
   id: number;
   /** Translation offset (top-left corner of bounding box) */
   offset: Coord;
-  /** Transform index (0-7 for polyomino) */
+  /** Transform index (0-7 for polyomino, 0-11 for polyhex) */
   transformIndex: number;
   /** Coordinates this placement covers (absolute, after transform and translation) */
   cells: Coord[];

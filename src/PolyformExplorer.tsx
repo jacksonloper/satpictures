@@ -1599,22 +1599,23 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
             const { cx, cy } = getHexCenter(cell.row, cell.col);
             const isOddRow = cell.row % 2 === 1;
             
-            // For each hex, check all 6 neighbors
-            // Neighbor offsets depend on whether we're in an odd or even row (odd-r offset)
+            // For each hex, check all 6 neighbors using odd-r offset coordinates.
+            // edgeStart indicates which hex edge (0-5) corresponds to this neighbor,
+            // where edges are numbered clockwise starting from the top-right edge.
             const neighbors = isOddRow ? [
-              { dr: -1, dc: 0, edgeStart: 0 },   // NE
-              { dr: -1, dc: 1, edgeStart: 1 },   // E (actually NW but shifted)
-              { dr: 0, dc: 1, edgeStart: 2 },    // SE
-              { dr: 1, dc: 1, edgeStart: 3 },    // SW (but shifted)
-              { dr: 1, dc: 0, edgeStart: 4 },    // W
-              { dr: 0, dc: -1, edgeStart: 5 },   // NW
+              { dr: -1, dc: 0, edgeStart: 0 },
+              { dr: -1, dc: 1, edgeStart: 1 },
+              { dr: 0, dc: 1, edgeStart: 2 },
+              { dr: 1, dc: 1, edgeStart: 3 },
+              { dr: 1, dc: 0, edgeStart: 4 },
+              { dr: 0, dc: -1, edgeStart: 5 },
             ] : [
-              { dr: -1, dc: -1, edgeStart: 0 },  // NE
-              { dr: -1, dc: 0, edgeStart: 1 },   // E
-              { dr: 0, dc: 1, edgeStart: 2 },    // SE
-              { dr: 1, dc: 0, edgeStart: 3 },    // SW
-              { dr: 1, dc: -1, edgeStart: 4 },   // W
-              { dr: 0, dc: -1, edgeStart: 5 },   // NW
+              { dr: -1, dc: -1, edgeStart: 0 },
+              { dr: -1, dc: 0, edgeStart: 1 },
+              { dr: 0, dc: 1, edgeStart: 2 },
+              { dr: 1, dc: 0, edgeStart: 3 },
+              { dr: 1, dc: -1, edgeStart: 4 },
+              { dr: 0, dc: -1, edgeStart: 5 },
             ];
             
             for (const { dr, dc, edgeStart } of neighbors) {

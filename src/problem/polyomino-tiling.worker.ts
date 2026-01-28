@@ -283,6 +283,17 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
     let result: TilingResult;
     if (polyformType === "polyhex") {
       result = solvePolyhexTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+    } else if (polyformType === "polyiamond") {
+      // Polyiamond not yet supported
+      cadical.release();
+      const response: PolyominoTilingSolverResponse = {
+        success: false,
+        result: null,
+        error: "Polyiamond tiling is not yet supported.",
+        messageType: "result",
+      };
+      self.postMessage(response);
+      return;
     } else {
       // Default to polyomino
       result = solvePolyominoTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
