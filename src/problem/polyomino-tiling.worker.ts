@@ -240,7 +240,11 @@ let modulePromise: Promise<CadicalModule> | null = null;
 
 function getModule(): Promise<CadicalModule> {
   if (!modulePromise) {
-    modulePromise = loadCadicalModule();
+    modulePromise = loadCadicalModule().catch(error => {
+      // Reset the promise on failure so subsequent requests can retry
+      modulePromise = null;
+      throw error;
+    });
   }
   return modulePromise;
 }

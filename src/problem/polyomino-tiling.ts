@@ -293,6 +293,14 @@ export function solvePolyominoTiling(
   solver: SATSolver,
   onStatsReady?: (stats: { numVars: number; numClauses: number }) => void
 ): TilingResult {
+  // Validate inputs
+  if (tilingWidth < 1 || tilingHeight < 1 || !Number.isInteger(tilingWidth) || !Number.isInteger(tilingHeight)) {
+    return {
+      satisfiable: false,
+      stats: { numVariables: 0, numClauses: 0, numPlacements: 0 },
+    };
+  }
+  
   // Convert grid to normalized coordinates
   const tileCoords = gridToCoords(cells);
   

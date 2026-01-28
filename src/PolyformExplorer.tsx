@@ -1157,19 +1157,35 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
   placements, 
   cellSize = 30 
 }) => {
-  // Build a map of cell -> placement index for coloring
-  const cellToPlacement = useMemo(() => {
+  // Calculate the bounds of the outer grid (including all tile overhangs)
+  const { outerBounds, cellToPlacement } = useMemo(() => {
+    let minRow = 0, maxRow = height - 1;
+    let minCol = 0, maxCol = width - 1;
+    
     const map = new Map<string, number>();
+    
     placements.forEach((p, index) => {
       for (const cell of p.cells) {
-        // Only include cells that are within the inner grid
-        if (cell.row >= 0 && cell.row < height && cell.col >= 0 && cell.col < width) {
-          map.set(`${cell.row},${cell.col}`, index);
-        }
+        map.set(`${cell.row},${cell.col}`, index);
+        minRow = Math.min(minRow, cell.row);
+        maxRow = Math.max(maxRow, cell.row);
+        minCol = Math.min(minCol, cell.col);
+        maxCol = Math.max(maxCol, cell.col);
       }
     });
-    return map;
+    
+    return {
+      outerBounds: { minRow, maxRow, minCol, maxCol },
+      cellToPlacement: map,
+    };
   }, [placements, width, height]);
+  
+  const outerWidth = outerBounds.maxCol - outerBounds.minCol + 1;
+  const outerHeight = outerBounds.maxRow - outerBounds.minRow + 1;
+  
+  // Offset to convert from logical coordinates to SVG coordinates
+  const offsetCol = -outerBounds.minCol;
+  const offsetRow = -outerBounds.minRow;
   
   return (
     <div style={{ 
@@ -1180,67 +1196,92 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
       display: "inline-block",
     }}>
       <svg
-        width={width * cellSize + 2}
-        height={height * cellSize + 2}
+        width={outerWidth * cellSize + 2}
+        height={outerHeight * cellSize + 2}
         style={{ display: "block" }}
+        role="img"
+        aria-label={`Tiling solution showing ${placements.length} tile placements on a ${width}×${height} grid with overhangs`}
       >
-        {/* Grid background */}
-        {Array.from({ length: height }, (_, rowIdx) =>
-          Array.from({ length: width }, (_, colIdx) => {
-            const key = `${rowIdx},${colIdx}`;
+        <title>Tiling Solution Visualization</title>
+        
+        {/* Draw all cells in the outer grid */}
+        {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
+          Array.from({ length: outerWidth }, (_, svgColIdx) => {
+            // Convert SVG coordinates back to logical coordinates
+            const logicalRow = svgRowIdx - offsetRow;
+            const logicalCol = svgColIdx - offsetCol;
+            const key = `${logicalRow},${logicalCol}`;
             const placementIndex = cellToPlacement.get(key);
-            const fill = placementIndex !== undefined 
-              ? getPlacementColor(placementIndex) 
-              : "#ecf0f1";
+            
+            // Determine if this cell is in the inner grid
+            const isInnerGrid = logicalRow >= 0 && logicalRow < height && 
+                               logicalCol >= 0 && logicalCol < width;
+            
+            // Determine fill color
+            let fill: string;
+            if (placementIndex !== undefined) {
+              fill = getPlacementColor(placementIndex);
+            } else if (isInnerGrid) {
+              fill = "#ecf0f1"; // Empty inner cell (shouldn't happen in valid solution)
+            } else {
+              fill = "#f8f9fa"; // Empty outer cell (overhang area background)
+            }
             
             return (
               <rect
                 key={key}
-                x={colIdx * cellSize + 1}
-                y={rowIdx * cellSize + 1}
+                x={svgColIdx * cellSize + 1}
+                y={svgRowIdx * cellSize + 1}
                 width={cellSize - 1}
                 height={cellSize - 1}
                 fill={fill}
-                stroke="#34495e"
+                stroke={isInnerGrid ? "#34495e" : "#bdc3c7"}
                 strokeWidth={0.5}
               />
             );
           })
         )}
         
-        {/* Draw tile boundaries (thicker lines between tiles) */}
+        {/* Draw inner grid boundary (thick border) */}
+        <rect
+          x={offsetCol * cellSize + 1}
+          y={offsetRow * cellSize + 1}
+          width={width * cellSize - 1}
+          height={height * cellSize - 1}
+          fill="none"
+          stroke="#2c3e50"
+          strokeWidth={3}
+        />
+        
+        {/* Draw tile boundaries (thicker lines between different tiles) */}
         {placements.map((p, pIndex) => {
-          // For each cell in this placement that's in the inner grid,
-          // draw thick lines on edges that border cells of different placements
           const edges: { x1: number; y1: number; x2: number; y2: number }[] = [];
           
           for (const cell of p.cells) {
-            if (cell.row < 0 || cell.row >= height || cell.col < 0 || cell.col >= width) {
-              continue;
-            }
+            const svgCol = cell.col + offsetCol;
+            const svgRow = cell.row + offsetRow;
+            const x = svgCol * cellSize + 1;
+            const y = svgRow * cellSize + 1;
             
-            const x = cell.col * cellSize + 1;
-            const y = cell.row * cellSize + 1;
-            
-            // Check each edge
+            // Check each edge - draw if neighbor is different placement or empty
             // Top edge
             const topKey = `${cell.row - 1},${cell.col}`;
-            if (cell.row === 0 || cellToPlacement.get(topKey) !== pIndex) {
+            if (cellToPlacement.get(topKey) !== pIndex) {
               edges.push({ x1: x, y1: y, x2: x + cellSize - 1, y2: y });
             }
             // Bottom edge
             const bottomKey = `${cell.row + 1},${cell.col}`;
-            if (cell.row === height - 1 || cellToPlacement.get(bottomKey) !== pIndex) {
+            if (cellToPlacement.get(bottomKey) !== pIndex) {
               edges.push({ x1: x, y1: y + cellSize - 1, x2: x + cellSize - 1, y2: y + cellSize - 1 });
             }
             // Left edge
             const leftKey = `${cell.row},${cell.col - 1}`;
-            if (cell.col === 0 || cellToPlacement.get(leftKey) !== pIndex) {
+            if (cellToPlacement.get(leftKey) !== pIndex) {
               edges.push({ x1: x, y1: y, x2: x, y2: y + cellSize - 1 });
             }
             // Right edge
             const rightKey = `${cell.row},${cell.col + 1}`;
-            if (cell.col === width - 1 || cellToPlacement.get(rightKey) !== pIndex) {
+            if (cellToPlacement.get(rightKey) !== pIndex) {
               edges.push({ x1: x + cellSize - 1, y1: y, x2: x + cellSize - 1, y2: y + cellSize - 1 });
             }
           }
