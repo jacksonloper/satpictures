@@ -367,6 +367,10 @@ export function PolyformExplorer() {
   const workerRef = useRef<Worker | null>(null);
   const tilingSvgRef = useRef<SVGSVGElement | null>(null);
   
+  // Debugging state
+  const [highlightedPlacement, setHighlightedPlacement] = useState<number | null>(null);
+  const [coordsJsonInput, setCoordsJsonInput] = useState("");
+  
   // Download SVG function
   const handleDownloadSvg = useCallback(() => {
     if (!tilingSvgRef.current) return;
@@ -385,6 +389,120 @@ export function PolyformExplorer() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }, [tilingWidth, tilingHeight]);
+  
+  // Export tile coordinates as JSON
+  const handleExportTileCoords = useCallback(() => {
+    const coords: Array<{ row: number; col: number }> = [];
+    for (let row = 0; row < cells.length; row++) {
+      for (let col = 0; col < cells[row].length; col++) {
+        if (cells[row][col]) {
+          coords.push({ row, col });
+        }
+      }
+    }
+    const json = JSON.stringify(coords, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+      alert(`Copied ${coords.length} coordinates to clipboard!`);
+    }).catch(() => {
+      // Fallback: show in a prompt
+      prompt("Copy these coordinates:", json);
+    });
+  }, [cells]);
+  
+  // Import tile coordinates from JSON
+  const handleImportTileCoords = useCallback(() => {
+    try {
+      const coords = JSON.parse(coordsJsonInput) as Array<{ row: number; col: number }>;
+      if (!Array.isArray(coords)) {
+        alert("Invalid JSON: expected an array of {row, col} objects");
+        return;
+      }
+      
+      // Find bounds
+      let maxRow = 0, maxCol = 0;
+      for (const { row, col } of coords) {
+        if (typeof row !== "number" || typeof col !== "number") {
+          alert("Invalid JSON: each item must have numeric 'row' and 'col' properties");
+          return;
+        }
+        maxRow = Math.max(maxRow, row);
+        maxCol = Math.max(maxCol, col);
+      }
+      
+      // Create new grid
+      const newWidth = Math.max(maxCol + 1, 3);
+      const newHeight = Math.max(maxRow + 1, 3);
+      const newCells = createEmptyGrid(newWidth, newHeight);
+      
+      for (const { row, col } of coords) {
+        if (row >= 0 && row < newHeight && col >= 0 && col < newWidth) {
+          newCells[row][col] = true;
+        }
+      }
+      
+      setGridWidth(newWidth);
+      setGridHeight(newHeight);
+      setWidthInput(String(newWidth));
+      setHeightInput(String(newHeight));
+      setCells(newCells);
+      setCoordsJsonInput("");
+      alert(`Imported ${coords.length} coordinates`);
+    } catch (e) {
+      alert(`Failed to parse JSON: ${e}`);
+    }
+  }, [coordsJsonInput]);
+  
+  // Download placements as JSON
+  const handleDownloadPlacementsJson = useCallback(() => {
+    if (!tilingResult || !tilingResult.placements) return;
+    
+    const data = {
+      gridWidth: tilingWidth,
+      gridHeight: tilingHeight,
+      polyformType: solvedPolyformType,
+      numPlacements: tilingResult.placements.length,
+      placements: tilingResult.placements.map((p, i) => ({
+        index: i,
+        id: p.id,
+        transformIndex: p.transformIndex,
+        cells: p.cells,
+        ...(("offset" in p) ? { offset: p.offset } : {}),
+      })),
+    };
+    
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `placements-${tilingWidth}x${tilingHeight}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [tilingResult, tilingWidth, tilingHeight, solvedPolyformType]);
+  
+  // Highlight navigation
+  const handlePrevPlacement = useCallback(() => {
+    if (!tilingResult?.placements?.length) return;
+    setHighlightedPlacement(prev => {
+      if (prev === null) return tilingResult.placements!.length - 1;
+      return (prev - 1 + tilingResult.placements!.length) % tilingResult.placements!.length;
+    });
+  }, [tilingResult]);
+  
+  const handleNextPlacement = useCallback(() => {
+    if (!tilingResult?.placements?.length) return;
+    setHighlightedPlacement(prev => {
+      if (prev === null) return 0;
+      return (prev + 1) % tilingResult.placements!.length;
+    });
+  }, [tilingResult]);
+  
+  const handleClearHighlight = useCallback(() => {
+    setHighlightedPlacement(null);
+  }, []);
   
   // Cleanup worker on unmount
   useEffect(() => {
@@ -792,6 +910,52 @@ export function PolyformExplorer() {
           >
             Clear
           </button>
+          <button
+            onClick={handleExportTileCoords}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#17a2b8",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+            title="Copy tile coordinates as JSON"
+          >
+            📋 Copy JSON
+          </button>
+        </div>
+        
+        {/* JSON Import */}
+        <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            value={coordsJsonInput}
+            onChange={(e) => setCoordsJsonInput(e.target.value)}
+            placeholder='Paste JSON coords: [{"row":0,"col":0},...]'
+            style={{
+              padding: "6px 10px",
+              borderRadius: "4px",
+              border: "1px solid #bdc3c7",
+              width: "300px",
+              fontSize: "12px",
+            }}
+          />
+          <button
+            onClick={handleImportTileCoords}
+            disabled={!coordsJsonInput.trim()}
+            style={{
+              padding: "6px 12px",
+              backgroundColor: coordsJsonInput.trim() ? "#28a745" : "#95a5a6",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: coordsJsonInput.trim() ? "pointer" : "not-allowed",
+              fontSize: "12px",
+            }}
+          >
+            📥 Import JSON
+          </button>
         </div>
         
         {/* Stats */}
@@ -969,6 +1133,7 @@ export function PolyformExplorer() {
                     height={tilingHeight}
                     placements={(tilingResult as HexTilingResult).placements || []}
                     svgRef={tilingSvgRef}
+                    highlightedPlacement={highlightedPlacement}
                   />
                 ) : (
                   <TilingViewer
@@ -976,23 +1141,95 @@ export function PolyformExplorer() {
                     height={tilingHeight}
                     placements={(tilingResult as TilingResult).placements || []}
                     svgRef={tilingSvgRef}
+                    highlightedPlacement={highlightedPlacement}
                   />
                 )}
-                <button
-                  onClick={handleDownloadSvg}
-                  style={{
-                    marginTop: "12px",
-                    padding: "8px 16px",
-                    backgroundColor: "#6c757d",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  💾 Save as SVG
-                </button>
+                
+                {/* Highlight controls */}
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    onClick={handlePrevPlacement}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#007bff",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    ◀ Prev
+                  </button>
+                  <button
+                    onClick={handleNextPlacement}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#007bff",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Next ▶
+                  </button>
+                  <button
+                    onClick={handleClearHighlight}
+                    disabled={highlightedPlacement === null}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: highlightedPlacement !== null ? "#6c757d" : "#adb5bd",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: highlightedPlacement !== null ? "pointer" : "not-allowed",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Clear Highlight
+                  </button>
+                  {highlightedPlacement !== null && tilingResult.placements && (
+                    <span style={{ fontSize: "14px", color: "#495057" }}>
+                      Placement <strong>{highlightedPlacement + 1}</strong> of {tilingResult.placements.length}
+                      {" | "}
+                      Transform: <strong>{tilingResult.placements[highlightedPlacement].transformIndex}</strong>
+                    </span>
+                  )}
+                </div>
+                
+                {/* Download buttons */}
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={handleDownloadSvg}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#6c757d",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    💾 Save as SVG
+                  </button>
+                  <button
+                    onClick={handleDownloadPlacementsJson}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#17a2b8",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    📥 Download Placements JSON
+                  </button>
+                </div>
               </>
             ) : (
               <div style={{ 
@@ -1194,12 +1431,18 @@ interface TilingViewerProps {
   placements: Placement[];
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  highlightedPlacement?: number | null;
 }
 
 // Generate a set of distinct colors for the placements
-function getPlacementColor(index: number): string {
+function getPlacementColor(index: number, highlighted?: number | null): string {
   // Use HSL for evenly distributed colors
   const hue = (index * 137.508) % 360; // Golden angle approximation
+  const isHighlighted = highlighted === index;
+  if (highlighted !== null && highlighted !== undefined && !isHighlighted) {
+    // Dim non-highlighted placements
+    return `hsl(${hue}, 30%, 80%)`;
+  }
   return `hsl(${hue}, 70%, 60%)`;
 }
 
@@ -1208,7 +1451,8 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
   height, 
   placements, 
   cellSize = 30,
-  svgRef 
+  svgRef,
+  highlightedPlacement 
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -1274,7 +1518,7 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             // Determine fill color
             let fill: string;
             if (placementIndex !== undefined) {
-              fill = getPlacementColor(placementIndex);
+              fill = getPlacementColor(placementIndex, highlightedPlacement);
             } else if (isInnerGrid) {
               fill = "#ecf0f1"; // Empty inner cell (shouldn't happen in valid solution)
             } else {
@@ -1431,6 +1675,7 @@ interface HexTilingViewerProps {
   placements: HexPlacement[];
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  highlightedPlacement?: number | null;
 }
 
 const HexTilingViewer: React.FC<HexTilingViewerProps> = ({ 
@@ -1438,7 +1683,8 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   height, 
   placements, 
   cellSize = 30,
-  svgRef 
+  svgRef,
+  highlightedPlacement 
 }) => {
   // Hex geometry calculations (matching HexGrid component)
   const hexSize = cellSize * 0.5;
@@ -1585,7 +1831,7 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           
           let fill: string;
           if (placementIndex !== undefined) {
-            fill = getPlacementColor(placementIndex);
+            fill = getPlacementColor(placementIndex, highlightedPlacement);
           } else if (isInner) {
             fill = "#ecf0f1"; // Empty inner cell
           } else {
