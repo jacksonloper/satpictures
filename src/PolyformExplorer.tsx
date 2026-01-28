@@ -1240,7 +1240,32 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
           })
         )}
         
+        {/* Layer 1.5: Draw low-contrast overlay on cells outside the inner grid */}
+        {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
+          Array.from({ length: outerWidth }, (_, svgColIdx) => {
+            const logicalRow = svgRowIdx - offsetRow;
+            const logicalCol = svgColIdx - offsetCol;
+            const isInnerGrid = logicalRow >= 0 && logicalRow < height && 
+                               logicalCol >= 0 && logicalCol < width;
+            
+            // Only draw overlay for outer cells
+            if (isInnerGrid) return null;
+            
+            return (
+              <rect
+                key={`overlay-${logicalRow},${logicalCol}`}
+                x={svgColIdx * cellSize + 1}
+                y={svgRowIdx * cellSize + 1}
+                width={cellSize - 1}
+                height={cellSize - 1}
+                fill="rgba(255, 255, 255, 0.35)"
+              />
+            );
+          })
+        )}
+        
         {/* Layer 2: Draw interior grid lines (thin gray lines between cells within same tile) */}
+        {/* Draw only the inner 80% of each line (10% to 90%) to avoid connecting across tile boundaries */}
         {placements.map((p, pIndex) => {
           const interiorEdges: { x1: number; y1: number; x2: number; y2: number }[] = [];
           
@@ -1254,12 +1279,20 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             // Right edge - only if neighbor to the right is same tile
             const rightKey = `${cell.row},${cell.col + 1}`;
             if (cellToPlacement.get(rightKey) === pIndex) {
-              interiorEdges.push({ x1: x + cellSize - 1, y1: y, x2: x + cellSize - 1, y2: y + cellSize - 1 });
+              // Vertical line: shorten by 10% on each end
+              const lineLen = cellSize - 1;
+              const startY = y + lineLen * 0.1;
+              const endY = y + lineLen * 0.9;
+              interiorEdges.push({ x1: x + cellSize - 1, y1: startY, x2: x + cellSize - 1, y2: endY });
             }
             // Bottom edge - only if neighbor below is same tile
             const bottomKey = `${cell.row + 1},${cell.col}`;
             if (cellToPlacement.get(bottomKey) === pIndex) {
-              interiorEdges.push({ x1: x, y1: y + cellSize - 1, x2: x + cellSize - 1, y2: y + cellSize - 1 });
+              // Horizontal line: shorten by 10% on each end
+              const lineLen = cellSize - 1;
+              const startX = x + lineLen * 0.1;
+              const endX = x + lineLen * 0.9;
+              interiorEdges.push({ x1: startX, y1: y + cellSize - 1, x2: endX, y2: y + cellSize - 1 });
             }
           }
           
@@ -1276,14 +1309,14 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
           ));
         })}
         
-        {/* Layer 3: Draw inner grid boundary (thick border) */}
+        {/* Layer 3: Draw inner grid boundary (thick red border to distinguish from tile boundaries) */}
         <rect
           x={offsetCol * cellSize + 1}
           y={offsetRow * cellSize + 1}
           width={width * cellSize - 1}
           height={height * cellSize - 1}
           fill="none"
-          stroke="#2c3e50"
+          stroke="#e74c3c"
           strokeWidth={3}
         />
         
