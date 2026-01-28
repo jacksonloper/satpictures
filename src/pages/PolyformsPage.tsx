@@ -14,6 +14,10 @@ function createEmptyGrid(width: number, height: number): Cell[][] {
 }
 
 function rotateGrid(grid: Cell[][]): Cell[][] {
+  if (grid.length === 0 || grid[0].length === 0) {
+    return grid;
+  }
+  
   const height = grid.length;
   const width = grid[0].length;
   const rotated = Array.from({ length: width }, () =>
@@ -73,14 +77,14 @@ export function PolyformsPage() {
 
   const handleCellMouseDown = useCallback((row: number, col: number) => {
     setIsDragging(true);
-    const newFillState = !grid[row][col].filled;
-    setDragMode(newFillState ? 'fill' : 'erase');
     setGrid(prevGrid => {
+      const newFillState = !prevGrid[row][col].filled;
+      setDragMode(newFillState ? 'fill' : 'erase');
       const newGrid = prevGrid.map(r => r.map(c => ({ ...c })));
       newGrid[row][col].filled = newFillState;
       return newGrid;
     });
-  }, [grid]);
+  }, []);
 
   const handleCellMouseEnter = useCallback((row: number, col: number) => {
     if (isDragging) {
@@ -97,15 +101,13 @@ export function PolyformsPage() {
   }, []);
 
   const handleRotate = () => {
-    setGrid(prevGrid => {
-      const rotated = rotateGrid(prevGrid);
-      // Update dimensions to match rotated grid
-      setGridWidth(rotated[0].length);
-      setGridHeight(rotated.length);
-      setWidthInput(String(rotated[0].length));
-      setHeightInput(String(rotated.length));
-      return rotated;
-    });
+    const rotated = rotateGrid(grid);
+    // Update all state together
+    setGrid(rotated);
+    setGridWidth(rotated[0]?.length || 0);
+    setGridHeight(rotated.length);
+    setWidthInput(String(rotated[0]?.length || 0));
+    setHeightInput(String(rotated.length));
   };
 
   const handleFlip = () => {
@@ -265,7 +267,7 @@ export function PolyformsPage() {
         )}
 
         {polyformType === 'polyiamond' && (
-          <div className="iamond-grid-container">
+          <div className="diamond-grid-container">
             <svg
               width={gridWidth * 40 + 20}
               height={gridHeight * 35 + 20}
