@@ -283,16 +283,26 @@ function transformPolyiamond(cells: boolean[][], t: PolyiamondTransform): boolea
     maxCol = Math.max(maxCol, p.col);
   }
 
-  const newHeight = maxRow - minRow + 1;
-  const newWidth = maxCol - minCol + 1;
+  // Base offsets to bring mins to 0
+  const offRow = -minRow;
+  let offCol = -minCol;
+
+  // IMPORTANT: preserve (row+col)%2 orientation.
+  // If offRow+offCol is odd, shift by 1 in col to maintain triangle parity.
+  if (((offRow + offCol) & 1) !== 0) {
+    offCol += 1;
+  }
+
+  const newHeight = maxRow + offRow + 1;
+  const newWidth = maxCol + offCol + 1;
 
   const out: boolean[][] = Array.from({ length: newHeight }, () =>
     Array.from({ length: newWidth }, () => false)
   );
 
   for (const p of cellsOut) {
-    const r = p.row - minRow;
-    const c = p.col - minCol;
+    const r = p.row + offRow;
+    const c = p.col + offCol;
     if (r >= 0 && r < newHeight && c >= 0 && c < newWidth) {
       out[r][c] = true;
     }
