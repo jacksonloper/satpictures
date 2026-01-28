@@ -1204,7 +1204,7 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
       >
         <title>Tiling Solution Visualization</title>
         
-        {/* Draw all cells in the outer grid */}
+        {/* Layer 1: Draw all cell fills (no strokes yet) */}
         {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
           Array.from({ length: outerWidth }, (_, svgColIdx) => {
             // Convert SVG coordinates back to logical coordinates
@@ -1235,14 +1235,48 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
                 width={cellSize - 1}
                 height={cellSize - 1}
                 fill={fill}
-                stroke={isInnerGrid ? "#34495e" : "#bdc3c7"}
-                strokeWidth={0.5}
               />
             );
           })
         )}
         
-        {/* Draw inner grid boundary (thick border) */}
+        {/* Layer 2: Draw interior grid lines (thin gray lines between cells within same tile) */}
+        {placements.map((p, pIndex) => {
+          const interiorEdges: { x1: number; y1: number; x2: number; y2: number }[] = [];
+          
+          for (const cell of p.cells) {
+            const svgCol = cell.col + offsetCol;
+            const svgRow = cell.row + offsetRow;
+            const x = svgCol * cellSize + 1;
+            const y = svgRow * cellSize + 1;
+            
+            // Only draw interior edges (where neighbor is same placement)
+            // Right edge - only if neighbor to the right is same tile
+            const rightKey = `${cell.row},${cell.col + 1}`;
+            if (cellToPlacement.get(rightKey) === pIndex) {
+              interiorEdges.push({ x1: x + cellSize - 1, y1: y, x2: x + cellSize - 1, y2: y + cellSize - 1 });
+            }
+            // Bottom edge - only if neighbor below is same tile
+            const bottomKey = `${cell.row + 1},${cell.col}`;
+            if (cellToPlacement.get(bottomKey) === pIndex) {
+              interiorEdges.push({ x1: x, y1: y + cellSize - 1, x2: x + cellSize - 1, y2: y + cellSize - 1 });
+            }
+          }
+          
+          return interiorEdges.map((edge, edgeIndex) => (
+            <line
+              key={`interior-${pIndex}-${edgeIndex}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke="#95a5a6"
+              strokeWidth={0.5}
+            />
+          ));
+        })}
+        
+        {/* Layer 3: Draw inner grid boundary (thick border) */}
         <rect
           x={offsetCol * cellSize + 1}
           y={offsetRow * cellSize + 1}
@@ -1253,7 +1287,7 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
           strokeWidth={3}
         />
         
-        {/* Draw tile boundaries (thicker lines between different tiles) */}
+        {/* Layer 4: Draw tile boundaries (thicker lines between different tiles - on top) */}
         {placements.map((p, pIndex) => {
           const edges: { x1: number; y1: number; x2: number; y2: number }[] = [];
           
