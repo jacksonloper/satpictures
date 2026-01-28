@@ -158,27 +158,25 @@ function axialToOffset(axial: AxialCoord): Coord {
 /**
  * Normalize hex coordinates so that the bounding box starts at (0, 0) in offset space.
  * This ensures consistent representation of transformed tiles.
+ * 
+ * NOTE: We normalize in offset space (row, col), NOT in axial space.
+ * Normalizing in axial space and converting back can cause parity issues
+ * because col = q + floor(r/2), and changing r by a constant can affect
+ * row parity, leading to shear/shift artifacts in the resulting coordinates.
  */
 function normalizeHexCoords(coords: Coord[]): Coord[] {
   if (coords.length === 0) return [];
-  
-  // First convert to axial to find proper bounds
-  const axials = coords.map(offsetToAxial);
-  
-  // Find min q and r
-  let minQ = Infinity, minR = Infinity;
-  for (const a of axials) {
-    minQ = Math.min(minQ, a.q);
-    minR = Math.min(minR, a.r);
+
+  let minRow = Infinity, minCol = Infinity;
+  for (const c of coords) {
+    minRow = Math.min(minRow, c.row);
+    minCol = Math.min(minCol, c.col);
   }
-  
-  // Normalize to minQ=0, minR=0 in axial, then convert back to offset
-  const normalized = axials.map(a => ({
-    q: a.q - minQ,
-    r: a.r - minR,
-  })).map(axialToOffset);
-  
-  return normalized;
+
+  return coords.map(c => ({
+    row: c.row - minRow,
+    col: c.col - minCol,
+  }));
 }
 
 /**
