@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
 
-/** Simple hash-based router */
+/** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
   const [page, setPage] = useState(() => {
     const hash = window.location.hash.slice(1);
+    // Empty hash, no hash, or '#main' all show the main page
     return hash === 'polyforms' ? 'polyforms' : 'main';
   });
 
@@ -20,7 +21,7 @@ export function Router() {
 
   return (
     <>
-      {/* Navigation */}
+      {/* Navigation bar */}
       <nav style={{
         padding: '12px 24px',
         backgroundColor: '#2c3e50',
@@ -28,7 +29,7 @@ export function Router() {
         gap: '16px',
       }}>
         <a
-          href="#main"
+          href="#"
           style={{
             color: page === 'main' ? '#3498db' : 'white',
             textDecoration: 'none',

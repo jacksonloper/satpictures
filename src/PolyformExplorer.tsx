@@ -159,6 +159,9 @@ function rotatePolyiamond(cells: boolean[][]): boolean[][] {
 
 /**
  * Flip the polyform horizontally.
+ * Note: For polyhex and polyiamond, this is a simple array flip which
+ * visually mirrors the shape but may not preserve exact geometric relationships
+ * on offset grids. For most use cases, this produces intuitive results.
  */
 function flipHorizontal(cells: boolean[][]): boolean[][] {
   return cells.map(row => [...row].reverse());
@@ -166,6 +169,9 @@ function flipHorizontal(cells: boolean[][]): boolean[][] {
 
 /**
  * Flip the polyform vertically.
+ * Note: For polyhex and polyiamond, this is a simple array flip which
+ * visually mirrors the shape but may not preserve exact geometric relationships
+ * on offset grids. For most use cases, this produces intuitive results.
  */
 function flipVertical(cells: boolean[][]): boolean[][] {
   return [...cells].reverse();
@@ -260,13 +266,16 @@ export function PolyformExplorer() {
         default:
           rotated = prev;
       }
-      // Update dimensions to match rotated shape
-      const newHeight = rotated.length;
-      const newWidth = rotated[0]?.length ?? 0;
+      // Update dimensions to match rotated shape (clamped to max 50)
+      const newHeight = Math.min(rotated.length, 50);
+      const newWidth = Math.min(rotated[0]?.length ?? 0, 50);
       setGridHeight(newHeight);
       setGridWidth(newWidth);
       setHeightInput(String(newHeight));
       setWidthInput(String(newWidth));
+      // Clear any error states since dimensions are now valid
+      setWidthError(false);
+      setHeightError(false);
       return rotated;
     });
   }, [polyformType]);
@@ -544,6 +553,11 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   
+  // Hex geometry calculations:
+  // - hexSize: radius from center to vertex (0.5 * cellSize for spacing)
+  // - hexWidth: flat-to-flat width = sqrt(3) * radius (standard hex geometry)
+  // - hexHeight: point-to-point height = 2 * radius
+  // - vertSpacing: 0.75 of height because hexes overlap vertically by 1/4
   const hexSize = cellSize * 0.5;
   const hexWidth = Math.sqrt(3) * hexSize;
   const hexHeight = 2 * hexSize;
@@ -553,7 +567,8 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
   const svgWidth = width * horizSpacing + horizSpacing / 2 + 10;
   const svgHeight = height * vertSpacing + hexSize + 10;
   
-  // Create hexagon path
+  // Create hexagon path - 6 vertices at 60° (PI/3) intervals
+  // Starting offset of -PI/6 (-30°) creates a flat-top orientation
   const createHexPath = (cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
@@ -573,6 +588,7 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
     >
       {cells.map((row, rowIdx) =>
         row.map((filled, colIdx) => {
+          // Odd-r offset: odd rows are shifted right by half a hex width
           const isOddRow = rowIdx % 2 === 1;
           const cx = colIdx * horizSpacing + horizSpacing / 2 + (isOddRow ? horizSpacing / 2 : 0) + 5;
           const cy = rowIdx * vertSpacing + hexSize + 5;
@@ -605,6 +621,10 @@ const TriangleGrid: React.FC<TriangleGridProps> = ({ cells, onCellClick, cellSiz
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   
+  // Triangle geometry:
+  // - triWidth: base of the equilateral triangle = cellSize
+  // - triHeight: height = base * sqrt(3)/2 (standard equilateral triangle ratio)
+  // - Triangles overlap horizontally by half their width (tessellation)
   const triWidth = cellSize;
   const triHeight = cellSize * Math.sqrt(3) / 2;
   
@@ -612,19 +632,20 @@ const TriangleGrid: React.FC<TriangleGridProps> = ({ cells, onCellClick, cellSiz
   const svgHeight = height * triHeight + 10;
   
   // Create triangle path (up-pointing or down-pointing)
+  // Orientation alternates based on (row + col) % 2 for tessellation
   const createTriPath = (row: number, col: number): string => {
     const isUp = (row + col) % 2 === 0;
     const x = col * (triWidth / 2) + 5;
     const y = row * triHeight + 5;
     
     if (isUp) {
-      // Up-pointing triangle
+      // Up-pointing triangle: apex at top
       const p1 = `${x + triWidth / 2},${y}`;
       const p2 = `${x},${y + triHeight}`;
       const p3 = `${x + triWidth},${y + triHeight}`;
       return `M ${p1} L ${p2} L ${p3} Z`;
     } else {
-      // Down-pointing triangle
+      // Down-pointing triangle: apex at bottom
       const p1 = `${x},${y}`;
       const p2 = `${x + triWidth},${y}`;
       const p3 = `${x + triWidth / 2},${y + triHeight}`;
