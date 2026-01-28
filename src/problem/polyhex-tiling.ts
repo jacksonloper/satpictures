@@ -221,22 +221,28 @@ function axialSetsEqual(a: AxialCoord[], b: AxialCoord[]): boolean {
   return true;
 }
 
+/** A transform with its canonical index preserved */
+interface TransformWithCanonical {
+  coords: AxialCoord[];
+  /** Original index in the 0-11 transform list (matching UI semantics) */
+  canonicalIndex: number;
+}
+
 /**
- * Remove duplicate transforms (for symmetric tiles).
+ * Remove duplicate transforms (for symmetric tiles) while preserving canonical indices.
+ * 
+ * This ensures that transformIndex remains 0-11 (matching UI rotation/flip semantics)
+ * even after deduplication. The first occurrence of each unique transform keeps its
+ * original index.
  */
-function deduplicateHexTransforms(transforms: AxialCoord[][]): AxialCoord[][] {
-  const unique: AxialCoord[][] = [];
+function deduplicateHexTransformsWithCanonical(transforms: AxialCoord[][]): TransformWithCanonical[] {
+  const unique: TransformWithCanonical[] = [];
   
-  for (const transform of transforms) {
-    let isDuplicate = false;
-    for (const existing of unique) {
-      if (axialSetsEqual(transform, existing)) {
-        isDuplicate = true;
-        break;
-      }
-    }
-    if (!isDuplicate) {
-      unique.push(transform);
+  for (let i = 0; i < transforms.length; i++) {
+    const transform = transforms[i];
+    const existing = unique.find(u => axialSetsEqual(u.coords, transform));
+    if (!existing) {
+      unique.push({ coords: transform, canonicalIndex: i });
     }
   }
   
@@ -348,14 +354,14 @@ export function generateAllHexPlacements(
   
   // Get all 12 transforms (may include duplicates for symmetric tiles)
   const allTransforms = generateAllHexTransforms(tileAxialCoords);
-  // Deduplicate for efficiency
-  const transforms = deduplicateHexTransforms(allTransforms);
+  // Deduplicate for efficiency while preserving canonical 0-11 indices
+  const transforms = deduplicateHexTransformsWithCanonical(allTransforms);
   
   // Find the maximum bounding box across all transforms in axial coords
   let maxTransformQ = 0;
   let maxTransformR = 0;
   for (const t of transforms) {
-    const bb = getAxialBoundingBox(t);
+    const bb = getAxialBoundingBox(t.coords);
     maxTransformQ = Math.max(maxTransformQ, bb.width);
     maxTransformR = Math.max(maxTransformR, bb.height);
   }
@@ -372,9 +378,7 @@ export function generateAllHexPlacements(
   const placements: HexPlacement[] = [];
   let placementId = 0;
   
-  for (let transformIndex = 0; transformIndex < transforms.length; transformIndex++) {
-    const transformCoords = transforms[transformIndex];
-    
+  for (const { coords: transformCoords, canonicalIndex } of transforms) {
     // Try all translations
     for (let offsetR = tilingBB.minR - maxTransformR + 1; offsetR <= tilingBB.maxR; offsetR++) {
       for (let offsetQ = tilingBB.minQ - maxTransformQ + 1; offsetQ <= tilingBB.maxQ; offsetQ++) {
@@ -397,7 +401,7 @@ export function generateAllHexPlacements(
           placements.push({
             id: placementId++,
             offset: { q: offsetQ, r: offsetR },
-            transformIndex,
+            transformIndex: canonicalIndex,  // Use original 0-11 index, not deduplicated index
             cells: translatedCells,
           });
         }
@@ -560,6 +564,40 @@ export function solvePolyhexTiling(
     placements: usedPlacements,
     stats: { numVariables: numVars, numClauses: numClauses, numPlacements: placements.length },
   };
+}
+
+// ============================================================================
+// Validation Utilities
+// ============================================================================
+
+/**
+ * Validate that placements don't overlap in axial space.
+ * 
+ * This helps distinguish between SAT model issues and rendering issues.
+ * Returns an array of overlap descriptions (empty array means no overlaps).
+ */
+export function findHexPlacementOverlaps(placements: HexPlacement[]): string[] {
+  const seen = new Map<string, { placementId: number; placementIndex: number }>();
+  const overlaps: string[] = [];
+  
+  for (let i = 0; i < placements.length; i++) {
+    const p = placements[i];
+    for (const cell of p.cells) {
+      const key = `${cell.q},${cell.r}`;
+      const existing = seen.get(key);
+      
+      if (existing) {
+        overlaps.push(
+          `Cell (q=${cell.q}, r=${cell.r}) covered by placement ${existing.placementIndex} (id=${existing.placementId}) ` +
+          `and placement ${i} (id=${p.id})`
+        );
+      } else {
+        seen.set(key, { placementId: p.id, placementIndex: i });
+      }
+    }
+  }
+  
+  return overlaps;
 }
 
 // ============================================================================
