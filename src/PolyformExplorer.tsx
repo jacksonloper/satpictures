@@ -194,12 +194,15 @@ function transformPolyiamond(cells: boolean[][], t: PolyiamondTransform): boolea
   type UV = { u: number; v: number };
 
   const toUV = (p: Vertex): UV => {
-    // Convert half-edge coords to lattice coords
-    return { u: (p.X - p.Y) / 2, v: p.Y };
+    // IMPORTANT:
+    // Our triangle vertices always satisfy (X - Y) is ODD.
+    // So we use the "odd sublattice" mapping: u = (X - Y - 1)/2 (integer), v = Y (integer).
+    return { u: (p.X - p.Y - 1) / 2, v: p.Y };
   };
 
   const fromUV = (p: UV): Vertex => {
-    return { X: 2 * p.u + p.v, Y: p.v };
+    // Inverse of the above: X = 2u + v + 1, Y = v
+    return { X: 2 * p.u + p.v + 1, Y: p.v };
   };
 
   const applyUV = (p: UV): UV => {
