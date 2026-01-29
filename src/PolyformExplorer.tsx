@@ -1794,16 +1794,20 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   }, [hexSize]);
   
   // Get 6 axial neighbors with edge indices for border drawing
-  // Neighbors in axial: (q+1,r), (q,r+1), (q-1,r+1), (q-1,r), (q,r-1), (q+1,r-1)
-  // Edge indices match the vertex indices for pointy-top (vertex 0 at top)
+  // Vertices go counter-clockwise starting at 90° (top):
+  //   v0: 90° (top), v1: 150° (upper-left), v2: 210° (lower-left)
+  //   v3: 270° (bottom), v4: 330° (lower-right), v5: 30° (upper-right)
+  // Edge i connects vertex i to vertex (i+1)%6:
+  //   edge 0: v0→v1 (faces NW), edge 1: v1→v2 (faces W), edge 2: v2→v3 (faces SW)
+  //   edge 3: v3→v4 (faces SE), edge 4: v4→v5 (faces E), edge 5: v5→v0 (faces NE)
   const getAxialNeighbors = useCallback((q: number, r: number): Array<{ q: number; r: number; edgeIndex: number }> => {
     return [
-      { q: q + 1, r: r - 1, edgeIndex: 0 }, // Upper-right (NE)
-      { q: q + 1, r: r, edgeIndex: 1 },     // Right (E)
-      { q: q, r: r + 1, edgeIndex: 2 },     // Lower-right (SE)
-      { q: q - 1, r: r + 1, edgeIndex: 3 }, // Lower-left (SW)
-      { q: q - 1, r: r, edgeIndex: 4 },     // Left (W)
-      { q: q, r: r - 1, edgeIndex: 5 },     // Upper-left (NW)
+      { q: q + 1, r: r - 1, edgeIndex: 5 }, // Upper-right (NE) → edge 5 (v5→v0)
+      { q: q + 1, r: r, edgeIndex: 4 },     // Right (E) → edge 4 (v4→v5)
+      { q: q, r: r + 1, edgeIndex: 3 },     // Lower-right (SE) → edge 3 (v3→v4)
+      { q: q - 1, r: r + 1, edgeIndex: 2 }, // Lower-left (SW) → edge 2 (v2→v3)
+      { q: q - 1, r: r, edgeIndex: 1 },     // Left (W) → edge 1 (v1→v2)
+      { q: q, r: r - 1, edgeIndex: 0 },     // Upper-left (NW) → edge 0 (v0→v1)
     ];
   }, []);
   
