@@ -193,7 +193,7 @@ console.log("=== Hook-shaped Polyhex Tiling Tests ===");
 const grid = createHookShapedGrid();
 console.log("\nHook shape (offset coords):");
 for (let row = 0; row < grid.length; row++) {
-  const rowStr = grid[row].map((v, col) => v ? 'X' : '.').join(' ');
+  const rowStr = grid[row].map((v) => v ? 'X' : '.').join(' ');
   console.log(`  Row ${row}: ${rowStr}`);
 }
 

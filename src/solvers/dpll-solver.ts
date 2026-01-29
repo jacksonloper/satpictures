@@ -5,7 +5,8 @@
  * This is a "textbook" implementation for educational purposes and comparison.
  */
 
-import type { Clause, FormulaBuilder, SATSolver, SolveResult } from "./types";
+import type { Clause, SATSolver, SolveResult } from "./types";
+import { BaseFormulaBuilder } from "./types";
 
 /**
  * Implementation of SATSolver using the classic DPLL algorithm
@@ -282,63 +283,11 @@ export class DPLLSolver implements SATSolver {
 }
 
 /**
- * Formula builder implementation using DPLL
+ * Formula builder implementation using DPLL.
+ * Extends BaseFormulaBuilder with DPLL-specific defaults.
  */
-export class DPLLFormulaBuilder implements FormulaBuilder {
-  solver: SATSolver;
-  private nameToVar: Map<string, number> = new Map();
-
+export class DPLLFormulaBuilder extends BaseFormulaBuilder {
   constructor(solver?: SATSolver) {
-    this.solver = solver ?? new DPLLSolver();
-  }
-
-  createNamedVariable(name: string): number {
-    if (this.nameToVar.has(name)) {
-      throw new Error(`Variable already exists: ${name}`);
-    }
-    const varNum = this.solver.newVariable();
-    this.nameToVar.set(name, varNum);
-    return varNum;
-  }
-
-  getVariable(name: string): number | undefined {
-    return this.nameToVar.get(name);
-  }
-
-  addOr(literals: number[]): void {
-    if (literals.length === 0) return;
-    this.solver.addClause(literals);
-  }
-
-  addAnd(literals: number[]): void {
-    for (const lit of literals) {
-      this.solver.addClause([lit]);
-    }
-  }
-
-  addExactlyOne(literals: number[]): void {
-    // At least one
-    this.addOr(literals);
-    // At most one
-    this.addAtMostOne(literals);
-  }
-
-  addAtMostOne(literals: number[]): void {
-    // Pairwise encoding: for all pairs, at most one can be true
-    for (let i = 0; i < literals.length; i++) {
-      for (let j = i + 1; j < literals.length; j++) {
-        // ¬li ∨ ¬lj
-        this.solver.addClause([-literals[i], -literals[j]]);
-      }
-    }
-  }
-
-  addImplies(a: number, b: number): void {
-    // a → b ≡ ¬a ∨ b
-    this.solver.addClause([-a, b]);
-  }
-
-  addUnit(literal: number): void {
-    this.solver.addClause([literal]);
+    super(solver ?? new DPLLSolver());
   }
 }

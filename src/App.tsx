@@ -134,13 +134,12 @@ function App() {
     };
   }, []);
 
-  // Auto-manage roots when colors change:
-  // 7a. Every color used must have a root as soon as it's assigned to at least one tile
-  // 7b. Root must go out of existence if color of its tile changes (and auto-place new root if tiles remain)
-  useEffect(() => {
+  // Helper function to update color roots when grid changes
+  // This synchronizes roots with the current grid state
+  const updateRootsForGrid = useCallback((gridColors: (number | null)[][], gridWidth: number, gridHeight: number, currentRoots: ColorRoots): ColorRoots => {
     // Find all used colors (non-null, non-hatch) from grid
     const usedColors = new Set<number>();
-    for (const row of grid.colors) {
+    for (const row of gridColors) {
       for (const cell of row) {
         if (cell !== null && cell !== HATCH_COLOR && cell >= 0) {
           usedColors.add(cell);
@@ -148,63 +147,61 @@ function App() {
       }
     }
 
-    setColorRoots((prevRoots) => {
-      const newRoots = { ...prevRoots };
-      let changed = false;
+    const newRoots = { ...currentRoots };
+    let changed = false;
 
-      // Remove roots for colors no longer used
-      for (const colorStr of Object.keys(newRoots)) {
-        const color = parseInt(colorStr, 10);
-        if (!usedColors.has(color)) {
+    // Remove roots for colors no longer used
+    for (const colorStr of Object.keys(newRoots)) {
+      const color = parseInt(colorStr, 10);
+      if (!usedColors.has(color)) {
+        delete newRoots[colorStr];
+        changed = true;
+      }
+    }
+
+    // Check if existing roots are still valid (root cell still has that color)
+    for (const colorStr of Object.keys(newRoots)) {
+      const color = parseInt(colorStr, 10);
+      const root = newRoots[colorStr];
+      if (root && gridColors[root.row]?.[root.col] !== color) {
+        // Root's cell no longer has this color - find a new cell with this color
+        let foundNew = false;
+        for (let r = 0; r < gridHeight && !foundNew; r++) {
+          for (let c = 0; c < gridWidth && !foundNew; c++) {
+            if (gridColors[r][c] === color) {
+              newRoots[colorStr] = { row: r, col: c };
+              foundNew = true;
+              changed = true;
+            }
+          }
+        }
+        if (!foundNew) {
+          // No cells with this color exist - remove root
           delete newRoots[colorStr];
           changed = true;
         }
       }
+    }
 
-      // Check if existing roots are still valid (root cell still has that color)
-      for (const colorStr of Object.keys(newRoots)) {
-        const color = parseInt(colorStr, 10);
-        const root = newRoots[colorStr];
-        if (root && grid.colors[root.row]?.[root.col] !== color) {
-          // Root's cell no longer has this color - find a new cell with this color
-          let foundNew = false;
-          for (let r = 0; r < grid.height && !foundNew; r++) {
-            for (let c = 0; c < grid.width && !foundNew; c++) {
-              if (grid.colors[r][c] === color) {
-                newRoots[colorStr] = { row: r, col: c };
-                foundNew = true;
-                changed = true;
-              }
+    // Add roots for colors that are used but don't have a root yet
+    for (const color of usedColors) {
+      if (!newRoots[String(color)]) {
+        // Find first cell with this color
+        for (let r = 0; r < gridHeight; r++) {
+          for (let c = 0; c < gridWidth; c++) {
+            if (gridColors[r][c] === color) {
+              newRoots[String(color)] = { row: r, col: c };
+              changed = true;
+              break;
             }
           }
-          if (!foundNew) {
-            // No cells with this color exist - remove root
-            delete newRoots[colorStr];
-            changed = true;
-          }
+          if (newRoots[String(color)]) break;
         }
       }
+    }
 
-      // Add roots for colors that are used but don't have a root yet
-      for (const color of usedColors) {
-        if (!newRoots[String(color)]) {
-          // Find first cell with this color
-          for (let r = 0; r < grid.height; r++) {
-            for (let c = 0; c < grid.width; c++) {
-              if (grid.colors[r][c] === color) {
-                newRoots[String(color)] = { row: r, col: c };
-                changed = true;
-                break;
-              }
-            }
-            if (newRoots[String(color)]) break;
-          }
-        }
-      }
-
-      return changed ? newRoots : prevRoots;
-    });
-  }, [grid.colors, grid.width, grid.height]);
+    return changed ? newRoots : currentRoots;
+  }, []);
 
   // Unified cell click handler - behavior depends on current tool
   const handleCellClick = useCallback(
@@ -213,7 +210,10 @@ function App() {
         setGrid((prev) => {
           const newColors = prev.colors.map((r) => [...r]);
           newColors[row][col] = selectedColor;
-          return { ...prev, colors: newColors };
+          const newGrid = { ...prev, colors: newColors };
+          // Update roots after grid state is set
+          setColorRoots((prevRoots) => updateRootsForGrid(newGrid.colors, newGrid.width, newGrid.height, prevRoots));
+          return newGrid;
         });
         setSolutionStatus("none"); // Hide "Solution found!" on edit
       } else if (editingTool === "roots") {
@@ -236,7 +236,7 @@ function App() {
         setDistanceInput(existingDistance ? existingDistance.toString() : "");
       }
     },
-    [editingTool, selectedColor, grid.colors, pathlengthConstraints]
+    [editingTool, selectedColor, grid.colors, pathlengthConstraints, updateRootsForGrid]
   );
 
   // Cell drag is only for colors tool
@@ -246,12 +246,15 @@ function App() {
         setGrid((prev) => {
           const newColors = prev.colors.map((r) => [...r]);
           newColors[row][col] = selectedColor;
-          return { ...prev, colors: newColors };
+          const newGrid = { ...prev, colors: newColors };
+          // Update roots after grid state is set
+          setColorRoots((prevRoots) => updateRootsForGrid(newGrid.colors, newGrid.width, newGrid.height, prevRoots));
+          return newGrid;
         });
         setSolutionStatus("none"); // Hide "Solution found!" on edit
       }
     },
-    [editingTool, selectedColor]
+    [editingTool, selectedColor, updateRootsForGrid]
   );
 
   // Handle distance input submission
@@ -326,9 +329,12 @@ function App() {
           col < prev.width ? prev.colors[row][col] : null
         )
       );
-      return { width: clampedWidth, height: prev.height, colors: newColors };
+      const newGrid = { width: clampedWidth, height: prev.height, colors: newColors };
+      // Update roots after grid resize
+      setColorRoots((prevRoots) => updateRootsForGrid(newGrid.colors, newGrid.width, newGrid.height, prevRoots));
+      return newGrid;
     });
-  }, []);
+  }, [updateRootsForGrid]);
 
   const handleHeightChange = useCallback((height: number) => {
     const clampedHeight = Math.min(Math.max(height, 2), 20);
@@ -339,9 +345,12 @@ function App() {
           row < prev.height ? prev.colors[row][col] : null
         )
       );
-      return { width: prev.width, height: clampedHeight, colors: newColors };
+      const newGrid = { width: prev.width, height: clampedHeight, colors: newColors };
+      // Update roots after grid resize
+      setColorRoots((prevRoots) => updateRootsForGrid(newGrid.colors, newGrid.width, newGrid.height, prevRoots));
+      return newGrid;
     });
-  }, []);
+  }, [updateRootsForGrid]);
 
   const handleSolve = useCallback(() => {
     // Terminate any existing worker
@@ -481,12 +490,14 @@ function App() {
     setGridWidth(solutionMetadata.width);
     setGridHeight(solutionMetadata.height);
     setGridType(solutionMetadata.gridType);
-    setGrid({
+    const newGrid = {
       width: solutionMetadata.width,
       height: solutionMetadata.height,
       colors: solution.assignedColors.map(row => [...row]),
-    });
-  }, [solution, solutionMetadata]);
+    };
+    setGrid(newGrid);
+    setColorRoots((prevRoots) => updateRootsForGrid(newGrid.colors, newGrid.width, newGrid.height, prevRoots));
+  }, [solution, solutionMetadata, updateRootsForGrid]);
 
   // Download sketchpad colorset as CSV
   const handleDownloadSketchpadColors = useCallback(() => {
@@ -569,16 +580,18 @@ function App() {
         )
       );
       
-      setGridWidth(clampedWidth);
-      setGridHeight(clampedHeight);
-      setGrid({
+      const newGrid = {
         width: clampedWidth,
         height: clampedHeight,
         colors: adjustedColors,
-      });
+      };
+      setGridWidth(clampedWidth);
+      setGridHeight(clampedHeight);
+      setGrid(newGrid);
+      setColorRoots((prevRoots) => updateRootsForGrid(newGrid.colors, newGrid.width, newGrid.height, prevRoots));
     };
     reader.readAsText(file);
-  }, [gridWidth]);
+  }, [gridWidth, updateRootsForGrid]);
 
   // Create a grid structure for the solution display based on solution metadata
   const solutionDisplayGrid: ColorGrid | null = solution && solutionMetadata ? {
