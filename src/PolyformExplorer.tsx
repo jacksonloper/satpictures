@@ -2009,9 +2009,6 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     return cells;
   }, [allAxialCells, cellToPlacement, width, height, isInInnerGrid]);
   
-  // Direction names for each edge
-  const edgeDirections = ['SW', 'W', 'NW', 'NE', 'E', 'SE'];
-  
   // Compute edge info for highlighted edge
   const highlightedEdgeInfo = useMemo(() => {
     if (highlightedPlacement === null || highlightedPlacement === undefined || highlightedEdge === null || highlightedEdge === undefined) {
@@ -2048,6 +2045,9 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     const neighborPlacement = cellToPlacement.get(neighborKey);
     const isInternal = neighborPlacement === highlightedPlacement;
     
+    // Direction names for each edge
+    const edgeDirections = ['SW', 'W', 'NW', 'NE', 'E', 'SE'];
+    
     return {
       cellIndex,
       edgeIndex,
@@ -2056,7 +2056,7 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
       coord2: isInternal ? { q: neighbor.q, r: neighbor.r } : null,
       direction: edgeDirections[edgeIndex],
     } as EdgeInfo;
-  }, [highlightedPlacement, highlightedEdge, placements, cellToPlacement, edgeDirections]);
+  }, [highlightedPlacement, highlightedEdge, placements, cellToPlacement]);
   
   // Notify parent of edge info changes
   const prevEdgeInfoRef = useRef<string | null>(null);
