@@ -113,17 +113,6 @@ export const MazeViewer: React.FC<MazeViewerProps> = ({
           fill="#f8f9fa"
         />
         
-        {/* Inner grid boundary (red border to show the original grid area) */}
-        <rect
-          x={offsetCol * cellSize}
-          y={offsetRow * cellSize}
-          width={width * cellSize}
-          height={height * cellSize}
-          fill="none"
-          stroke="#e74c3c"
-          strokeWidth={3}
-        />
-        
         {/* Draw walls */}
         {lineSegments.map(({ x1, y1, x2, y2, key }) => (
           <line

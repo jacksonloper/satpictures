@@ -14,3 +14,7 @@ export { generateMaze } from "./mazeGenerator";
 export type { Wall, MazeResult } from "./mazeGenerator";
 export { MazeViewer } from "./MazeViewer";
 export type { MazeViewerProps } from "./MazeViewer";
+export { generateHexMaze } from "./hexMazeGenerator";
+export type { HexWall, HexMazeResult } from "./hexMazeGenerator";
+export { HexMazeViewer } from "./HexMazeViewer";
+export type { HexMazeViewerProps } from "./HexMazeViewer";
