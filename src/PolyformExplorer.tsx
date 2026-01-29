@@ -32,6 +32,9 @@ import {
   generateHexMaze,
   HexMazeViewer,
   type HexMazeResult,
+  generateTriMaze,
+  TriMazeViewer,
+  type TriMazeResult,
 } from "./polyform-explorer";
 
 /**
@@ -83,6 +86,7 @@ export function PolyformExplorer() {
   // Maze generation state
   const [mazeResult, setMazeResult] = useState<MazeResult | null>(null);
   const [hexMazeResult, setHexMazeResult] = useState<HexMazeResult | null>(null);
+  const [triMazeResult, setTriMazeResult] = useState<TriMazeResult | null>(null);
   const mazeSvgRef = useRef<SVGSVGElement | null>(null);
   
   // Download SVG function
@@ -172,6 +176,16 @@ export function PolyformExplorer() {
     const placements = (tilingResult as HexTilingResult).placements!;
     const result = generateHexMaze(placements);
     setHexMazeResult(result);
+  }, [tilingResult, solvedPolyformType]);
+  
+  // Generate triangle maze from current solution (polyiamond)
+  const handleGenerateTriMaze = useCallback(() => {
+    if (!tilingResult?.placements || solvedPolyformType !== "polyiamond") return;
+    
+    // Cast to TriTilingResult since we checked solvedPolyformType === "polyiamond"
+    const placements = (tilingResult as TriTilingResult).placements!;
+    const result = generateTriMaze(placements);
+    setTriMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
   
   // Download maze SVG
@@ -287,6 +301,7 @@ export function PolyformExplorer() {
     setSolvedPolyformType(null);
     setMazeResult(null); // Clear maze when starting new solve
     setHexMazeResult(null); // Clear hex maze when starting new solve
+    setTriMazeResult(null); // Clear tri maze when starting new solve
     setSolving(true);
     
     // Create worker
@@ -959,6 +974,24 @@ export function PolyformExplorer() {
                       🌲 Generate Maze
                     </button>
                   )}
+                  {/* Generate Triangle Maze button - only for polyiamond */}
+                  {solvedPolyformType === "polyiamond" && (
+                    <button
+                      onClick={handleGenerateTriMaze}
+                      style={{
+                        padding: "8px 16px",
+                        backgroundColor: "#9b59b6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      🌲 Generate Maze
+                    </button>
+                  )}
                 </div>
                 
                 {/* Maze Result Display (polyomino) */}
@@ -1030,6 +1063,50 @@ export function PolyformExplorer() {
                     <div style={{ marginTop: "12px", fontSize: "14px", color: "#495057" }}>
                       <strong>{hexMazeResult.remainingWalls.length}</strong> walls remaining 
                       ({hexMazeResult.spanningTreeEdges.length} walls opened via spanning tree)
+                    </div>
+                    <button
+                      onClick={handleDownloadMazeSvg}
+                      style={{
+                        marginTop: "12px",
+                        padding: "8px 16px",
+                        backgroundColor: "#9b59b6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                      }}
+                    >
+                      💾 Save Maze as SVG
+                    </button>
+                  </div>
+                )}
+                
+                {/* Triangle Maze Result Display (polyiamond) */}
+                {triMazeResult && solvedPolyformType === "polyiamond" && (
+                  <div style={{ 
+                    marginTop: "24px", 
+                    padding: "16px", 
+                    backgroundColor: "#f0f8ff", 
+                    borderRadius: "8px",
+                    border: "2px solid #9b59b6",
+                  }}>
+                    <h4 style={{ marginTop: 0, marginBottom: "12px", color: "#9b59b6" }}>
+                      🌲 Generated Triangle Maze
+                    </h4>
+                    <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "12px" }}>
+                      A spanning tree connects all tile placements. One wall has been randomly opened 
+                      for each edge in the spanning tree, creating a maze.
+                    </p>
+                    <TriMazeViewer
+                      width={tilingWidth}
+                      height={tilingHeight}
+                      walls={triMazeResult.remainingWalls}
+                      svgRef={mazeSvgRef}
+                    />
+                    <div style={{ marginTop: "12px", fontSize: "14px", color: "#495057" }}>
+                      <strong>{triMazeResult.remainingWalls.length}</strong> walls remaining 
+                      ({triMazeResult.spanningTreeEdges.length} walls opened via spanning tree)
                     </div>
                     <button
                       onClick={handleDownloadMazeSvg}

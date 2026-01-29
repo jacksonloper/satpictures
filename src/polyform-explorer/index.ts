@@ -18,3 +18,7 @@ export { generateHexMaze } from "./hexMazeGenerator";
 export type { HexWall, HexMazeResult } from "./hexMazeGenerator";
 export { HexMazeViewer } from "./HexMazeViewer";
 export type { HexMazeViewerProps } from "./HexMazeViewer";
+export { generateTriMaze } from "./triMazeGenerator";
+export type { TriWall, TriMazeResult } from "./triMazeGenerator";
+export { TriMazeViewer } from "./TriMazeViewer";
+export type { TriMazeViewerProps } from "./TriMazeViewer";
