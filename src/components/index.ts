@@ -1,4 +1,6 @@
-export { ColorPalette, Controls, Grid, COLORS, HATCH_COLOR } from "./Grid";
+export { Grid, COLORS, HATCH_COLOR } from "./Grid";
+export { ColorPalette } from "./ColorPalette";
+export { Controls } from "./Controls";
 export { PathlengthConstraintEditor } from "./PathlengthConstraintEditor";
 export { SketchpadGrid } from "./SketchpadGrid";
 export { SolutionGrid } from "./SolutionGrid";
