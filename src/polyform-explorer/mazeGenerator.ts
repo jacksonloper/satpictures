@@ -122,7 +122,7 @@ function findAllBoundaryWalls(placements: Placement[]): Wall[] {
   const walls: Wall[] = [];
   const directions: Array<"top" | "bottom" | "left" | "right"> = ["top", "bottom", "left", "right"];
   
-  for (const p of placements) {
+  placements.forEach((p, pIndex) => {
     for (const cell of p.cells) {
       for (const dir of directions) {
         const neighbor = getNeighbor(cell, dir);
@@ -130,7 +130,7 @@ function findAllBoundaryWalls(placements: Placement[]): Wall[] {
         const neighborPlacement = cellToPlacement.get(neighborKey);
         
         // Wall exists if neighbor is outside (undefined) or belongs to a different placement
-        if (neighborPlacement === undefined || neighborPlacement !== cellToPlacement.get(`${cell.row},${cell.col}`)) {
+        if (neighborPlacement === undefined || neighborPlacement !== pIndex) {
           walls.push({
             cell1: cell,
             direction: dir,
@@ -138,7 +138,7 @@ function findAllBoundaryWalls(placements: Placement[]): Wall[] {
         }
       }
     }
-  }
+  });
   
   return walls;
 }
@@ -194,7 +194,11 @@ function shuffleArray<T>(array: T[]): T[] {
 }
 
 /**
- * Generate a random spanning tree using Kruskal's algorithm
+ * Generate a random spanning tree using Kruskal's algorithm.
+ * 
+ * Note: If the placement graph is disconnected (rare in valid tilings),
+ * this will return a spanning forest instead of a spanning tree.
+ * In that case, the resulting maze will have isolated regions.
  */
 function generateSpanningTree(numNodes: number, edges: AdjacencyEdge[]): AdjacencyEdge[] {
   if (numNodes <= 1) return [];
