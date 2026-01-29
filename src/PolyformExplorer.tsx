@@ -368,6 +368,15 @@ export function PolyformExplorer() {
   
   // Debugging state
   const [highlightedPlacement, setHighlightedPlacement] = useState<number | null>(null);
+  const [highlightedEdge, setHighlightedEdge] = useState<number | null>(null);
+  const [edgeInfo, setEdgeInfo] = useState<{
+    cellIndex: number;
+    edgeIndex: number;
+    isInternal: boolean;
+    coord1: { q: number; r: number };
+    coord2: { q: number; r: number } | null;
+    direction: string;
+  } | null>(null);
   const [coordsJsonInput, setCoordsJsonInput] = useState("");
   
   // Download SVG function
@@ -485,6 +494,7 @@ export function PolyformExplorer() {
   // Highlight navigation
   const handlePrevPlacement = useCallback(() => {
     if (!tilingResult?.placements?.length) return;
+    setHighlightedEdge(null); // Clear edge when changing placement
     setHighlightedPlacement(prev => {
       if (prev === null) return tilingResult.placements!.length - 1;
       return (prev - 1 + tilingResult.placements!.length) % tilingResult.placements!.length;
@@ -493,6 +503,7 @@ export function PolyformExplorer() {
   
   const handleNextPlacement = useCallback(() => {
     if (!tilingResult?.placements?.length) return;
+    setHighlightedEdge(null); // Clear edge when changing placement
     setHighlightedPlacement(prev => {
       if (prev === null) return 0;
       return (prev + 1) % tilingResult.placements!.length;
@@ -501,6 +512,32 @@ export function PolyformExplorer() {
   
   const handleClearHighlight = useCallback(() => {
     setHighlightedPlacement(null);
+    setHighlightedEdge(null);
+  }, []);
+  
+  // Edge cycling handlers (only available when placement is highlighted)
+  const handlePrevEdge = useCallback(() => {
+    if (highlightedPlacement === null || !tilingResult?.placements?.[highlightedPlacement]) return;
+    const numCells = tilingResult.placements[highlightedPlacement].cells.length;
+    const totalEdges = numCells * 6; // 6 edges per hex cell
+    setHighlightedEdge(prev => {
+      if (prev === null) return totalEdges - 1;
+      return (prev - 1 + totalEdges) % totalEdges;
+    });
+  }, [highlightedPlacement, tilingResult]);
+  
+  const handleNextEdge = useCallback(() => {
+    if (highlightedPlacement === null || !tilingResult?.placements?.[highlightedPlacement]) return;
+    const numCells = tilingResult.placements[highlightedPlacement].cells.length;
+    const totalEdges = numCells * 6; // 6 edges per hex cell
+    setHighlightedEdge(prev => {
+      if (prev === null) return 0;
+      return (prev + 1) % totalEdges;
+    });
+  }, [highlightedPlacement, tilingResult]);
+  
+  const handleClearEdge = useCallback(() => {
+    setHighlightedEdge(null);
   }, []);
   
   // Cleanup worker on unmount
@@ -1133,6 +1170,8 @@ export function PolyformExplorer() {
                     placements={(tilingResult as HexTilingResult).placements || []}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
+                    highlightedEdge={highlightedEdge}
+                    onEdgeInfo={setEdgeInfo}
                   />
                 ) : (
                   <TilingViewer
@@ -1197,6 +1236,93 @@ export function PolyformExplorer() {
                     </span>
                   )}
                 </div>
+                
+                {/* Edge debugging controls (only for polyhex when placement is highlighted) */}
+                {solvedPolyformType === "polyhex" && highlightedPlacement !== null && tilingResult.placements && (
+                  <div style={{ 
+                    marginTop: "12px", 
+                    padding: "12px", 
+                    backgroundColor: "#f8f9fa", 
+                    borderRadius: "4px",
+                    border: "1px solid #dee2e6"
+                  }}>
+                    <div style={{ marginBottom: "8px", fontWeight: "bold", fontSize: "14px" }}>
+                      🔍 Edge Debugging
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        onClick={handlePrevEdge}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#28a745",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                        }}
+                      >
+                        ◀ Prev Edge
+                      </button>
+                      <button
+                        onClick={handleNextEdge}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#28a745",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                        }}
+                      >
+                        Next Edge ▶
+                      </button>
+                      <button
+                        onClick={handleClearEdge}
+                        disabled={highlightedEdge === null}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: highlightedEdge !== null ? "#6c757d" : "#adb5bd",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: highlightedEdge !== null ? "pointer" : "not-allowed",
+                          fontSize: "12px",
+                        }}
+                      >
+                        Clear Edge
+                      </button>
+                      {highlightedEdge !== null && (
+                        <span style={{ fontSize: "12px", color: "#495057" }}>
+                          Edge <strong>{highlightedEdge + 1}</strong> of {tilingResult.placements[highlightedPlacement].cells.length * 6}
+                        </span>
+                      )}
+                    </div>
+                    {edgeInfo && (
+                      <div style={{ 
+                        marginTop: "8px", 
+                        padding: "8px", 
+                        backgroundColor: edgeInfo.isInternal ? "#d4edda" : "#f8d7da",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        fontFamily: "monospace"
+                      }}>
+                        <div>
+                          <strong>Edge Type:</strong> {edgeInfo.isInternal ? "🔗 INTERNAL" : "🚧 EXTERNAL"} (direction: {edgeInfo.direction})
+                        </div>
+                        <div>
+                          <strong>Cell:</strong> ({edgeInfo.coord1.q}, {edgeInfo.coord1.r}) [cell #{edgeInfo.cellIndex + 1}, edge #{edgeInfo.edgeIndex}]
+                        </div>
+                        {edgeInfo.isInternal && edgeInfo.coord2 && (
+                          <div>
+                            <strong>Connects to:</strong> ({edgeInfo.coord2.q}, {edgeInfo.coord2.r})
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 {/* Download buttons */}
                 <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
@@ -1673,6 +1799,18 @@ interface HexTilingViewerProps {
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
   highlightedPlacement?: number | null;
+  highlightedEdge?: number | null;
+  onEdgeInfo?: (info: EdgeInfo | null) => void;
+}
+
+// Info about a highlighted edge
+interface EdgeInfo {
+  cellIndex: number;
+  edgeIndex: number;
+  isInternal: boolean;
+  coord1: { q: number; r: number };
+  coord2: { q: number; r: number } | null;  // null if external
+  direction: string;
 }
 
 const HexTilingViewer: React.FC<HexTilingViewerProps> = ({ 
@@ -1681,7 +1819,9 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   placements, 
   cellSize = 30,
   svgRef,
-  highlightedPlacement 
+  highlightedPlacement,
+  highlightedEdge,
+  onEdgeInfo 
 }) => {
   // Hex geometry for POINTY-TOP orientation
   // Using standard axial → pixel conversion:
@@ -1849,6 +1989,85 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     
     return cells;
   }, [allAxialCells, cellToPlacement, width, height, isInInnerGrid]);
+  
+  // Direction names for each edge
+  const edgeDirections = ['SW', 'W', 'NW', 'NE', 'E', 'SE'];
+  
+  // Compute edge info for highlighted edge
+  const highlightedEdgeInfo = useMemo(() => {
+    if (highlightedPlacement === null || highlightedPlacement === undefined || highlightedEdge === null || highlightedEdge === undefined) {
+      return null;
+    }
+    
+    const placement = placements[highlightedPlacement];
+    if (!placement) return null;
+    
+    const numCells = placement.cells.length;
+    if (numCells === 0) return null;
+    
+    const cellIndex = Math.floor(highlightedEdge / 6);
+    const edgeIndex = highlightedEdge % 6;
+    
+    if (cellIndex >= numCells) return null;
+    
+    const cell = placement.cells[cellIndex];
+    const neighbors = [
+      { q: cell.q + 1, r: cell.r - 1, edgeIndex: 3, direction: 'NE' },
+      { q: cell.q + 1, r: cell.r, edgeIndex: 4, direction: 'E' },
+      { q: cell.q, r: cell.r + 1, edgeIndex: 5, direction: 'SE' },
+      { q: cell.q - 1, r: cell.r + 1, edgeIndex: 0, direction: 'SW' },
+      { q: cell.q - 1, r: cell.r, edgeIndex: 1, direction: 'W' },
+      { q: cell.q, r: cell.r - 1, edgeIndex: 2, direction: 'NW' },
+    ];
+    
+    // Find which neighbor corresponds to this edge
+    const neighbor = neighbors.find(n => n.edgeIndex === edgeIndex);
+    if (!neighbor) return null;
+    
+    // Check if neighbor cell is in same placement
+    const neighborKey = `${neighbor.q},${neighbor.r}`;
+    const neighborPlacement = cellToPlacement.get(neighborKey);
+    const isInternal = neighborPlacement === highlightedPlacement;
+    
+    return {
+      cellIndex,
+      edgeIndex,
+      isInternal,
+      coord1: { q: cell.q, r: cell.r },
+      coord2: isInternal ? { q: neighbor.q, r: neighbor.r } : null,
+      direction: edgeDirections[edgeIndex],
+    } as EdgeInfo;
+  }, [highlightedPlacement, highlightedEdge, placements, cellToPlacement, edgeDirections]);
+  
+  // Notify parent of edge info changes
+  const prevEdgeInfoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (onEdgeInfo) {
+      const infoStr = JSON.stringify(highlightedEdgeInfo);
+      if (prevEdgeInfoRef.current !== infoStr) {
+        prevEdgeInfoRef.current = infoStr;
+        onEdgeInfo(highlightedEdgeInfo);
+      }
+    }
+  }, [highlightedEdgeInfo, onEdgeInfo]);
+  
+  // Calculate highlighted edge geometry
+  const highlightedEdgeGeometry = useMemo(() => {
+    if (!highlightedEdgeInfo || highlightedPlacement === null || highlightedPlacement === undefined) return null;
+    
+    const placement = placements[highlightedPlacement];
+    if (!placement) return null;
+    
+    const cell = placement.cells[highlightedEdgeInfo.cellIndex];
+    if (!cell) return null;
+    
+    const { cx, cy } = getHexCenter(cell.q, cell.r);
+    const vertices = getHexVertices(cx, cy);
+    const v1 = vertices[highlightedEdgeInfo.edgeIndex];
+    const v2 = vertices[(highlightedEdgeInfo.edgeIndex + 1) % 6];
+    
+    return { x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y };
+  }, [highlightedEdgeInfo, highlightedPlacement, placements, getHexCenter, getHexVertices]);
   
   return (
     <div style={{ 
@@ -2028,6 +2247,18 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
             />
           ));
         })()}
+        
+        {/* Layer 5: Highlighted edge (bright cyan, thick) */}
+        {highlightedEdgeGeometry && (
+          <line
+            x1={highlightedEdgeGeometry.x1}
+            y1={highlightedEdgeGeometry.y1}
+            x2={highlightedEdgeGeometry.x2}
+            y2={highlightedEdgeGeometry.y2}
+            stroke="#00ffff"
+            strokeWidth={4}
+          />
+        )}
       </svg>
     </div>
   );
