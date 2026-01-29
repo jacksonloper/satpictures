@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "./App.css";
 import type { TilingResult, Placement } from "./problem/polyomino-tiling";
+import type { HexTilingResult, HexPlacement } from "./problem/polyhex-tiling";
 
 /** Polyform type - determines the grid geometry */
 type PolyformType = "polyomino" | "polyhex" | "polyiamond";
@@ -358,11 +359,26 @@ export function PolyformExplorer() {
   const [tilingWidthError, setTilingWidthError] = useState(false);
   const [tilingHeightError, setTilingHeightError] = useState(false);
   const [solving, setSolving] = useState(false);
-  const [tilingResult, setTilingResult] = useState<TilingResult | null>(null);
+  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | null>(null);
   const [tilingError, setTilingError] = useState<string | null>(null);
   const [tilingStats, setTilingStats] = useState<{ numVars: number; numClauses: number } | null>(null);
+  const [solvedPolyformType, setSolvedPolyformType] = useState<PolyformType | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const tilingSvgRef = useRef<SVGSVGElement | null>(null);
+  
+  // Debugging state
+  const [highlightedPlacement, setHighlightedPlacement] = useState<number | null>(null);
+  const [highlightedEdge, setHighlightedEdge] = useState<number | null>(null);
+  const [edgeInfo, setEdgeInfo] = useState<{
+    cellIndex: number;
+    edgeIndex: number;
+    isInternal: boolean;
+    coord1: { q: number; r: number };
+    coord2: { q: number; r: number } | null;
+    direction: string;
+  } | null>(null);
+  const [coordsJsonInput, setCoordsJsonInput] = useState("");
+  const [hideFills, setHideFills] = useState(false);
   
   // Download SVG function
   const handleDownloadSvg = useCallback(() => {
@@ -382,6 +398,148 @@ export function PolyformExplorer() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }, [tilingWidth, tilingHeight]);
+  
+  // Export tile coordinates as JSON
+  const handleExportTileCoords = useCallback(() => {
+    const coords: Array<{ row: number; col: number }> = [];
+    for (let row = 0; row < cells.length; row++) {
+      for (let col = 0; col < cells[row].length; col++) {
+        if (cells[row][col]) {
+          coords.push({ row, col });
+        }
+      }
+    }
+    const json = JSON.stringify(coords, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+      alert(`Copied ${coords.length} coordinates to clipboard!`);
+    }).catch(() => {
+      // Fallback: show in a prompt
+      prompt("Copy these coordinates:", json);
+    });
+  }, [cells]);
+  
+  // Import tile coordinates from JSON
+  const handleImportTileCoords = useCallback(() => {
+    try {
+      const coords = JSON.parse(coordsJsonInput) as Array<{ row: number; col: number }>;
+      if (!Array.isArray(coords)) {
+        alert("Invalid JSON: expected an array of {row, col} objects");
+        return;
+      }
+      
+      // Find bounds
+      let maxRow = 0, maxCol = 0;
+      for (const { row, col } of coords) {
+        if (typeof row !== "number" || typeof col !== "number") {
+          alert("Invalid JSON: each item must have numeric 'row' and 'col' properties");
+          return;
+        }
+        maxRow = Math.max(maxRow, row);
+        maxCol = Math.max(maxCol, col);
+      }
+      
+      // Create new grid
+      const newWidth = Math.max(maxCol + 1, 3);
+      const newHeight = Math.max(maxRow + 1, 3);
+      const newCells = createEmptyGrid(newWidth, newHeight);
+      
+      for (const { row, col } of coords) {
+        if (row >= 0 && row < newHeight && col >= 0 && col < newWidth) {
+          newCells[row][col] = true;
+        }
+      }
+      
+      setGridWidth(newWidth);
+      setGridHeight(newHeight);
+      setWidthInput(String(newWidth));
+      setHeightInput(String(newHeight));
+      setCells(newCells);
+      setCoordsJsonInput("");
+      alert(`Imported ${coords.length} coordinates`);
+    } catch (e) {
+      alert(`Failed to parse JSON: ${e}`);
+    }
+  }, [coordsJsonInput]);
+  
+  // Download placements as JSON
+  const handleDownloadPlacementsJson = useCallback(() => {
+    if (!tilingResult || !tilingResult.placements) return;
+    
+    const data = {
+      gridWidth: tilingWidth,
+      gridHeight: tilingHeight,
+      polyformType: solvedPolyformType,
+      numPlacements: tilingResult.placements.length,
+      placements: tilingResult.placements.map((p, i) => ({
+        index: i,
+        id: p.id,
+        transformIndex: p.transformIndex,
+        cells: p.cells,
+        ...(("offset" in p) ? { offset: p.offset } : {}),
+      })),
+    };
+    
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `placements-${tilingWidth}x${tilingHeight}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [tilingResult, tilingWidth, tilingHeight, solvedPolyformType]);
+  
+  // Highlight navigation
+  const handlePrevPlacement = useCallback(() => {
+    if (!tilingResult?.placements?.length) return;
+    setHighlightedEdge(null); // Clear edge when changing placement
+    setHighlightedPlacement(prev => {
+      if (prev === null) return tilingResult.placements!.length - 1;
+      return (prev - 1 + tilingResult.placements!.length) % tilingResult.placements!.length;
+    });
+  }, [tilingResult]);
+  
+  const handleNextPlacement = useCallback(() => {
+    if (!tilingResult?.placements?.length) return;
+    setHighlightedEdge(null); // Clear edge when changing placement
+    setHighlightedPlacement(prev => {
+      if (prev === null) return 0;
+      return (prev + 1) % tilingResult.placements!.length;
+    });
+  }, [tilingResult]);
+  
+  const handleClearHighlight = useCallback(() => {
+    setHighlightedPlacement(null);
+    setHighlightedEdge(null);
+  }, []);
+  
+  // Edge cycling handlers (only available when placement is highlighted)
+  const handlePrevEdge = useCallback(() => {
+    if (highlightedPlacement === null || !tilingResult?.placements?.[highlightedPlacement]) return;
+    const numCells = tilingResult.placements[highlightedPlacement].cells.length;
+    const totalEdges = numCells * 6; // 6 edges per hex cell
+    setHighlightedEdge(prev => {
+      if (prev === null) return totalEdges - 1;
+      return (prev - 1 + totalEdges) % totalEdges;
+    });
+  }, [highlightedPlacement, tilingResult]);
+  
+  const handleNextEdge = useCallback(() => {
+    if (highlightedPlacement === null || !tilingResult?.placements?.[highlightedPlacement]) return;
+    const numCells = tilingResult.placements[highlightedPlacement].cells.length;
+    const totalEdges = numCells * 6; // 6 edges per hex cell
+    setHighlightedEdge(prev => {
+      if (prev === null) return 0;
+      return (prev + 1) % totalEdges;
+    });
+  }, [highlightedPlacement, tilingResult]);
+  
+  const handleClearEdge = useCallback(() => {
+    setHighlightedEdge(null);
+  }, []);
   
   // Cleanup worker on unmount
   useEffect(() => {
@@ -416,9 +574,9 @@ export function PolyformExplorer() {
   
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
-    // Only support polyomino for now
-    if (polyformType !== "polyomino") {
-      setTilingError("Tiling solver currently only supports polyomino (square) tiles.");
+    // Support polyomino and polyhex
+    if (polyformType !== "polyomino" && polyformType !== "polyhex") {
+      setTilingError("Tiling solver currently only supports polyomino (square) and polyhex (hexagon) tiles.");
       return;
     }
     
@@ -433,6 +591,7 @@ export function PolyformExplorer() {
     setTilingResult(null);
     setTilingError(null);
     setTilingStats(null);
+    setSolvedPolyformType(null);
     setSolving(true);
     
     // Create worker
@@ -451,6 +610,7 @@ export function PolyformExplorer() {
         setSolving(false);
         if (response.success) {
           setTilingResult(response.result);
+          setSolvedPolyformType(response.polyformType || "polyomino");
         } else {
           setTilingError(response.error || "Unknown error");
         }
@@ -466,11 +626,12 @@ export function PolyformExplorer() {
       workerRef.current = null;
     };
     
-    // Send request
+    // Send request with polyform type
     worker.postMessage({
       cells,
       tilingWidth,
       tilingHeight,
+      polyformType,
     });
   }, [cells, tilingWidth, tilingHeight, polyformType]);
   
@@ -786,6 +947,52 @@ export function PolyformExplorer() {
           >
             Clear
           </button>
+          <button
+            onClick={handleExportTileCoords}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#17a2b8",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+            title="Copy tile coordinates as JSON"
+          >
+            📋 Copy JSON
+          </button>
+        </div>
+        
+        {/* JSON Import */}
+        <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            value={coordsJsonInput}
+            onChange={(e) => setCoordsJsonInput(e.target.value)}
+            placeholder='Paste JSON coords: [{"row":0,"col":0},...]'
+            style={{
+              padding: "6px 10px",
+              borderRadius: "4px",
+              border: "1px solid #bdc3c7",
+              width: "300px",
+              fontSize: "12px",
+            }}
+          />
+          <button
+            onClick={handleImportTileCoords}
+            disabled={!coordsJsonInput.trim()}
+            style={{
+              padding: "6px 12px",
+              backgroundColor: coordsJsonInput.trim() ? "#28a745" : "#95a5a6",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: coordsJsonInput.trim() ? "pointer" : "not-allowed",
+              fontSize: "12px",
+            }}
+          >
+            📥 Import JSON
+          </button>
         </div>
         
         {/* Stats */}
@@ -833,9 +1040,9 @@ export function PolyformExplorer() {
         <h3 style={{ marginTop: 0, marginBottom: "12px" }}>🧩 Tiling Solver</h3>
         <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "16px" }}>
           Try to tile a grid of the specified size using rotations, translations, and flips of your polyform.
-          {polyformType !== "polyomino" && (
+          {polyformType === "polyiamond" && (
             <span style={{ color: "#e74c3c", display: "block", marginTop: "8px" }}>
-              ⚠️ Currently only polyomino (square) tiling is supported.
+              ⚠️ Polyiamond (triangle) tiling is not yet supported.
             </span>
           )}
         </p>
@@ -896,14 +1103,14 @@ export function PolyformExplorer() {
           </div>
           <button
             onClick={handleSolveTiling}
-            disabled={solving || polyformType !== "polyomino"}
+            disabled={solving || polyformType === "polyiamond"}
             style={{
               padding: "8px 20px",
               backgroundColor: solving ? "#95a5a6" : "#27ae60",
               color: "white",
               border: "none",
               borderRadius: "4px",
-              cursor: solving || polyformType !== "polyomino" ? "not-allowed" : "pointer",
+              cursor: solving || polyformType === "polyiamond" ? "not-allowed" : "pointer",
               fontWeight: "bold",
             }}
           >
@@ -957,27 +1164,214 @@ export function PolyformExplorer() {
                     ({tilingResult.stats.numPlacements.toLocaleString()} total possible placements, {tilingResult.stats.numVariables.toLocaleString()} vars, {tilingResult.stats.numClauses.toLocaleString()} clauses)
                   </span>
                 </div>
-                <TilingViewer
-                  width={tilingWidth}
-                  height={tilingHeight}
-                  placements={tilingResult.placements || []}
-                  svgRef={tilingSvgRef}
-                />
-                <button
-                  onClick={handleDownloadSvg}
-                  style={{
-                    marginTop: "12px",
-                    padding: "8px 16px",
-                    backgroundColor: "#6c757d",
-                    color: "white",
-                    border: "none",
+                {solvedPolyformType === "polyhex" ? (
+                  <HexTilingViewer
+                    width={tilingWidth}
+                    height={tilingHeight}
+                    placements={(tilingResult as HexTilingResult).placements || []}
+                    svgRef={tilingSvgRef}
+                    highlightedPlacement={highlightedPlacement}
+                    highlightedEdge={highlightedEdge}
+                    onEdgeInfo={setEdgeInfo}
+                    hideFills={hideFills}
+                  />
+                ) : (
+                  <TilingViewer
+                    width={tilingWidth}
+                    height={tilingHeight}
+                    placements={(tilingResult as TilingResult).placements || []}
+                    svgRef={tilingSvgRef}
+                    highlightedPlacement={highlightedPlacement}
+                  />
+                )}
+                
+                {/* Highlight controls */}
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    onClick={handlePrevPlacement}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#007bff",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    ◀ Prev
+                  </button>
+                  <button
+                    onClick={handleNextPlacement}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#007bff",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Next ▶
+                  </button>
+                  <button
+                    onClick={handleClearHighlight}
+                    disabled={highlightedPlacement === null}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: highlightedPlacement !== null ? "#6c757d" : "#adb5bd",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: highlightedPlacement !== null ? "pointer" : "not-allowed",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Clear Highlight
+                  </button>
+                  {highlightedPlacement !== null && tilingResult.placements && (
+                    <span style={{ fontSize: "14px", color: "#495057" }}>
+                      Placement <strong>{highlightedPlacement + 1}</strong> of {tilingResult.placements.length}
+                      {" | "}
+                      Transform: <strong>{tilingResult.placements[highlightedPlacement].transformIndex}</strong>
+                    </span>
+                  )}
+                </div>
+                
+                {/* Hide fills checkbox (only for polyhex) */}
+                {solvedPolyformType === "polyhex" && (
+                  <div style={{ marginTop: "12px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "14px" }}>
+                      <input
+                        type="checkbox"
+                        checked={hideFills}
+                        onChange={(e) => setHideFills(e.target.checked)}
+                        style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                      />
+                      Hide filled hexes (show edges only)
+                    </label>
+                  </div>
+                )}
+                
+                {/* Edge debugging controls (only for polyhex when placement is highlighted) */}
+                {solvedPolyformType === "polyhex" && highlightedPlacement !== null && tilingResult.placements && (
+                  <div style={{ 
+                    marginTop: "12px", 
+                    padding: "12px", 
+                    backgroundColor: "#f8f9fa", 
                     borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  💾 Save as SVG
-                </button>
+                    border: "1px solid #dee2e6"
+                  }}>
+                    <div style={{ marginBottom: "8px", fontWeight: "bold", fontSize: "14px" }}>
+                      🔍 Edge Debugging
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        onClick={handlePrevEdge}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#28a745",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                        }}
+                      >
+                        ◀ Prev Edge
+                      </button>
+                      <button
+                        onClick={handleNextEdge}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#28a745",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                        }}
+                      >
+                        Next Edge ▶
+                      </button>
+                      <button
+                        onClick={handleClearEdge}
+                        disabled={highlightedEdge === null}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: highlightedEdge !== null ? "#6c757d" : "#adb5bd",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          cursor: highlightedEdge !== null ? "pointer" : "not-allowed",
+                          fontSize: "12px",
+                        }}
+                      >
+                        Clear Edge
+                      </button>
+                      {highlightedEdge !== null && (
+                        <span style={{ fontSize: "12px", color: "#495057" }}>
+                          Edge <strong>{highlightedEdge + 1}</strong> of {tilingResult.placements[highlightedPlacement].cells.length * 6}
+                        </span>
+                      )}
+                    </div>
+                    {edgeInfo && (
+                      <div style={{ 
+                        marginTop: "8px", 
+                        padding: "8px", 
+                        backgroundColor: edgeInfo.isInternal ? "#d4edda" : "#f8d7da",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        fontFamily: "monospace"
+                      }}>
+                        <div>
+                          <strong>Edge Type:</strong> {edgeInfo.isInternal ? "🔗 INTERNAL" : "🚧 EXTERNAL"} (direction: {edgeInfo.direction})
+                        </div>
+                        <div>
+                          <strong>Cell:</strong> ({edgeInfo.coord1.q}, {edgeInfo.coord1.r}) [cell #{edgeInfo.cellIndex + 1}, edge #{edgeInfo.edgeIndex}]
+                        </div>
+                        {edgeInfo.isInternal && edgeInfo.coord2 && (
+                          <div>
+                            <strong>Connects to:</strong> ({edgeInfo.coord2.q}, {edgeInfo.coord2.r})
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Download buttons */}
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={handleDownloadSvg}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#6c757d",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    💾 Save as SVG
+                  </button>
+                  <button
+                    onClick={handleDownloadPlacementsJson}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#17a2b8",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    📥 Download Placements JSON
+                  </button>
+                </div>
               </>
             ) : (
               <div style={{ 
@@ -1049,26 +1443,24 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   
-  // Hex geometry calculations:
+  // Hex geometry calculations for POINTY-TOP orientation:
   // - hexSize: radius from center to vertex (0.5 * cellSize for spacing)
-  // - hexWidth: flat-to-flat width = sqrt(3) * radius (standard hex geometry)
-  // - hexHeight: point-to-point height = 2 * radius
-  // - vertSpacing: 0.75 of height because hexes overlap vertically by 1/4
+  // - For pointy-top: hexWidth = sqrt(3) * size, hexHeight = 2 * size
+  // - Pointy-top axial → pixel: x = size * sqrt(3) * (q + r/2), y = size * 3/2 * r
   const hexSize = cellSize * 0.5;
   const hexWidth = Math.sqrt(3) * hexSize;
-  const hexHeight = 2 * hexSize;
   const horizSpacing = hexWidth;
-  const vertSpacing = hexHeight * 0.75;
+  const vertSpacing = hexSize * 1.5; // 3/2 * size for pointy-top
   
   const svgWidth = width * horizSpacing + horizSpacing / 2 + 10;
   const svgHeight = height * vertSpacing + hexSize + 10;
   
-  // Create hexagon path - 6 vertices at 60° (PI/3) intervals
-  // Starting offset of -PI/6 (-30°) creates a flat-top orientation
+  // Create hexagon path - POINTY-TOP orientation
+  // Starting at angle PI/2 (90°) creates pointy-top orientation
   const createHexPath = (cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
       const x = cx + hexSize * Math.cos(angle);
       const y = cy + hexSize * Math.sin(angle);
       points.push(`${x},${y}`);
@@ -1084,7 +1476,7 @@ const HexGrid: React.FC<HexGridProps> = ({ cells, onCellClick, cellSize = 40 }) 
     >
       {cells.map((row, rowIdx) =>
         row.map((filled, colIdx) => {
-          // Odd-r offset: odd rows are shifted right by half a hex width
+          // Odd-r offset for pointy-top: odd rows are shifted right by half a hex width
           const isOddRow = rowIdx % 2 === 1;
           const cx = colIdx * horizSpacing + horizSpacing / 2 + (isOddRow ? horizSpacing / 2 : 0) + 5;
           const cy = rowIdx * vertSpacing + hexSize + 5;
@@ -1179,12 +1571,18 @@ interface TilingViewerProps {
   placements: Placement[];
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  highlightedPlacement?: number | null;
 }
 
 // Generate a set of distinct colors for the placements
-function getPlacementColor(index: number): string {
+function getPlacementColor(index: number, highlighted?: number | null): string {
   // Use HSL for evenly distributed colors
   const hue = (index * 137.508) % 360; // Golden angle approximation
+  const isHighlighted = highlighted === index;
+  if (highlighted !== null && highlighted !== undefined && !isHighlighted) {
+    // Dim non-highlighted placements
+    return `hsl(${hue}, 30%, 80%)`;
+  }
   return `hsl(${hue}, 70%, 60%)`;
 }
 
@@ -1193,7 +1591,8 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
   height, 
   placements, 
   cellSize = 30,
-  svgRef 
+  svgRef,
+  highlightedPlacement 
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -1259,7 +1658,7 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             // Determine fill color
             let fill: string;
             if (placementIndex !== undefined) {
-              fill = getPlacementColor(placementIndex);
+              fill = getPlacementColor(placementIndex, highlightedPlacement);
             } else if (isInnerGrid) {
               fill = "#ecf0f1"; // Empty inner cell (shouldn't happen in valid solution)
             } else {
@@ -1404,6 +1803,485 @@ const TilingViewer: React.FC<TilingViewerProps> = ({
             />
           ));
         })}
+      </svg>
+    </div>
+  );
+};
+
+/** HexTilingViewer - displays the solved hex tiling */
+interface HexTilingViewerProps {
+  width: number;
+  height: number;
+  placements: HexPlacement[];
+  cellSize?: number;
+  svgRef?: React.RefObject<SVGSVGElement | null>;
+  highlightedPlacement?: number | null;
+  highlightedEdge?: number | null;
+  onEdgeInfo?: (info: EdgeInfo | null) => void;
+  hideFills?: boolean;  // Hide filled hexes to see edges only
+}
+
+// Info about a highlighted edge
+interface EdgeInfo {
+  cellIndex: number;
+  edgeIndex: number;
+  isInternal: boolean;
+  coord1: { q: number; r: number };
+  coord2: { q: number; r: number } | null;  // null if external
+  direction: string;
+}
+
+const HexTilingViewer: React.FC<HexTilingViewerProps> = ({ 
+  width, 
+  height, 
+  placements, 
+  cellSize = 30,
+  svgRef,
+  highlightedPlacement,
+  highlightedEdge,
+  onEdgeInfo,
+  hideFills = false
+}) => {
+  // Hex geometry for POINTY-TOP orientation
+  // Using standard axial → pixel conversion:
+  // x = size * sqrt(3) * (q + r/2)
+  // y = size * 3/2 * r
+  const hexSize = cellSize * 0.5;
+  
+  // Build axial coordinate maps and find bounds
+  const { axialBounds, cellToPlacement, allAxialCells } = useMemo(() => {
+    // Track all axial coordinates and which placement owns them
+    const map = new Map<string, number>();
+    const cells: Array<{ placementIndex: number; q: number; r: number }> = [];
+    
+    // Find bounds in axial space
+    let minQ = 0, maxQ = width - 1;
+    let minR = 0, maxR = height - 1;
+    
+    // Add inner grid cells (convert offset bounds to axial bounds)
+    for (let r = 0; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        // Convert offset to axial: q = col - floor(row/2)
+        const q = c - Math.floor(r / 2);
+        minQ = Math.min(minQ, q);
+        maxQ = Math.max(maxQ, q);
+      }
+    }
+    
+    // Process placements - these are already in axial coordinates
+    placements.forEach((p, index) => {
+      for (const cell of p.cells) {
+        const key = `${cell.q},${cell.r}`;
+        map.set(key, index);
+        cells.push({ placementIndex: index, q: cell.q, r: cell.r });
+        minQ = Math.min(minQ, cell.q);
+        maxQ = Math.max(maxQ, cell.q);
+        minR = Math.min(minR, cell.r);
+        maxR = Math.max(maxR, cell.r);
+      }
+    });
+    
+    return {
+      axialBounds: { minQ, maxQ, minR, maxR },
+      cellToPlacement: map,
+      allAxialCells: cells,
+    };
+  }, [placements, width, height]);
+  
+  // Calculate pixel position from axial coordinates (pointy-top)
+  const axialToPixel = useCallback((q: number, r: number) => {
+    // Standard pointy-top conversion:
+    // x = size * sqrt(3) * (q + r/2)
+    // y = size * 3/2 * r
+    const x = hexSize * Math.sqrt(3) * (q + r / 2);
+    const y = hexSize * 1.5 * r;
+    return { x, y };
+  }, [hexSize]);
+  
+  // Calculate SVG offset to center everything with padding
+  const svgOffset = useMemo(() => {
+    const minPixel = axialToPixel(axialBounds.minQ, axialBounds.minR);
+    return {
+      x: -minPixel.x + hexSize * Math.sqrt(3) / 2 + 5,
+      y: -minPixel.y + hexSize + 5,
+    };
+  }, [axialBounds, axialToPixel, hexSize]);
+  
+  // Calculate SVG dimensions
+  const svgDimensions = useMemo(() => {
+    const minPixel = axialToPixel(axialBounds.minQ, axialBounds.minR);
+    const maxPixel = axialToPixel(axialBounds.maxQ, axialBounds.maxR);
+    return {
+      width: maxPixel.x - minPixel.x + hexSize * Math.sqrt(3) + 15,
+      height: maxPixel.y - minPixel.y + hexSize * 2 + 15,
+    };
+  }, [axialBounds, axialToPixel, hexSize]);
+  
+  // Create hexagon path for pointy-top orientation
+  const createHexPath = useCallback((cx: number, cy: number): string => {
+    const points: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      // Pointy-top: first vertex at top (90°)
+      const angle = (Math.PI / 3) * i + Math.PI / 2;
+      const x = cx + hexSize * Math.cos(angle);
+      const y = cy + hexSize * Math.sin(angle);
+      points.push(`${x},${y}`);
+    }
+    return `M ${points.join(" L ")} Z`;
+  }, [hexSize]);
+  
+  // Get hex center in SVG coordinates from axial
+  const getHexCenter = useCallback((q: number, r: number): { cx: number; cy: number } => {
+    const pixel = axialToPixel(q, r);
+    return {
+      cx: pixel.x + svgOffset.x,
+      cy: pixel.y + svgOffset.y,
+    };
+  }, [axialToPixel, svgOffset]);
+  
+  // Get hex vertices for border drawing
+  const getHexVertices = useCallback((cx: number, cy: number): Array<{ x: number; y: number }> => {
+    const vertices: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i + Math.PI / 2;
+      vertices.push({
+        x: cx + hexSize * Math.cos(angle),
+        y: cy + hexSize * Math.sin(angle),
+      });
+    }
+    return vertices;
+  }, [hexSize]);
+  
+  // Get 6 axial neighbors with edge indices for border drawing
+  // In SVG coordinates (Y increases downward), with angle starting at 90°:
+  //   v0: 90° → BOTTOM (sin(90°)=1 means +Y), v1: 150° → lower-left, v2: 210° → upper-left
+  //   v3: 270° → TOP (sin(270°)=-1 means -Y), v4: 330° → upper-right, v5: 30° → lower-right
+  // Edge i connects vertex i to vertex (i+1)%6:
+  //   edge 0: v0→v1 (faces SW), edge 1: v1→v2 (faces W), edge 2: v2→v3 (faces NW)
+  //   edge 3: v3→v4 (faces NE), edge 4: v4→v5 (faces E), edge 5: v5→v0 (faces SE)
+  const getAxialNeighbors = useCallback((q: number, r: number): Array<{ q: number; r: number; edgeIndex: number }> => {
+    return [
+      { q: q + 1, r: r - 1, edgeIndex: 3 }, // Upper-right (NE) → edge 3 (v3→v4)
+      { q: q + 1, r: r, edgeIndex: 4 },     // Right (E) → edge 4 (v4→v5)
+      { q: q, r: r + 1, edgeIndex: 5 },     // Lower-right (SE) → edge 5 (v5→v0)
+      { q: q - 1, r: r + 1, edgeIndex: 0 }, // Lower-left (SW) → edge 0 (v0→v1)
+      { q: q - 1, r: r, edgeIndex: 1 },     // Left (W) → edge 1 (v1→v2)
+      { q: q, r: r - 1, edgeIndex: 2 },     // Upper-left (NW) → edge 2 (v2→v3)
+    ];
+  }, []);
+  
+  // Check if axial coord is in inner grid (need to convert to offset and check bounds)
+  const isInInnerGrid = useCallback((q: number, r: number): boolean => {
+    // Convert axial to offset: row = r, col = q + floor(r/2)
+    const row = r;
+    const col = q + Math.floor(r / 2);
+    return row >= 0 && row < height && col >= 0 && col < width;
+  }, [width, height]);
+  
+  // Generate all cells to render
+  const allCells = useMemo(() => {
+    const cells: Array<{ q: number; r: number; placementIndex: number | undefined; isInner: boolean }> = [];
+    const seen = new Set<string>();
+    
+    // Add all placement cells
+    for (const { q, r, placementIndex } of allAxialCells) {
+      const key = `${q},${r}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        cells.push({ q, r, placementIndex, isInner: isInInnerGrid(q, r) });
+      }
+    }
+    
+    // Add empty inner grid cells
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const q = col - Math.floor(row / 2);
+        const r = row;
+        const key = `${q},${r}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const placementIndex = cellToPlacement.get(key);
+          cells.push({ q, r, placementIndex, isInner: true });
+        }
+      }
+    }
+    
+    return cells;
+  }, [allAxialCells, cellToPlacement, width, height, isInInnerGrid]);
+  
+  // Direction names for each edge
+  const edgeDirections = ['SW', 'W', 'NW', 'NE', 'E', 'SE'];
+  
+  // Compute edge info for highlighted edge
+  const highlightedEdgeInfo = useMemo(() => {
+    if (highlightedPlacement === null || highlightedPlacement === undefined || highlightedEdge === null || highlightedEdge === undefined) {
+      return null;
+    }
+    
+    const placement = placements[highlightedPlacement];
+    if (!placement) return null;
+    
+    const numCells = placement.cells.length;
+    if (numCells === 0) return null;
+    
+    const cellIndex = Math.floor(highlightedEdge / 6);
+    const edgeIndex = highlightedEdge % 6;
+    
+    if (cellIndex >= numCells) return null;
+    
+    const cell = placement.cells[cellIndex];
+    const neighbors = [
+      { q: cell.q + 1, r: cell.r - 1, edgeIndex: 3, direction: 'NE' },
+      { q: cell.q + 1, r: cell.r, edgeIndex: 4, direction: 'E' },
+      { q: cell.q, r: cell.r + 1, edgeIndex: 5, direction: 'SE' },
+      { q: cell.q - 1, r: cell.r + 1, edgeIndex: 0, direction: 'SW' },
+      { q: cell.q - 1, r: cell.r, edgeIndex: 1, direction: 'W' },
+      { q: cell.q, r: cell.r - 1, edgeIndex: 2, direction: 'NW' },
+    ];
+    
+    // Find which neighbor corresponds to this edge
+    const neighbor = neighbors.find(n => n.edgeIndex === edgeIndex);
+    if (!neighbor) return null;
+    
+    // Check if neighbor cell is in same placement
+    const neighborKey = `${neighbor.q},${neighbor.r}`;
+    const neighborPlacement = cellToPlacement.get(neighborKey);
+    const isInternal = neighborPlacement === highlightedPlacement;
+    
+    return {
+      cellIndex,
+      edgeIndex,
+      isInternal,
+      coord1: { q: cell.q, r: cell.r },
+      coord2: isInternal ? { q: neighbor.q, r: neighbor.r } : null,
+      direction: edgeDirections[edgeIndex],
+    } as EdgeInfo;
+  }, [highlightedPlacement, highlightedEdge, placements, cellToPlacement, edgeDirections]);
+  
+  // Notify parent of edge info changes
+  const prevEdgeInfoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (onEdgeInfo) {
+      const infoStr = JSON.stringify(highlightedEdgeInfo);
+      if (prevEdgeInfoRef.current !== infoStr) {
+        prevEdgeInfoRef.current = infoStr;
+        onEdgeInfo(highlightedEdgeInfo);
+      }
+    }
+  }, [highlightedEdgeInfo, onEdgeInfo]);
+  
+  // Calculate highlighted edge geometry
+  const highlightedEdgeGeometry = useMemo(() => {
+    if (!highlightedEdgeInfo || highlightedPlacement === null || highlightedPlacement === undefined) return null;
+    
+    const placement = placements[highlightedPlacement];
+    if (!placement) return null;
+    
+    const cell = placement.cells[highlightedEdgeInfo.cellIndex];
+    if (!cell) return null;
+    
+    const { cx, cy } = getHexCenter(cell.q, cell.r);
+    const vertices = getHexVertices(cx, cy);
+    const v1 = vertices[highlightedEdgeInfo.edgeIndex];
+    const v2 = vertices[(highlightedEdgeInfo.edgeIndex + 1) % 6];
+    
+    return { x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y };
+  }, [highlightedEdgeInfo, highlightedPlacement, placements, getHexCenter, getHexVertices]);
+  
+  return (
+    <div style={{ 
+      padding: "16px", 
+      backgroundColor: "white", 
+      borderRadius: "8px",
+      border: "1px solid #dee2e6",
+      display: "inline-block",
+    }}>
+      <svg
+        ref={svgRef}
+        width={svgDimensions.width}
+        height={svgDimensions.height}
+        style={{ display: "block" }}
+        role="img"
+        aria-label={`Hex tiling solution showing ${placements.length} tile placements on a ${width}×${height} grid`}
+      >
+        <title>Hex Tiling Solution Visualization</title>
+        
+        {/* Layer 1: Draw all hex cell fills (skip if hideFills is true) */}
+        {!hideFills && allCells.map(({ q, r, placementIndex, isInner }) => {
+          const { cx, cy } = getHexCenter(q, r);
+          
+          let fill: string;
+          if (placementIndex !== undefined) {
+            fill = getPlacementColor(placementIndex, highlightedPlacement);
+          } else if (isInner) {
+            fill = "#ecf0f1"; // Empty inner cell
+          } else {
+            fill = "#f8f9fa"; // Empty outer cell
+          }
+          
+          return (
+            <path
+              key={`fill-${q},${r}`}
+              d={createHexPath(cx, cy)}
+              fill={fill}
+              stroke={fill}
+              strokeWidth={0.5}
+            />
+          );
+        })}
+        
+        {/* Layer 1.5: Draw overlay on cells outside the inner grid (skip if hideFills is true) */}
+        {!hideFills && allCells
+          .filter(({ isInner }) => !isInner)
+          .map(({ q, r }) => {
+            const { cx, cy } = getHexCenter(q, r);
+            return (
+              <path
+                key={`overlay-${q},${r}`}
+                d={createHexPath(cx, cy)}
+                fill="rgba(255, 255, 255, 0.35)"
+              />
+            );
+          })}
+        
+        {/* Layer 2: Draw interior edges (thin gray lines between cells in same tile) */}
+        {/* Use edge deduplication: edge (A,B) is same as (B,A) */}
+        {(() => {
+          const seenEdges = new Set<string>();
+          const interiorEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+          
+          for (const { placementIndex, q, r } of allAxialCells) {
+            const { cx, cy } = getHexCenter(q, r);
+            const vertices = getHexVertices(cx, cy);
+            const neighbors = getAxialNeighbors(q, r);
+            
+            for (const neighbor of neighbors) {
+              const neighborKey = `${neighbor.q},${neighbor.r}`;
+              const neighborPlacement = cellToPlacement.get(neighborKey);
+              
+              if (neighborPlacement === placementIndex) {
+                // Interior edge - between two cells of same tile
+                // Normalize edge key for deduplication (sort coordinate-pair strings)
+                const a = `${q},${r}`;
+                const b = `${neighbor.q},${neighbor.r}`;
+                const edgeKey = a < b ? `${a}|${b}` : `${b}|${a}`;
+                if (!seenEdges.has(edgeKey)) {
+                  seenEdges.add(edgeKey);
+                  const v1 = vertices[neighbor.edgeIndex];
+                  const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
+                  // Shorten the line by 10% on each end for visual separation
+                  const dx = v2.x - v1.x;
+                  const dy = v2.y - v1.y;
+                  interiorEdges.push({
+                    x1: v1.x + dx * 0.1,
+                    y1: v1.y + dy * 0.1,
+                    x2: v2.x - dx * 0.1,
+                    y2: v2.y - dy * 0.1,
+                  });
+                }
+              }
+            }
+          }
+          
+          return interiorEdges.map((edge, idx) => (
+            <line
+              key={`interior-${idx}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke="#bdc3c7"
+              strokeWidth={0.5}
+            />
+          ));
+        })()}
+        
+        {/* Layer 3: Draw inner grid boundary */}
+        {allCells
+          .filter(({ isInner }) => isInner)
+          .map(({ q, r }) => {
+            const { cx, cy } = getHexCenter(q, r);
+            const vertices = getHexVertices(cx, cy);
+            const neighbors = getAxialNeighbors(q, r);
+            
+            const boundaryEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+            
+            for (const neighbor of neighbors) {
+              if (!isInInnerGrid(neighbor.q, neighbor.r)) {
+                // This edge is on the boundary
+                const v1 = vertices[neighbor.edgeIndex];
+                const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
+                boundaryEdges.push({ x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y });
+              }
+            }
+            
+            return boundaryEdges.map((edge, edgeIndex) => (
+              <line
+                key={`boundary-${q},${r}-${edgeIndex}`}
+                x1={edge.x1}
+                y1={edge.y1}
+                x2={edge.x2}
+                y2={edge.y2}
+                stroke="#e74c3c"
+                strokeWidth={3}
+              />
+            ));
+          })}
+        
+        {/* Layer 4: Draw tile boundaries (thick black lines between different tiles) */}
+        {(() => {
+          const seenEdges = new Set<string>();
+          const exteriorEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+          
+          for (const { placementIndex, q, r } of allAxialCells) {
+            const { cx, cy } = getHexCenter(q, r);
+            const vertices = getHexVertices(cx, cy);
+            const neighbors = getAxialNeighbors(q, r);
+            
+            for (const neighbor of neighbors) {
+              const neighborKey = `${neighbor.q},${neighbor.r}`;
+              const neighborPlacement = cellToPlacement.get(neighborKey);
+              
+              // Draw boundary if neighbor is different tile or empty
+              if (neighborPlacement !== placementIndex) {
+                // Normalize edge key for deduplication (sort coordinate-pair strings)
+                const a = `${q},${r}`;
+                const b = `${neighbor.q},${neighbor.r}`;
+                const edgeKey = a < b ? `${a}|${b}` : `${b}|${a}`;
+                if (!seenEdges.has(edgeKey)) {
+                  seenEdges.add(edgeKey);
+                  const v1 = vertices[neighbor.edgeIndex];
+                  const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
+                  exteriorEdges.push({ x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y });
+                }
+              }
+            }
+          }
+          
+          return exteriorEdges.map((edge, idx) => (
+            <line
+              key={`tileBoundary-${idx}`}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke="#2c3e50"
+              strokeWidth={2}
+            />
+          ));
+        })()}
+        
+        {/* Layer 5: Highlighted edge (bright cyan, thick) */}
+        {highlightedEdgeGeometry && (
+          <line
+            x1={highlightedEdgeGeometry.x1}
+            y1={highlightedEdgeGeometry.y1}
+            x2={highlightedEdgeGeometry.x2}
+            y2={highlightedEdgeGeometry.y2}
+            stroke="#00ffff"
+            strokeWidth={4}
+          />
+        )}
       </svg>
     </div>
   );
