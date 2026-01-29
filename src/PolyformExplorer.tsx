@@ -378,6 +378,7 @@ export function PolyformExplorer() {
     direction: string;
   } | null>(null);
   const [coordsJsonInput, setCoordsJsonInput] = useState("");
+  const [hideFills, setHideFills] = useState(false);
   
   // Download SVG function
   const handleDownloadSvg = useCallback(() => {
@@ -1172,6 +1173,7 @@ export function PolyformExplorer() {
                     highlightedPlacement={highlightedPlacement}
                     highlightedEdge={highlightedEdge}
                     onEdgeInfo={setEdgeInfo}
+                    hideFills={hideFills}
                   />
                 ) : (
                   <TilingViewer
@@ -1236,6 +1238,21 @@ export function PolyformExplorer() {
                     </span>
                   )}
                 </div>
+                
+                {/* Hide fills checkbox (only for polyhex) */}
+                {solvedPolyformType === "polyhex" && (
+                  <div style={{ marginTop: "12px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "14px" }}>
+                      <input
+                        type="checkbox"
+                        checked={hideFills}
+                        onChange={(e) => setHideFills(e.target.checked)}
+                        style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                      />
+                      Hide filled hexes (show edges only)
+                    </label>
+                  </div>
+                )}
                 
                 {/* Edge debugging controls (only for polyhex when placement is highlighted) */}
                 {solvedPolyformType === "polyhex" && highlightedPlacement !== null && tilingResult.placements && (
@@ -1801,6 +1818,7 @@ interface HexTilingViewerProps {
   highlightedPlacement?: number | null;
   highlightedEdge?: number | null;
   onEdgeInfo?: (info: EdgeInfo | null) => void;
+  hideFills?: boolean;  // Hide filled hexes to see edges only
 }
 
 // Info about a highlighted edge
@@ -1821,7 +1839,8 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   svgRef,
   highlightedPlacement,
   highlightedEdge,
-  onEdgeInfo 
+  onEdgeInfo,
+  hideFills = false
 }) => {
   // Hex geometry for POINTY-TOP orientation
   // Using standard axial → pixel conversion:
@@ -2087,8 +2106,8 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
       >
         <title>Hex Tiling Solution Visualization</title>
         
-        {/* Layer 1: Draw all hex cell fills */}
-        {allCells.map(({ q, r, placementIndex, isInner }) => {
+        {/* Layer 1: Draw all hex cell fills (skip if hideFills is true) */}
+        {!hideFills && allCells.map(({ q, r, placementIndex, isInner }) => {
           const { cx, cy } = getHexCenter(q, r);
           
           let fill: string;
@@ -2111,8 +2130,8 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
           );
         })}
         
-        {/* Layer 1.5: Draw overlay on cells outside the inner grid */}
-        {allCells
+        {/* Layer 1.5: Draw overlay on cells outside the inner grid (skip if hideFills is true) */}
+        {!hideFills && allCells
           .filter(({ isInner }) => !isInner)
           .map(({ q, r }) => {
             const { cx, cy } = getHexCenter(q, r);
