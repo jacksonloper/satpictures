@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "./App.css";
 import type { TilingResult } from "./problem/polyomino-tiling";
 import type { HexTilingResult } from "./problem/polyhex-tiling";
+import type { TriTilingResult } from "./problem/polyiamond-tiling";
 import {
   type PolyformType,
   createEmptyBooleanGrid,
@@ -19,6 +20,7 @@ import {
   TriangleGrid,
   TilingViewer,
   HexTilingViewer,
+  TriTilingViewer,
   downloadSvg,
   exportCellsToJson,
   parseCoordsJson,
@@ -51,7 +53,7 @@ export function PolyformExplorer() {
   const [tilingWidthError, setTilingWidthError] = useState(false);
   const [tilingHeightError, setTilingHeightError] = useState(false);
   const [solving, setSolving] = useState(false);
-  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | null>(null);
+  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | TriTilingResult | null>(null);
   const [tilingError, setTilingError] = useState<string | null>(null);
   const [tilingStats, setTilingStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [solvedPolyformType, setSolvedPolyformType] = useState<PolyformType | null>(null);
@@ -221,14 +223,19 @@ export function PolyformExplorer() {
     }
   }, [tilingHeightInput]);
   
+  // Cancel solving (kill worker)
+  const handleCancelSolving = useCallback(() => {
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+      setSolving(false);
+      setTilingError("Solving cancelled by user.");
+      setTilingStats(null);
+    }
+  }, []);
+  
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
-    // Support polyomino and polyhex
-    if (polyformType !== "polyomino" && polyformType !== "polyhex") {
-      setTilingError("Tiling solver currently only supports polyomino (square) and polyhex (hexagon) tiles.");
-      return;
-    }
-    
     // Check that tile has at least one cell
     const hasFilledCell = cells.some(row => row.some(c => c));
     if (!hasFilledCell) {
@@ -527,11 +534,6 @@ export function PolyformExplorer() {
         <h3 style={{ marginTop: 0, marginBottom: "12px" }}>🧩 Tiling Solver</h3>
         <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "16px" }}>
           Try to tile a grid of the specified size using rotations, translations, and flips of your polyform.
-          {polyformType === "polyiamond" && (
-            <span style={{ color: "#e74c3c", display: "block", marginTop: "8px" }}>
-              ⚠️ Polyiamond (triangle) tiling is not yet supported.
-            </span>
-          )}
         </p>
         
         {/* Tiling Grid Size Inputs */}
@@ -590,19 +592,35 @@ export function PolyformExplorer() {
           </div>
           <button
             onClick={handleSolveTiling}
-            disabled={solving || polyformType === "polyiamond"}
+            disabled={solving}
             style={{
               padding: "8px 20px",
               backgroundColor: solving ? "#95a5a6" : "#27ae60",
               color: "white",
               border: "none",
               borderRadius: "4px",
-              cursor: solving || polyformType === "polyiamond" ? "not-allowed" : "pointer",
+              cursor: solving ? "not-allowed" : "pointer",
               fontWeight: "bold",
             }}
           >
             {solving ? "⏳ Solving..." : "🔍 Solve Tiling"}
           </button>
+          {solving && (
+            <button
+              onClick={handleCancelSolving}
+              style={{
+                padding: "8px 20px",
+                backgroundColor: "#e74c3c",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              ❌ Cancel
+            </button>
+          )}
         </div>
         
         {/* Progress/Stats display */}
@@ -661,6 +679,14 @@ export function PolyformExplorer() {
                     highlightedEdge={highlightedEdge}
                     onEdgeInfo={setEdgeInfo}
                     hideFills={hideFills}
+                  />
+                ) : solvedPolyformType === "polyiamond" ? (
+                  <TriTilingViewer
+                    width={tilingWidth}
+                    height={tilingHeight}
+                    placements={(tilingResult as TriTilingResult).placements || []}
+                    svgRef={tilingSvgRef}
+                    highlightedPlacement={highlightedPlacement}
                   />
                 ) : (
                   <TilingViewer

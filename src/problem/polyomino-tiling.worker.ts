@@ -1,8 +1,8 @@
 /**
- * Web Worker for running the Polyomino/Polyhex Tiling SAT solver in a background thread
+ * Web Worker for running the Polyomino/Polyhex/Polyiamond Tiling SAT solver in a background thread
  * 
  * This worker loads the CaDiCaL WASM module and uses it for SAT solving
- * of polyomino and polyhex tiling problems.
+ * of polyomino, polyhex, and polyiamond tiling problems.
  */
 
 /// <reference lib="webworker" />
@@ -11,11 +11,13 @@ import { solvePolyominoTiling } from "./polyomino-tiling";
 import type { TilingResult, Placement } from "./polyomino-tiling";
 import { solvePolyhexTiling } from "./polyhex-tiling";
 import type { HexTilingResult, HexPlacement } from "./polyhex-tiling";
+import { solvePolyiamondTiling } from "./polyiamond-tiling";
+import type { TriTilingResult, TriPlacement } from "./polyiamond-tiling";
 import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 /** Polyform type for the solver */
-export type PolyformType = "polyomino" | "polyhex";
+export type PolyformType = "polyomino" | "polyhex" | "polyiamond";
 
 export interface PolyominoTilingSolverRequest {
   /** The tile cells (boolean grid) */
@@ -30,7 +32,7 @@ export interface PolyominoTilingSolverRequest {
 
 export interface PolyominoTilingSolverResponse {
   success: boolean;
-  result: TilingResult | HexTilingResult | null;
+  result: TilingResult | HexTilingResult | TriTilingResult | null;
   error?: string;
   /** Type of message: 'progress' for stats before solving, 'result' for final result */
   messageType?: "progress" | "result";
@@ -41,7 +43,7 @@ export interface PolyominoTilingSolverResponse {
 }
 
 // Re-export types for consumers
-export type { TilingResult, Placement, HexTilingResult, HexPlacement };
+export type { TilingResult, Placement, HexTilingResult, HexPlacement, TriTilingResult, TriPlacement };
 
 // Type definitions for the Emscripten module
 interface CadicalModule {
@@ -284,10 +286,12 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
     };
     
     // Solve the tiling problem based on polyform type
-    let result: TilingResult | HexTilingResult;
+    let result: TilingResult | HexTilingResult | TriTilingResult;
     
     if (polyformType === "polyhex") {
       result = solvePolyhexTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+    } else if (polyformType === "polyiamond") {
+      result = solvePolyiamondTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
     } else {
       result = solvePolyominoTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
     }
