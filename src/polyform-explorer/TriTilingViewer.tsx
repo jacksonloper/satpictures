@@ -208,22 +208,32 @@ export const TriTilingViewer: React.FC<TriTilingViewerProps> = ({
           for (const { row, col, placementIndex } of allCells) {
             if (placementIndex === undefined) continue;
             
-            // Check neighbors
+            const isUp = (row + col) % 2 === 0;
+            
+            // Neighbors based on triangle orientation:
+            // - neighbor[0]: left neighbor at (row, col-1)
+            // - neighbor[1]: right neighbor at (row, col+1)
+            // - neighbor[2]: vertical neighbor (below for UP, above for DOWN)
             const neighbors = [
               { row, col: col - 1 },
               { row, col: col + 1 },
-              { row: ((row + col) % 2 === 0) ? row - 1 : row + 1, col },
+              { row: isUp ? row + 1 : row - 1, col },
             ];
             
             const vertices = getTriVertices(row, col);
-            // Map edges to vertex pairs based on triangle orientation
-            const isUp = (row + col) % 2 === 0;
-            // For up tri: edge 0 = v0-v1 (left), edge 1 = v1-v2 (bottom), edge 2 = v2-v0 (right)
-            // For down tri: edge 0 = v0-v1 (top), edge 1 = v1-v2 (right), edge 2 = v2-v0 (left)
             
+            // Map neighbor index to the shared edge vertices:
+            // For UP tri (vertices: 0=apex-top, 1=bottom-left, 2=bottom-right):
+            //   - left edge (neighbor 0): v0→v1
+            //   - right edge (neighbor 1): v2→v0
+            //   - bottom edge (neighbor 2): v1→v2
+            // For DOWN tri (vertices: 0=top-left, 1=top-right, 2=apex-bottom):
+            //   - left edge (neighbor 0): v2→v0
+            //   - right edge (neighbor 1): v1→v2
+            //   - top edge (neighbor 2): v0→v1
             const edgeVertexPairs = isUp
-              ? [[0, 1], [1, 2], [2, 0]]  // left, bottom, right
-              : [[0, 1], [1, 2], [2, 0]]; // top, right, left
+              ? [[0, 1], [2, 0], [1, 2]]  // left, right, bottom
+              : [[2, 0], [1, 2], [0, 1]]; // left, right, top
             
             for (let i = 0; i < neighbors.length; i++) {
               const neighbor = neighbors[i];
@@ -276,16 +286,16 @@ export const TriTilingViewer: React.FC<TriTilingViewerProps> = ({
             const vertices = getTriVertices(row, col);
             const isUp = (row + col) % 2 === 0;
             
-            // Check each neighbor to see if it's outside inner grid
+            // Neighbors and edge mappings (same as Layer 2)
             const neighbors = [
               { row, col: col - 1 },
               { row, col: col + 1 },
-              { row: isUp ? row - 1 : row + 1, col },
+              { row: isUp ? row + 1 : row - 1, col },
             ];
             
             const edgeVertexPairs = isUp
-              ? [[0, 1], [1, 2], [2, 0]]
-              : [[0, 1], [1, 2], [2, 0]];
+              ? [[0, 1], [2, 0], [1, 2]]  // left, right, bottom
+              : [[2, 0], [1, 2], [0, 1]]; // left, right, top
             
             const boundaryEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
             
@@ -323,15 +333,16 @@ export const TriTilingViewer: React.FC<TriTilingViewerProps> = ({
             const vertices = getTriVertices(row, col);
             const isUp = (row + col) % 2 === 0;
             
+            // Neighbors and edge mappings (same as Layer 2)
             const neighbors = [
               { row, col: col - 1 },
               { row, col: col + 1 },
-              { row: isUp ? row - 1 : row + 1, col },
+              { row: isUp ? row + 1 : row - 1, col },
             ];
             
             const edgeVertexPairs = isUp
-              ? [[0, 1], [1, 2], [2, 0]]
-              : [[0, 1], [1, 2], [2, 0]];
+              ? [[0, 1], [2, 0], [1, 2]]  // left, right, bottom
+              : [[2, 0], [1, 2], [0, 1]]; // left, right, top
             
             for (let i = 0; i < neighbors.length; i++) {
               const neighbor = neighbors[i];
