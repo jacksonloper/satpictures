@@ -26,6 +26,9 @@ import {
   parseCoordsJson,
   downloadJson,
   PolyformControls,
+  generateMaze,
+  MazeViewer,
+  type MazeResult,
 } from "./polyform-explorer";
 
 /**
@@ -73,6 +76,10 @@ export function PolyformExplorer() {
   } | null>(null);
   const [coordsJsonInput, setCoordsJsonInput] = useState("");
   const [hideFills, setHideFills] = useState(false);
+  
+  // Maze generation state
+  const [mazeResult, setMazeResult] = useState<MazeResult | null>(null);
+  const mazeSvgRef = useRef<SVGSVGElement | null>(null);
   
   // Download SVG function
   const handleDownloadSvg = useCallback(() => {
@@ -142,6 +149,22 @@ export function PolyformExplorer() {
     
     downloadJson(data, `placements-${tilingWidth}x${tilingHeight}.json`);
   }, [tilingResult, tilingWidth, tilingHeight, solvedPolyformType]);
+  
+  // Generate maze from current solution (polyomino only for now)
+  const handleGenerateMaze = useCallback(() => {
+    if (!tilingResult?.placements || solvedPolyformType !== "polyomino") return;
+    
+    // Cast to TilingResult since we checked solvedPolyformType === "polyomino"
+    const placements = (tilingResult as TilingResult).placements!;
+    const result = generateMaze(placements);
+    setMazeResult(result);
+  }, [tilingResult, solvedPolyformType]);
+  
+  // Download maze SVG
+  const handleDownloadMazeSvg = useCallback(() => {
+    if (!mazeSvgRef.current) return;
+    downloadSvg(mazeSvgRef.current, `maze-${tilingWidth}x${tilingHeight}.svg`);
+  }, [tilingWidth, tilingHeight]);
   
   // Highlight navigation
   const handlePrevPlacement = useCallback(() => {
@@ -248,6 +271,7 @@ export function PolyformExplorer() {
     setTilingError(null);
     setTilingStats(null);
     setSolvedPolyformType(null);
+    setMazeResult(null); // Clear maze when starting new solve
     setSolving(true);
     
     // Create worker
@@ -855,7 +879,7 @@ export function PolyformExplorer() {
                 )}
                 
                 {/* Download buttons */}
-                <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                   <button
                     onClick={handleDownloadSvg}
                     style={{
@@ -884,7 +908,69 @@ export function PolyformExplorer() {
                   >
                     📥 Download Placements JSON
                   </button>
+                  {/* Generate Maze button - only for polyomino */}
+                  {solvedPolyformType === "polyomino" && (
+                    <button
+                      onClick={handleGenerateMaze}
+                      style={{
+                        padding: "8px 16px",
+                        backgroundColor: "#9b59b6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      🌲 Generate Maze
+                    </button>
+                  )}
                 </div>
+                
+                {/* Maze Result Display */}
+                {mazeResult && solvedPolyformType === "polyomino" && (
+                  <div style={{ 
+                    marginTop: "24px", 
+                    padding: "16px", 
+                    backgroundColor: "#f0f8ff", 
+                    borderRadius: "8px",
+                    border: "2px solid #9b59b6",
+                  }}>
+                    <h4 style={{ marginTop: 0, marginBottom: "12px", color: "#9b59b6" }}>
+                      🌲 Generated Maze
+                    </h4>
+                    <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "12px" }}>
+                      A spanning tree connects all tile placements. One wall has been randomly opened 
+                      for each edge in the spanning tree, creating a maze.
+                    </p>
+                    <MazeViewer
+                      width={tilingWidth}
+                      height={tilingHeight}
+                      walls={mazeResult.remainingWalls}
+                      svgRef={mazeSvgRef}
+                    />
+                    <div style={{ marginTop: "12px", fontSize: "14px", color: "#495057" }}>
+                      <strong>{mazeResult.remainingWalls.length}</strong> walls remaining 
+                      ({mazeResult.spanningTreeEdges.length} walls opened via spanning tree)
+                    </div>
+                    <button
+                      onClick={handleDownloadMazeSvg}
+                      style={{
+                        marginTop: "12px",
+                        padding: "8px 16px",
+                        backgroundColor: "#9b59b6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                      }}
+                    >
+                      💾 Save Maze as SVG
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <div style={{ 

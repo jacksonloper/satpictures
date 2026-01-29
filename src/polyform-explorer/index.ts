@@ -10,3 +10,7 @@ export { TriTilingViewer } from "./TriTilingViewer";
 export type { TriTilingViewerProps } from "./TriTilingViewer";
 export { downloadSvg, exportCellsToJson, parseCoordsJson, downloadJson } from "./downloadUtils";
 export { PolyformControls } from "./PolyformControls";
+export { generateMaze } from "./mazeGenerator";
+export type { Wall, MazeResult } from "./mazeGenerator";
+export { MazeViewer } from "./MazeViewer";
+export type { MazeViewerProps } from "./MazeViewer";
