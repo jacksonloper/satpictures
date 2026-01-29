@@ -5,7 +5,7 @@
  * 1. Builds an adjacency graph where nodes = placements, edges = shared walls
  * 2. Generates a random spanning tree
  * 3. Opens one random wall for each spanning tree edge
- * 4. Returns the remaining exterior walls
+ * 4. Returns the remaining walls (both interior and exterior walls that were not opened)
  */
 
 import type { HexPlacement } from "../problem/polyhex-tiling";
@@ -203,6 +203,10 @@ function shuffleArray<T>(array: T[]): T[] {
 
 /**
  * Generate a random spanning tree using Kruskal's algorithm.
+ * 
+ * Note: If the placement graph is disconnected (rare in valid tilings),
+ * this will return a spanning forest instead of a spanning tree.
+ * In that case, the resulting maze will have isolated regions.
  */
 function generateSpanningTree(numNodes: number, edges: AdjacencyEdge[]): AdjacencyEdge[] {
   if (numNodes <= 1) return [];
@@ -235,17 +239,17 @@ function hexWallKey(wall: HexWall): string {
     return `${q},${r}:${wall.edgeIndex}`;
   }
   
-  // Normalize: use the cell with smaller (q, r) lexicographically
-  const cell1Key = `${q},${r}`;
-  const cell2Key = `${neighbor.q},${neighbor.r}`;
+  // Normalize: use the cell with smaller (q, r) numerically
+  // Compare q first, then r if q values are equal
+  const useCell1 = (q < neighbor.q) || (q === neighbor.q && r < neighbor.r);
   
-  if (cell1Key < cell2Key) {
-    return `${cell1Key}:${wall.edgeIndex}`;
+  if (useCell1) {
+    return `${q},${r}:${wall.edgeIndex}`;
   } else {
     // Get the opposite edge index (the edge from neighbor's perspective)
     // Edges are opposite: 0↔3, 1↔4, 2↔5
     const oppositeEdge = (wall.edgeIndex + 3) % 6;
-    return `${cell2Key}:${oppositeEdge}`;
+    return `${neighbor.q},${neighbor.r}:${oppositeEdge}`;
   }
 }
 
