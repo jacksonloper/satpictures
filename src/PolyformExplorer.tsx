@@ -1902,46 +1902,55 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
             );
           })}
         
-        {/* Layer 2: Draw interior edges (thin lines between cells in same tile) */}
-        {allAxialCells.map(({ placementIndex, q, r }) => {
-          const { cx, cy } = getHexCenter(q, r);
-          const vertices = getHexVertices(cx, cy);
-          const neighbors = getAxialNeighbors(q, r);
-          
+        {/* Layer 2: Draw interior edges (thin gray lines between cells in same tile) */}
+        {/* Use edge deduplication: edge (A,B) is same as (B,A) */}
+        {(() => {
+          const seenEdges = new Set<string>();
           const interiorEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
           
-          for (const neighbor of neighbors) {
-            const neighborKey = `${neighbor.q},${neighbor.r}`;
-            const neighborPlacement = cellToPlacement.get(neighborKey);
+          for (const { placementIndex, q, r } of allAxialCells) {
+            const { cx, cy } = getHexCenter(q, r);
+            const vertices = getHexVertices(cx, cy);
+            const neighbors = getAxialNeighbors(q, r);
             
-            if (neighborPlacement === placementIndex) {
-              // Interior edge - draw thin line
-              const v1 = vertices[neighbor.edgeIndex];
-              const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
-              // Shorten the line by 10% on each end
-              const dx = v2.x - v1.x;
-              const dy = v2.y - v1.y;
-              interiorEdges.push({
-                x1: v1.x + dx * 0.1,
-                y1: v1.y + dy * 0.1,
-                x2: v2.x - dx * 0.1,
-                y2: v2.y - dy * 0.1,
-              });
+            for (const neighbor of neighbors) {
+              const neighborKey = `${neighbor.q},${neighbor.r}`;
+              const neighborPlacement = cellToPlacement.get(neighborKey);
+              
+              if (neighborPlacement === placementIndex) {
+                // Interior edge - between two cells of same tile
+                // Normalize edge key for deduplication (sort endpoints)
+                const edgeKey = [q, r, neighbor.q, neighbor.r].sort((a, b) => a - b).join(',');
+                if (!seenEdges.has(edgeKey)) {
+                  seenEdges.add(edgeKey);
+                  const v1 = vertices[neighbor.edgeIndex];
+                  const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
+                  // Shorten the line by 10% on each end for visual separation
+                  const dx = v2.x - v1.x;
+                  const dy = v2.y - v1.y;
+                  interiorEdges.push({
+                    x1: v1.x + dx * 0.1,
+                    y1: v1.y + dy * 0.1,
+                    x2: v2.x - dx * 0.1,
+                    y2: v2.y - dy * 0.1,
+                  });
+                }
+              }
             }
           }
           
-          return interiorEdges.map((edge, edgeIndex) => (
+          return interiorEdges.map((edge, idx) => (
             <line
-              key={`interior-${q},${r}-${edgeIndex}`}
+              key={`interior-${idx}`}
               x1={edge.x1}
               y1={edge.y1}
               x2={edge.x2}
               y2={edge.y2}
-              stroke="#95a5a6"
+              stroke="#bdc3c7"
               strokeWidth={0.5}
             />
           ));
-        })}
+        })()}
         
         {/* Layer 3: Draw inner grid boundary */}
         {allCells
@@ -1975,38 +1984,46 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
             ));
           })}
         
-        {/* Layer 4: Draw tile boundaries (thicker lines between different tiles) */}
-        {allAxialCells.map(({ placementIndex, q, r }) => {
-          const { cx, cy } = getHexCenter(q, r);
-          const vertices = getHexVertices(cx, cy);
-          const neighbors = getAxialNeighbors(q, r);
+        {/* Layer 4: Draw tile boundaries (thick black lines between different tiles) */}
+        {(() => {
+          const seenEdges = new Set<string>();
+          const exteriorEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
           
-          const boundaryEdges: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-          
-          for (const neighbor of neighbors) {
-            const neighborKey = `${neighbor.q},${neighbor.r}`;
-            const neighborPlacement = cellToPlacement.get(neighborKey);
+          for (const { placementIndex, q, r } of allAxialCells) {
+            const { cx, cy } = getHexCenter(q, r);
+            const vertices = getHexVertices(cx, cy);
+            const neighbors = getAxialNeighbors(q, r);
             
-            // Draw boundary if neighbor is different tile or empty
-            if (neighborPlacement !== placementIndex) {
-              const v1 = vertices[neighbor.edgeIndex];
-              const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
-              boundaryEdges.push({ x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y });
+            for (const neighbor of neighbors) {
+              const neighborKey = `${neighbor.q},${neighbor.r}`;
+              const neighborPlacement = cellToPlacement.get(neighborKey);
+              
+              // Draw boundary if neighbor is different tile or empty
+              if (neighborPlacement !== placementIndex) {
+                // Normalize edge key for deduplication (sort endpoints)
+                const edgeKey = [q, r, neighbor.q, neighbor.r].sort((a, b) => a - b).join(',');
+                if (!seenEdges.has(edgeKey)) {
+                  seenEdges.add(edgeKey);
+                  const v1 = vertices[neighbor.edgeIndex];
+                  const v2 = vertices[(neighbor.edgeIndex + 1) % 6];
+                  exteriorEdges.push({ x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y });
+                }
+              }
             }
           }
           
-          return boundaryEdges.map((edge, edgeIndex) => (
+          return exteriorEdges.map((edge, idx) => (
             <line
-              key={`tileBoundary-${q},${r}-${edgeIndex}`}
+              key={`tileBoundary-${idx}`}
               x1={edge.x1}
               y1={edge.y1}
               x2={edge.x2}
               y2={edge.y2}
               stroke="#2c3e50"
-              strokeWidth={1.5}
+              strokeWidth={2}
             />
           ));
-        })}
+        })()}
       </svg>
     </div>
   );
