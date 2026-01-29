@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import type { Wall } from "./mazeGenerator";
 
 /** MazeViewer - displays the maze with only the remaining walls */
@@ -22,14 +22,37 @@ export const MazeViewer: React.FC<MazeViewerProps> = ({
   cellSize = 30,
   svgRef,
 }) => {
-  // Calculate SVG dimensions
-  const svgWidth = width * cellSize;
-  const svgHeight = height * cellSize;
+  // Calculate the outer bounds from wall coordinates (including overhangs)
+  const { offsetCol, offsetRow, outerWidth, outerHeight } = useMemo(() => {
+    let minRow = 0, maxRow = height - 1;
+    let minCol = 0, maxCol = width - 1;
+    
+    // Scan all walls to find the actual bounds
+    for (const wall of walls) {
+      const { row, col } = wall.cell1;
+      minRow = Math.min(minRow, row);
+      maxRow = Math.max(maxRow, row);
+      minCol = Math.min(minCol, col);
+      maxCol = Math.max(maxCol, col);
+    }
+    
+    return {
+      offsetCol: -minCol,
+      offsetRow: -minRow,
+      outerWidth: maxCol - minCol + 1,
+      outerHeight: maxRow - minRow + 1,
+    };
+  }, [walls, width, height]);
   
-  // Convert walls to line segments
+  // Calculate SVG dimensions based on outer bounds
+  const svgWidth = outerWidth * cellSize;
+  const svgHeight = outerHeight * cellSize;
+  
+  // Convert walls to line segments with offset applied
   const lineSegments = walls.map((wall, index) => {
-    const x = wall.cell1.col * cellSize;
-    const y = wall.cell1.row * cellSize;
+    // Apply offset to convert logical coordinates to SVG coordinates
+    const x = (wall.cell1.col + offsetCol) * cellSize;
+    const y = (wall.cell1.row + offsetRow) * cellSize;
     
     let x1: number, y1: number, x2: number, y2: number;
     
@@ -88,6 +111,17 @@ export const MazeViewer: React.FC<MazeViewerProps> = ({
           width={svgWidth}
           height={svgHeight}
           fill="#f8f9fa"
+        />
+        
+        {/* Inner grid boundary (red border to show the original grid area) */}
+        <rect
+          x={offsetCol * cellSize}
+          y={offsetRow * cellSize}
+          width={width * cellSize}
+          height={height * cellSize}
+          fill="none"
+          stroke="#e74c3c"
+          strokeWidth={3}
         />
         
         {/* Draw walls */}
