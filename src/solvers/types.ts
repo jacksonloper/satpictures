@@ -103,3 +103,67 @@ export interface FormulaBuilder {
    */
   addUnit(literal: Literal): void;
 }
+
+/**
+ * Base implementation of FormulaBuilder that works with any SATSolver.
+ * This provides the common logic that was previously duplicated across
+ * MiniSatFormulaBuilder, CadicalFormulaBuilder, and DPLLFormulaBuilder.
+ */
+export class BaseFormulaBuilder implements FormulaBuilder {
+  solver: SATSolver;
+  private nameToVar: Map<string, number> = new Map();
+
+  constructor(solver: SATSolver) {
+    this.solver = solver;
+  }
+
+  createNamedVariable(name: string): number {
+    if (this.nameToVar.has(name)) {
+      throw new Error(`Variable already exists: ${name}`);
+    }
+    const varNum = this.solver.newVariable();
+    this.nameToVar.set(name, varNum);
+    return varNum;
+  }
+
+  getVariable(name: string): number | undefined {
+    return this.nameToVar.get(name);
+  }
+
+  addOr(literals: number[]): void {
+    if (literals.length === 0) return;
+    this.solver.addClause(literals);
+  }
+
+  addAnd(literals: number[]): void {
+    for (const lit of literals) {
+      this.solver.addClause([lit]);
+    }
+  }
+
+  addExactlyOne(literals: number[]): void {
+    // At least one
+    this.addOr(literals);
+    // At most one
+    this.addAtMostOne(literals);
+  }
+
+  addAtMostOne(literals: number[]): void {
+    // Pairwise encoding: for all pairs, at most one can be true
+    for (let i = 0; i < literals.length; i++) {
+      for (let j = i + 1; j < literals.length; j++) {
+        // ¬li ∨ ¬lj
+        this.solver.addClause([-literals[i], -literals[j]]);
+      }
+    }
+  }
+
+  addImplies(a: number, b: number): void {
+    // a → b ≡ ¬a ∨ b
+    this.solver.addClause([-a, b]);
+  }
+
+  addUnit(literal: number): void {
+    this.solver.addClause([literal]);
+  }
+}
