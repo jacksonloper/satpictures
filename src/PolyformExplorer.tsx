@@ -23,6 +23,7 @@ import {
   exportCellsToJson,
   parseCoordsJson,
   downloadJson,
+  PolyformControls,
 } from "./polyform-explorer";
 
 /**
@@ -462,192 +463,30 @@ export function PolyformExplorer() {
         Use the rotation and flip buttons to transform your shape.
       </p>
       
+
       {/* Controls */}
-      <div style={{ marginBottom: "20px" }}>
-        {/* Polyform Type Selector */}
-        <div style={{ marginBottom: "16px" }}>
-          <label style={{ marginRight: "12px", fontWeight: "bold" }}>Type:</label>
-          <select
-            value={polyformType}
-            onChange={(e) => handleTypeChange(e.target.value as PolyformType)}
-            style={{
-              padding: "8px 16px",
-              fontSize: "14px",
-              borderRadius: "4px",
-              border: "1px solid #bdc3c7",
-              cursor: "pointer",
-            }}
-          >
-            <option value="polyomino">Polyomino (Square)</option>
-            <option value="polyhex">Polyhex (Hexagon)</option>
-            <option value="polyiamond">Polyiamond (Triangle)</option>
-          </select>
-        </div>
-        
-        {/* Grid Size Inputs */}
-        <div style={{ marginBottom: "16px", display: "flex", gap: "20px", flexWrap: "wrap" }}>
-          <div>
-            <label style={{ marginRight: "8px" }}>Width:</label>
-            <input
-              type="text"
-              value={widthInput}
-              onChange={(e) => {
-                setWidthInput(e.target.value);
-                setWidthError(false); // Clear error while typing
-              }}
-              onBlur={handleWidthBlur}
-              style={{
-                width: "60px",
-                padding: "8px",
-                fontSize: "14px",
-                borderRadius: "4px",
-                border: widthError ? "2px solid #e74c3c" : "1px solid #bdc3c7",
-                backgroundColor: widthError ? "#fdecea" : "white",
-              }}
-            />
-            {widthError && (
-              <span style={{ color: "#e74c3c", marginLeft: "8px", fontSize: "12px" }}>
-                Enter an integer (1-50)
-              </span>
-            )}
-          </div>
-          <div>
-            <label style={{ marginRight: "8px" }}>Height:</label>
-            <input
-              type="text"
-              value={heightInput}
-              onChange={(e) => {
-                setHeightInput(e.target.value);
-                setHeightError(false); // Clear error while typing
-              }}
-              onBlur={handleHeightBlur}
-              style={{
-                width: "60px",
-                padding: "8px",
-                fontSize: "14px",
-                borderRadius: "4px",
-                border: heightError ? "2px solid #e74c3c" : "1px solid #bdc3c7",
-                backgroundColor: heightError ? "#fdecea" : "white",
-              }}
-            />
-            {heightError && (
-              <span style={{ color: "#e74c3c", marginLeft: "8px", fontSize: "12px" }}>
-                Enter an integer (1-50)
-              </span>
-            )}
-          </div>
-        </div>
-        
-        {/* Action Buttons */}
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button
-            onClick={handleRotate}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#3498db",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            🔄 Rotate {polyformType === "polyomino" ? "90°" : "60°"}
-          </button>
-          <button
-            onClick={handleFlipH}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#9b59b6",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            ↔️ Flip H
-          </button>
-          <button
-            onClick={handleFlipV}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#9b59b6",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            ↕️ Flip V
-          </button>
-          <button
-            onClick={handleClear}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#e74c3c",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-          >
-            Clear
-          </button>
-          <button
-            onClick={handleExportTileCoords}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#17a2b8",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-            title="Copy tile coordinates as JSON"
-          >
-            📋 Copy JSON
-          </button>
-        </div>
-        
-        {/* JSON Import */}
-        <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            type="text"
-            value={coordsJsonInput}
-            onChange={(e) => setCoordsJsonInput(e.target.value)}
-            placeholder='Paste JSON coords: [{"row":0,"col":0},...]'
-            style={{
-              padding: "6px 10px",
-              borderRadius: "4px",
-              border: "1px solid #bdc3c7",
-              width: "300px",
-              fontSize: "12px",
-            }}
-          />
-          <button
-            onClick={handleImportTileCoords}
-            disabled={!coordsJsonInput.trim()}
-            style={{
-              padding: "6px 12px",
-              backgroundColor: coordsJsonInput.trim() ? "#28a745" : "#95a5a6",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: coordsJsonInput.trim() ? "pointer" : "not-allowed",
-              fontSize: "12px",
-            }}
-          >
-            📥 Import JSON
-          </button>
-        </div>
-        
-        {/* Stats */}
-        <div style={{ marginTop: "12px", color: "#7f8c8d", fontSize: "14px" }}>
-          Filled cells: <strong>{filledCount}</strong>
-        </div>
-      </div>
+      <PolyformControls
+        polyformType={polyformType}
+        onTypeChange={handleTypeChange}
+        widthInput={widthInput}
+        heightInput={heightInput}
+        widthError={widthError}
+        heightError={heightError}
+        onWidthInputChange={(v) => { setWidthInput(v); setWidthError(false); }}
+        onHeightInputChange={(v) => { setHeightInput(v); setHeightError(false); }}
+        onWidthBlur={handleWidthBlur}
+        onHeightBlur={handleHeightBlur}
+        onRotate={handleRotate}
+        onFlipH={handleFlipH}
+        onFlipV={handleFlipV}
+        onClear={handleClear}
+        onExportTileCoords={handleExportTileCoords}
+        coordsJsonInput={coordsJsonInput}
+        onCoordsJsonInputChange={setCoordsJsonInput}
+        onImportTileCoords={handleImportTileCoords}
+        filledCount={filledCount}
+      />
+
       
       {/* Grid */}
       <div style={{ 

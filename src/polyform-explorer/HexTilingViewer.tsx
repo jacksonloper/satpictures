@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef } from "react";
 import type { HexPlacement } from "../problem/polyhex-tiling";
-import { getPlacementColor } from "./TilingViewer";
+import { getPlacementColor } from "./placementColors";
 
 /** HexTilingViewer - displays the solved hex tiling */
 export interface HexTilingViewerProps {
