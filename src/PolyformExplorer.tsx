@@ -2161,8 +2161,10 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
               
               if (neighborPlacement === placementIndex) {
                 // Interior edge - between two cells of same tile
-                // Normalize edge key for deduplication (sort endpoints)
-                const edgeKey = [q, r, neighbor.q, neighbor.r].sort((a, b) => a - b).join(',');
+                // Normalize edge key for deduplication (sort coordinate-pair strings)
+                const a = `${q},${r}`;
+                const b = `${neighbor.q},${neighbor.r}`;
+                const edgeKey = a < b ? `${a}|${b}` : `${b}|${a}`;
                 if (!seenEdges.has(edgeKey)) {
                   seenEdges.add(edgeKey);
                   const v1 = vertices[neighbor.edgeIndex];
@@ -2242,8 +2244,10 @@ const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
               
               // Draw boundary if neighbor is different tile or empty
               if (neighborPlacement !== placementIndex) {
-                // Normalize edge key for deduplication (sort endpoints)
-                const edgeKey = [q, r, neighbor.q, neighbor.r].sort((a, b) => a - b).join(',');
+                // Normalize edge key for deduplication (sort coordinate-pair strings)
+                const a = `${q},${r}`;
+                const b = `${neighbor.q},${neighbor.r}`;
+                const edgeKey = a < b ? `${a}|${b}` : `${b}|${a}`;
                 if (!seenEdges.has(edgeKey)) {
                   seenEdges.add(edgeKey);
                   const v1 = vertices[neighbor.edgeIndex];
