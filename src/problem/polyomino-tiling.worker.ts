@@ -20,8 +20,10 @@ import type { CadicalClass } from "../solvers";
 export type PolyformType = "polyomino" | "polyhex" | "polyiamond";
 
 export interface PolyominoTilingSolverRequest {
-  /** The tile cells (boolean grid) */
-  cells: boolean[][];
+  /** The tile cells (boolean grid) - kept for backward compatibility */
+  cells?: boolean[][];
+  /** Multiple tiles to use for tiling (new: takes precedence over cells) */
+  tiles?: boolean[][][];
   /** Width of the tiling grid */
   tilingWidth: number;
   /** Height of the tiling grid */
@@ -261,7 +263,10 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
-  const { cells, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
+  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
+  
+  // Use tiles array if provided, otherwise fall back to single cells for backward compatibility
+  const tilesToUse: boolean[][][] = tiles ?? (cells ? [cells] : []);
 
   try {
     // Load the module (cached after first load)
@@ -289,11 +294,11 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
     let result: TilingResult | HexTilingResult | TriTilingResult;
     
     if (polyformType === "polyhex") {
-      result = solvePolyhexTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+      result = solvePolyhexTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
     } else if (polyformType === "polyiamond") {
-      result = solvePolyiamondTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+      result = solvePolyiamondTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
     } else {
-      result = solvePolyominoTiling(cells, tilingWidth, tilingHeight, solver, onStatsReady);
+      result = solvePolyominoTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
     }
     
     // Clean up
