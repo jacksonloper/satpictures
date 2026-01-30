@@ -40,6 +40,8 @@ export interface TilingResult {
     numClauses: number;
     numPlacements: number;
   };
+  /** Count of placements used for each tile type (when multiple tiles) */
+  tileTypeCounts?: number[];
 }
 
 /**
@@ -329,7 +331,7 @@ export function solvePolyominoTiling(
   }
   
   // Generate all valid placements for each tile type
-  // Track which placements belong to each tile type (for "use each tile" constraint)
+  // Track which placements belong to each tile type (for counting in solution)
   let allPlacements: Placement[] = [];
   const placementsByTileType: number[][] = []; // placementsByTileType[tileIndex] = [placementId, ...]
   let placementId = 0;
@@ -349,7 +351,7 @@ export function solvePolyominoTiling(
     // Generate placements for this tile, with continuous ID sequence
     const tilePlacements = generateAllPlacements(tileCoords, tilingWidth, tilingHeight);
     
-    // Track placement IDs for this tile type
+    // Track placement IDs for this tile type (for counting in solution)
     const tileTypePlacementIds: number[] = [];
     
     // Renumber IDs to be continuous across all tiles
@@ -433,18 +435,6 @@ export function solvePolyominoTiling(
     }
   }
   
-  // CONSTRAINT 3: Each tile type must be used at least once (when multiple tiles)
-  // For each tile type, add an OR clause requiring at least one of its placements
-  if (nonEmptyTileCoords.length > 1) {
-    for (const tileTypePlacements of placementsByTileType) {
-      if (tileTypePlacements.length > 0) {
-        // At least one placement of this tile type must be active
-        const literals = tileTypePlacements.map(pid => placementVars.get(pid)!);
-        solver.addClause(literals);
-      }
-    }
-  }
-  
   const numVars = solver.getVariableCount();
   const numClauses = solver.getClauseCount();
   
@@ -465,16 +455,24 @@ export function solvePolyominoTiling(
   
   // Extract solution: which placements are used?
   const usedPlacements: Placement[] = [];
+  const usedPlacementIds = new Set<number>();
   for (const p of allPlacements) {
     const varNum = placementVars.get(p.id)!;
     if (result.assignment.get(varNum)) {
       usedPlacements.push(p);
+      usedPlacementIds.add(p.id);
     }
   }
+  
+  // Count how many placements of each tile type were used
+  const tileTypeCounts = placementsByTileType.map(tileTypePlacements => 
+    tileTypePlacements.filter(pid => usedPlacementIds.has(pid)).length
+  );
   
   return {
     satisfiable: true,
     placements: usedPlacements,
     stats: { numVariables: numVars, numClauses: numClauses, numPlacements: allPlacements.length },
+    tileTypeCounts,
   };
 }

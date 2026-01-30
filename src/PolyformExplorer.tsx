@@ -900,6 +900,16 @@ export function PolyformExplorer() {
                   fontSize: "14px",
                 }}>
                   ✅ <strong>Solution found!</strong> Using {tilingResult.placements?.length ?? 0} tile placements.
+                  {tilingResult.tileTypeCounts && tilingResult.tileTypeCounts.length > 1 && (
+                    <>
+                      <br/>
+                      <span style={{ fontSize: "12px", color: "#155724" }}>
+                        {tilingResult.tileTypeCounts.map((count, index) => 
+                          `Tile ${index + 1}: ${count}`
+                        ).join(' • ')}
+                      </span>
+                    </>
+                  )}
                   <br/>
                   <span style={{ fontSize: "12px", color: "#6c757d" }}>
                     ({tilingResult.stats.numPlacements.toLocaleString()} total possible placements, {tilingResult.stats.numVariables.toLocaleString()} vars, {tilingResult.stats.numClauses.toLocaleString()} clauses)
