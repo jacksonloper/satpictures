@@ -426,7 +426,7 @@ export function generateAllHexPlacements(
  * 2. Non-overlap: Each cell (including outer cells) can be covered by at most one placement.
  */
 export function solvePolyhexTiling(
-  cells: boolean[][],
+  tilesInput: boolean[][] | boolean[][][],
   tilingWidth: number,
   tilingHeight: number,
   solver: SATSolver,
@@ -440,20 +440,52 @@ export function solvePolyhexTiling(
     };
   }
   
-  // Convert grid to normalized axial coordinates
-  const tileAxialCoords = hexGridToAxialCoords(cells);
+  // Normalize input: support both single tile (boolean[][]) and multiple tiles (boolean[][][])
+  const tiles: boolean[][][] = Array.isArray(tilesInput[0]?.[0]) 
+    ? (tilesInput as boolean[][][])
+    : [tilesInput as boolean[][]];
   
-  if (tileAxialCoords.length === 0) {
+  // Convert each tile grid to normalized axial coordinates
+  const allTileCoords: AxialCoord[][] = tiles.map(cells => hexGridToAxialCoords(cells));
+  
+  // Filter out empty tiles
+  const nonEmptyTileCoords = allTileCoords.filter(coords => coords.length > 0);
+  
+  if (nonEmptyTileCoords.length === 0) {
     return {
       satisfiable: false,
       stats: { numVariables: 0, numClauses: 0, numPlacements: 0 },
     };
   }
   
-  // Generate all valid placements
-  const placements = generateAllHexPlacements(tileAxialCoords, tilingWidth, tilingHeight);
+  // Generate all valid placements for each tile type
+  let allPlacements: HexPlacement[] = [];
+  let placementId = 0;
+  let maxQ = 0, maxR = 0; // Track max bounding box across all tiles
   
-  if (placements.length === 0) {
+  for (const tileAxialCoords of nonEmptyTileCoords) {
+    // Get transforms for this tile
+    const allTransforms = generateAllHexTransforms(tileAxialCoords);
+    
+    // Track max bounding box
+    for (const t of allTransforms) {
+      const bb = getAxialBoundingBox(t);
+      maxQ = Math.max(maxQ, bb.width);
+      maxR = Math.max(maxR, bb.height);
+    }
+    
+    // Generate placements for this tile
+    const tilePlacements = generateAllHexPlacements(tileAxialCoords, tilingWidth, tilingHeight);
+    
+    // Renumber IDs to be continuous across all tiles
+    for (const p of tilePlacements) {
+      p.id = placementId++;
+    }
+    
+    allPlacements = allPlacements.concat(tilePlacements);
+  }
+  
+  if (allPlacements.length === 0) {
     return {
       satisfiable: false,
       stats: { numVariables: 0, numClauses: 0, numPlacements: 0 },
@@ -462,18 +494,9 @@ export function solvePolyhexTiling(
   
   // Create SAT variables for each placement
   const placementVars: Map<number, number> = new Map();
-  for (const p of placements) {
+  for (const p of allPlacements) {
     const varNum = solver.newVariable();
     placementVars.set(p.id, varNum);
-  }
-  
-  // Find bounding box of all transforms for outer grid calculation
-  const allTransforms = generateAllHexTransforms(tileAxialCoords);
-  let maxQ = 0, maxR = 0;
-  for (const t of allTransforms) {
-    const bb = getAxialBoundingBox(t);
-    maxQ = Math.max(maxQ, bb.width);
-    maxR = Math.max(maxR, bb.height);
   }
   
   // Build index: for each axial coordinate, which placements cover it?
@@ -488,7 +511,7 @@ export function solvePolyhexTiling(
   
   const cellToPlacements: Map<string, number[]> = new Map();
   
-  for (const p of placements) {
+  for (const p of allPlacements) {
     for (const cell of p.cells) {
       const key = `${cell.q},${cell.r}`;
       if (!cellToPlacements.has(key)) {
@@ -546,13 +569,13 @@ export function solvePolyhexTiling(
   if (!result.satisfiable) {
     return {
       satisfiable: false,
-      stats: { numVariables: numVars, numClauses: numClauses, numPlacements: placements.length },
+      stats: { numVariables: numVars, numClauses: numClauses, numPlacements: allPlacements.length },
     };
   }
   
   // Extract solution: which placements are used?
   const usedPlacements: HexPlacement[] = [];
-  for (const p of placements) {
+  for (const p of allPlacements) {
     const varNum = placementVars.get(p.id)!;
     if (result.assignment.get(varNum)) {
       usedPlacements.push(p);
@@ -562,7 +585,7 @@ export function solvePolyhexTiling(
   return {
     satisfiable: true,
     placements: usedPlacements,
-    stats: { numVariables: numVars, numClauses: numClauses, numPlacements: placements.length },
+    stats: { numVariables: numVars, numClauses: numClauses, numPlacements: allPlacements.length },
   };
 }
 

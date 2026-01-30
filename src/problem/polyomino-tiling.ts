@@ -287,7 +287,7 @@ export function generateAllPlacements(
  * 2. Non-overlap: Each cell (including outer cells) can be covered by at most one placement.
  */
 export function solvePolyominoTiling(
-  cells: boolean[][],
+  tilesInput: boolean[][] | boolean[][][],
   tilingWidth: number,
   tilingHeight: number,
   solver: SATSolver,
@@ -301,20 +301,52 @@ export function solvePolyominoTiling(
     };
   }
   
-  // Convert grid to normalized coordinates
-  const tileCoords = gridToCoords(cells);
+  // Normalize input: support both single tile (boolean[][]) and multiple tiles (boolean[][][])
+  const tiles: boolean[][][] = Array.isArray(tilesInput[0]?.[0]) 
+    ? (tilesInput as boolean[][][])
+    : [tilesInput as boolean[][]];
   
-  if (tileCoords.length === 0) {
+  // Convert each tile grid to normalized coordinates
+  const allTileCoords: Coord[][] = tiles.map(cells => gridToCoords(cells));
+  
+  // Filter out empty tiles
+  const nonEmptyTileCoords = allTileCoords.filter(coords => coords.length > 0);
+  
+  if (nonEmptyTileCoords.length === 0) {
     return {
       satisfiable: false,
       stats: { numVariables: 0, numClauses: 0, numPlacements: 0 },
     };
   }
   
-  // Generate all valid placements
-  const placements = generateAllPlacements(tileCoords, tilingWidth, tilingHeight);
+  // Generate all valid placements for each tile type
+  let allPlacements: Placement[] = [];
+  let placementId = 0;
+  let maxA = 0, maxB = 0; // Track max bounding box across all tiles
   
-  if (placements.length === 0) {
+  for (const tileCoords of nonEmptyTileCoords) {
+    // Get transforms for this tile
+    const allTransforms = generateAllTransforms(tileCoords);
+    
+    // Track max bounding box
+    for (const t of allTransforms) {
+      const bb = getBoundingBox(t);
+      maxA = Math.max(maxA, bb.width);
+      maxB = Math.max(maxB, bb.height);
+    }
+    
+    // Generate placements for this tile, with continuous ID sequence
+    const tilePlacements = generateAllPlacements(tileCoords, tilingWidth, tilingHeight);
+    
+    // Renumber IDs to be continuous across all tiles
+    for (const p of tilePlacements) {
+      p.id = placementId++;
+    }
+    
+    allPlacements = allPlacements.concat(tilePlacements);
+  }
+  
+  if (allPlacements.length === 0) {
     return {
       satisfiable: false,
       stats: { numVariables: 0, numClauses: 0, numPlacements: 0 },
@@ -323,18 +355,9 @@ export function solvePolyominoTiling(
   
   // Create SAT variables for each placement
   const placementVars: Map<number, number> = new Map();
-  for (const p of placements) {
+  for (const p of allPlacements) {
     const varNum = solver.newVariable();
     placementVars.set(p.id, varNum);
-  }
-  
-  // Find bounding box of tile for outer grid calculation
-  const allTransforms = generateAllTransforms(tileCoords);
-  let maxA = 0, maxB = 0;
-  for (const t of allTransforms) {
-    const bb = getBoundingBox(t);
-    maxA = Math.max(maxA, bb.width);
-    maxB = Math.max(maxB, bb.height);
   }
   
   // Build index: for each coordinate, which placements cover it?
@@ -346,7 +369,7 @@ export function solvePolyominoTiling(
   
   const cellToPlacements: Map<string, number[]> = new Map();
   
-  for (const p of placements) {
+  for (const p of allPlacements) {
     for (const cell of p.cells) {
       const key = `${cell.row},${cell.col}`;
       if (!cellToPlacements.has(key)) {
@@ -408,13 +431,13 @@ export function solvePolyominoTiling(
   if (!result.satisfiable) {
     return {
       satisfiable: false,
-      stats: { numVariables: numVars, numClauses: numClauses, numPlacements: placements.length },
+      stats: { numVariables: numVars, numClauses: numClauses, numPlacements: allPlacements.length },
     };
   }
   
   // Extract solution: which placements are used?
   const usedPlacements: Placement[] = [];
-  for (const p of placements) {
+  for (const p of allPlacements) {
     const varNum = placementVars.get(p.id)!;
     if (result.assignment.get(varNum)) {
       usedPlacements.push(p);
@@ -424,6 +447,6 @@ export function solvePolyominoTiling(
   return {
     satisfiable: true,
     placements: usedPlacements,
-    stats: { numVariables: numVars, numClauses: numClauses, numPlacements: placements.length },
+    stats: { numVariables: numVars, numClauses: numClauses, numPlacements: allPlacements.length },
   };
 }

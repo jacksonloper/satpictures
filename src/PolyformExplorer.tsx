@@ -42,17 +42,85 @@ import {
  * Allows users to build polyomino, polyhex, or polyiamond shapes
  * with rotation and flip controls.
  */
+/** Represents a single tile with its grid and dimensions */
+interface TileState {
+  cells: boolean[][];
+  gridWidth: number;
+  gridHeight: number;
+  widthInput: string;
+  heightInput: string;
+  widthError: boolean;
+  heightError: boolean;
+}
+
+/** Create a new empty tile state */
+function createEmptyTileState(width: number = 8, height: number = 8): TileState {
+  return {
+    cells: createEmptyBooleanGrid(width, height),
+    gridWidth: width,
+    gridHeight: height,
+    widthInput: String(width),
+    heightInput: String(height),
+    widthError: false,
+    heightError: false,
+  };
+}
+
 export function PolyformExplorer() {
   const [polyformType, setPolyformType] = useState<PolyformType>("polyomino");
-  const [gridWidth, setGridWidth] = useState(8);
-  const [gridHeight, setGridHeight] = useState(8);
-  const [cells, setCells] = useState<boolean[][]>(() => createEmptyBooleanGrid(8, 8));
   
-  // Textbox input state (separate from actual values for validation)
-  const [widthInput, setWidthInput] = useState("8");
-  const [heightInput, setHeightInput] = useState("8");
-  const [widthError, setWidthError] = useState(false);
-  const [heightError, setHeightError] = useState(false);
+  // Multi-tile state: array of tiles and the currently active tile index
+  const [tiles, setTiles] = useState<TileState[]>(() => [createEmptyTileState(8, 8)]);
+  const [activeTileIndex, setActiveTileIndex] = useState(0);
+  
+  // Derived state for the active tile (for convenience)
+  const activeTile = tiles[activeTileIndex];
+  const gridWidth = activeTile.gridWidth;
+  const gridHeight = activeTile.gridHeight;
+  const cells = activeTile.cells;
+  const widthInput = activeTile.widthInput;
+  const heightInput = activeTile.heightInput;
+  const widthError = activeTile.widthError;
+  const heightError = activeTile.heightError;
+  
+  // Setter helpers that update the active tile
+  const updateActiveTile = useCallback((updates: Partial<TileState>) => {
+    setTiles(prev => prev.map((tile, i) => 
+      i === activeTileIndex ? { ...tile, ...updates } : tile
+    ));
+  }, [activeTileIndex]);
+  
+  const setCells = useCallback((updater: boolean[][] | ((prev: boolean[][]) => boolean[][])) => {
+    setTiles(prev => prev.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      const newCells = typeof updater === 'function' ? updater(tile.cells) : updater;
+      return { ...tile, cells: newCells };
+    }));
+  }, [activeTileIndex]);
+  
+  const setGridWidth = useCallback((width: number) => {
+    updateActiveTile({ gridWidth: width });
+  }, [updateActiveTile]);
+  
+  const setGridHeight = useCallback((height: number) => {
+    updateActiveTile({ gridHeight: height });
+  }, [updateActiveTile]);
+  
+  const setWidthInput = useCallback((value: string) => {
+    updateActiveTile({ widthInput: value });
+  }, [updateActiveTile]);
+  
+  const setHeightInput = useCallback((value: string) => {
+    updateActiveTile({ heightInput: value });
+  }, [updateActiveTile]);
+  
+  const setWidthError = useCallback((value: boolean) => {
+    updateActiveTile({ widthError: value });
+  }, [updateActiveTile]);
+  
+  const setHeightError = useCallback((value: boolean) => {
+    updateActiveTile({ heightError: value });
+  }, [updateActiveTile]);
   
   // Tiling solver state
   const [tilingWidthInput, setTilingWidthInput] = useState("6");
@@ -135,7 +203,7 @@ export function PolyformExplorer() {
     setCells(newCells);
     setCoordsJsonInput("");
     alert(`Imported ${coords.length} coordinates`);
-  }, [coordsJsonInput]);
+  }, [coordsJsonInput, setGridWidth, setGridHeight, setWidthInput, setHeightInput, setCells]);
   
   // Download placements as JSON
   const handleDownloadPlacementsJson = useCallback(() => {
@@ -287,10 +355,14 @@ export function PolyformExplorer() {
   
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
-    // Check that tile has at least one cell
-    const hasFilledCell = cells.some(row => row.some(c => c));
-    if (!hasFilledCell) {
-      setTilingError("Please draw a tile first by clicking cells above.");
+    // Gather all tiles with at least one filled cell
+    const allTileCells = tiles.map(tile => tile.cells);
+    const tilesWithContent = allTileCells.filter(cells => 
+      cells.some(row => row.some(c => c))
+    );
+    
+    if (tilesWithContent.length === 0) {
+      setTilingError("Please draw at least one tile first by clicking cells above.");
       return;
     }
     
@@ -336,14 +408,14 @@ export function PolyformExplorer() {
       workerRef.current = null;
     };
     
-    // Send request with polyform type
+    // Send request with all tiles that have content
     worker.postMessage({
-      cells,
+      tiles: tilesWithContent,
       tilingWidth,
       tilingHeight,
       polyformType,
     });
-  }, [cells, tilingWidth, tilingHeight, polyformType]);
+  }, [tiles, tilingWidth, tilingHeight, polyformType]);
   
   // Validate and apply width on blur
   const handleWidthBlur = useCallback(() => {
@@ -366,7 +438,7 @@ export function PolyformExplorer() {
     } else {
       setWidthError(true);
     }
-  }, [widthInput, gridWidth, gridHeight]);
+  }, [widthInput, gridWidth, gridHeight, setWidthError, setGridWidth, setCells]);
   
   // Validate and apply height on blur
   const handleHeightBlur = useCallback(() => {
@@ -389,7 +461,7 @@ export function PolyformExplorer() {
     } else {
       setHeightError(true);
     }
-  }, [heightInput, gridHeight, gridWidth]);
+  }, [heightInput, gridHeight, gridWidth, setHeightError, setGridHeight, setCells]);
   
   // Toggle cell on click
   const handleCellClick = useCallback((row: number, col: number) => {
@@ -398,7 +470,7 @@ export function PolyformExplorer() {
       newCells[row][col] = !newCells[row][col];
       return newCells;
     });
-  }, []);
+  }, [setCells]);
   
   // Rotate the polyform
   const handleRotate = useCallback(() => {
@@ -429,7 +501,7 @@ export function PolyformExplorer() {
       setHeightError(false);
       return rotated;
     });
-  }, [polyformType]);
+  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip horizontally (geometry-correct per polyform type)
   const handleFlipH = useCallback(() => {
@@ -460,7 +532,7 @@ export function PolyformExplorer() {
 
       return next;
     });
-  }, [polyformType]);
+  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip vertically (geometry-correct per polyform type)
   const handleFlipV = useCallback(() => {
@@ -491,19 +563,43 @@ export function PolyformExplorer() {
 
       return next;
     });
-  }, [polyformType]);
+  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Clear the grid
   const handleClear = useCallback(() => {
     setCells(createEmptyBooleanGrid(gridWidth, gridHeight));
-  }, [gridWidth, gridHeight]);
+  }, [gridWidth, gridHeight, setCells]);
   
   // Change polyform type
   const handleTypeChange = useCallback((newType: PolyformType) => {
     setPolyformType(newType);
-    // Reset grid when changing type
-    setCells(createEmptyBooleanGrid(gridWidth, gridHeight));
-  }, [gridWidth, gridHeight]);
+    // Reset all tiles when changing type
+    setTiles([createEmptyTileState(8, 8)]);
+    setActiveTileIndex(0);
+  }, []);
+  
+  // Add a new tile
+  const handleAddTile = useCallback(() => {
+    setTiles(prev => [...prev, createEmptyTileState(8, 8)]);
+    setActiveTileIndex(tiles.length); // Switch to the new tile
+  }, [tiles.length]);
+  
+  // Remove the active tile (if there's more than one)
+  const handleRemoveTile = useCallback(() => {
+    if (tiles.length <= 1) return;
+    setTiles(prev => prev.filter((_, i) => i !== activeTileIndex));
+    // Adjust active index if necessary
+    if (activeTileIndex >= tiles.length - 1) {
+      setActiveTileIndex(tiles.length - 2);
+    }
+  }, [activeTileIndex, tiles.length]);
+  
+  // Switch to a specific tile
+  const handleSelectTile = useCallback((index: number) => {
+    if (index >= 0 && index < tiles.length) {
+      setActiveTileIndex(index);
+    }
+  }, [tiles.length]);
   
   // Count filled cells
   const filledCount = useMemo(() => {
@@ -547,6 +643,80 @@ export function PolyformExplorer() {
         onImportTileCoords={handleImportTileCoords}
         filledCount={filledCount}
       />
+
+      {/* Tile Tabs Navigation */}
+      <div style={{ 
+        marginTop: "16px",
+        marginBottom: "8px",
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        flexWrap: "wrap",
+      }}>
+        {/* Tab buttons for each tile */}
+        {tiles.map((tile, index) => {
+          const tileFilledCount = tile.cells.reduce((sum, row) => 
+            sum + row.filter(c => c).length, 0
+          );
+          return (
+            <button
+              key={index}
+              onClick={() => handleSelectTile(index)}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: index === activeTileIndex ? "#3498db" : "#e9ecef",
+                color: index === activeTileIndex ? "white" : "#495057",
+                border: "none",
+                borderRadius: "4px 4px 0 0",
+                cursor: "pointer",
+                fontWeight: index === activeTileIndex ? "bold" : "normal",
+                fontSize: "14px",
+                transition: "background-color 0.2s",
+              }}
+            >
+              Tile {index + 1} {tileFilledCount > 0 && `(${tileFilledCount})`}
+            </button>
+          );
+        })}
+        
+        {/* Add Tile button */}
+        <button
+          onClick={handleAddTile}
+          style={{
+            padding: "8px 12px",
+            backgroundColor: "#27ae60",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: "bold",
+          }}
+          title="Add a new tile"
+        >
+          + Add Tile
+        </button>
+        
+        {/* Remove Tile button (only if more than one tile) */}
+        {tiles.length > 1 && (
+          <button
+            onClick={handleRemoveTile}
+            style={{
+              padding: "8px 12px",
+              backgroundColor: "#e74c3c",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: "bold",
+            }}
+            title="Remove current tile"
+          >
+            − Remove
+          </button>
+        )}
+      </div>
 
       
       {/* Grid */}
