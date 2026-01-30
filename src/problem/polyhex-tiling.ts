@@ -468,7 +468,9 @@ export function solvePolyhexTiling(
   }
   
   // Generate all valid placements for each tile type
+  // Track which placements belong to each tile type (for "use each tile" constraint)
   let allPlacements: HexPlacement[] = [];
+  const placementsByTileType: number[][] = []; // placementsByTileType[tileIndex] = [placementId, ...]
   let placementId = 0;
   let maxQ = 0, maxR = 0; // Track max bounding box across all tiles
   
@@ -486,11 +488,16 @@ export function solvePolyhexTiling(
     // Generate placements for this tile
     const tilePlacements = generateAllHexPlacements(tileAxialCoords, tilingWidth, tilingHeight);
     
+    // Track placement IDs for this tile type
+    const tileTypePlacementIds: number[] = [];
+    
     // Renumber IDs to be continuous across all tiles
     for (const p of tilePlacements) {
       p.id = placementId++;
+      tileTypePlacementIds.push(p.id);
     }
     
+    placementsByTileType.push(tileTypePlacementIds);
     allPlacements = allPlacements.concat(tilePlacements);
   }
   
@@ -560,6 +567,18 @@ export function solvePolyhexTiling(
           const var2 = placementVars.get(coveringPlacements[j])!;
           solver.addClause([-var1, -var2]);
         }
+      }
+    }
+  }
+  
+  // CONSTRAINT 3: Each tile type must be used at least once (when multiple tiles)
+  // For each tile type, add an OR clause requiring at least one of its placements
+  if (nonEmptyTileCoords.length > 1) {
+    for (const tileTypePlacements of placementsByTileType) {
+      if (tileTypePlacements.length > 0) {
+        // At least one placement of this tile type must be active
+        const literals = tileTypePlacements.map(pid => placementVars.get(pid)!);
+        solver.addClause(literals);
       }
     }
   }
