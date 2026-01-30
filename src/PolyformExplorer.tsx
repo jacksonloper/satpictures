@@ -74,7 +74,8 @@ export function PolyformExplorer() {
   const [activeTileIndex, setActiveTileIndex] = useState(0);
   
   // Derived state for the active tile (for convenience)
-  const activeTile = tiles[activeTileIndex];
+  // Use a safe fallback in case activeTileIndex is temporarily out of bounds during state transitions
+  const activeTile = tiles[activeTileIndex] ?? tiles[0] ?? createEmptyTileState(8, 8);
   const gridWidth = activeTile.gridWidth;
   const gridHeight = activeTile.gridHeight;
   const cells = activeTile.cells;
@@ -580,26 +581,37 @@ export function PolyformExplorer() {
   
   // Add a new tile
   const handleAddTile = useCallback(() => {
-    setTiles(prev => [...prev, createEmptyTileState(8, 8)]);
-    setActiveTileIndex(tiles.length); // Switch to the new tile
-  }, [tiles.length]);
+    setTiles(prev => {
+      const newTiles = [...prev, createEmptyTileState(8, 8)];
+      // Use setTimeout to set the active index after the state update
+      // to avoid stale closure issues
+      setActiveTileIndex(newTiles.length - 1);
+      return newTiles;
+    });
+  }, []);
   
   // Remove the active tile (if there's more than one)
   const handleRemoveTile = useCallback(() => {
-    if (tiles.length <= 1) return;
-    setTiles(prev => prev.filter((_, i) => i !== activeTileIndex));
-    // Adjust active index if necessary
-    if (activeTileIndex >= tiles.length - 1) {
-      setActiveTileIndex(tiles.length - 2);
-    }
-  }, [activeTileIndex, tiles.length]);
+    setTiles(prev => {
+      if (prev.length <= 1) return prev;
+      const newTiles = prev.filter((_, i) => i !== activeTileIndex);
+      // Adjust active index if it's now out of bounds
+      if (activeTileIndex >= newTiles.length) {
+        setActiveTileIndex(newTiles.length - 1);
+      }
+      return newTiles;
+    });
+  }, [activeTileIndex]);
   
   // Switch to a specific tile
   const handleSelectTile = useCallback((index: number) => {
-    if (index >= 0 && index < tiles.length) {
-      setActiveTileIndex(index);
-    }
-  }, [tiles.length]);
+    setTiles(prev => {
+      if (index >= 0 && index < prev.length) {
+        setActiveTileIndex(index);
+      }
+      return prev;
+    });
+  }, []);
   
   // Count filled cells
   const filledCount = useMemo(() => {

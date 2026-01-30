@@ -441,9 +441,18 @@ export function solvePolyhexTiling(
   }
   
   // Normalize input: support both single tile (boolean[][]) and multiple tiles (boolean[][][])
-  const tiles: boolean[][][] = Array.isArray(tilesInput[0]?.[0]) 
-    ? (tilesInput as boolean[][][])
-    : [tilesInput as boolean[][]];
+  // Check if the input is a 3D array (multiple tiles) or 2D array (single tile)
+  // Handle edge cases: empty array, single tile with data, multiple tiles
+  let tiles: boolean[][][];
+  if (tilesInput.length === 0) {
+    tiles = [];
+  } else if (Array.isArray(tilesInput[0]?.[0])) {
+    // It's a 3D array (boolean[][][]) - multiple tiles
+    tiles = tilesInput as boolean[][][];
+  } else {
+    // It's a 2D array (boolean[][]) - single tile
+    tiles = [tilesInput as boolean[][]];
+  }
   
   // Convert each tile grid to normalized axial coordinates
   const allTileCoords: AxialCoord[][] = tiles.map(cells => hexGridToAxialCoords(cells));
