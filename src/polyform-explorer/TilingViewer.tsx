@@ -272,7 +272,8 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
           
           // Larger radius for better visibility and easier clicking
           const semicircleRadius = cellSize * 0.18;
-          const numEdges = grid.neighbors[0].length;
+          // All cell types have the same neighbor count for square grids
+          const numEdges = grid.neighbors[0]?.length ?? 4;
           
           return placements.flatMap((placement, pIndex) => {
             // Use grid-agnostic inverse permutation computation

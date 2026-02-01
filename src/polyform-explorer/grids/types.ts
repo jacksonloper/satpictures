@@ -464,9 +464,10 @@ function composePermutations(a: number[], b: number[]): number[] {
 /**
  * Compute the inverse of a permutation.
  * If perm[i] = j, then inverse[j] = i.
+ * Assumes perm is a valid permutation (bijective mapping).
  */
 function invertPermutation(perm: number[]): number[] {
-  const inverse = new Array(perm.length).fill(0);
+  const inverse = new Array<number>(perm.length);
   for (let i = 0; i < perm.length; i++) {
     inverse[perm[i]] = i;
   }
