@@ -51,7 +51,8 @@ export function gridToCoords(grid: GridDefinition, cells: boolean[][]): Coord[] 
   for (let row = 0; row < cells.length; row++) {
     for (let col = 0; col < cells[row].length; col++) {
       if (cells[row][col]) {
-        coords.push({ row, col });
+        // cells[row][col] corresponds to cells[r][q], so row=r, col=q
+        coords.push({ q: col, r: row });
       }
     }
   }

@@ -7,8 +7,25 @@
 
 import React, { useMemo, useCallback } from "react";
 import type { GridDefinition, Coord, EdgeState } from "./types";
+import { getInverseEdgePermutation } from "./types";
 import type { UnifiedPlacement } from "./unifiedTiling";
 import { getPlacementColor } from "../placementColors";
+
+/**
+ * Create an SVG path for a semicircle centered at (cx, cy) with given radius.
+ * The semicircle faces the direction specified by the angle (in radians).
+ */
+function createSemicirclePath(cx: number, cy: number, radius: number, angle: number): string {
+  const startAngle = angle - Math.PI / 2;
+  const endAngle = angle + Math.PI / 2;
+  
+  const x1 = cx + radius * Math.cos(startAngle);
+  const y1 = cy + radius * Math.sin(startAngle);
+  const x2 = cx + radius * Math.cos(endAngle);
+  const y2 = cy + radius * Math.sin(endAngle);
+  
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2} Z`;
+}
 
 export interface UnifiedTilingViewerProps {
   /** The grid definition to use for rendering */
@@ -362,70 +379,84 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
           ));
         })()}
         
-        {/* Layer 5: Edge markings as inset circles
+        {/* Layer 5: Edge markings as half-circles for each tile placement
          * 
-         * Since neighboring cells may have different edge values, we render
-         * the marker as a circle that protrudes into this cell's interior.
+         * The edgeState represents the edges marked on the original tile shape.
+         * Each placement has a transformIndex indicating how it was rotated/flipped.
+         * We need to apply the inverse permutation to map from visual edge indices
+         * back to the original edge indices in edgeState.
          * 
          * With vertices listed clockwise, the cell interior is to the RIGHT
          * of each edge (when going from vertex[i] to vertex[i+1]).
-         * 
-         * For each marked edge:
-         * 1. Find the edge midpoint
-         * 2. Calculate the perpendicular direction (90° CW = into cell interior)
-         * 3. Offset the circle center inward from the edge
-         * 4. Draw a filled circle to indicate the edge is marked
+         * We render half-circles facing into the cell interior.
          */}
-        {edgeState && cellsToRender.flatMap(({ coord }) => {
-          const cellEdges = edgeState[coord.r]?.[coord.q];
-          if (!cellEdges) return [];
+        {edgeState && (() => {
+          // Pre-compute the original cells (cells that have edge state defined)
+          const originalCells: { q: number; r: number }[] = [];
+          for (let r = 0; r < edgeState.length; r++) {
+            for (let q = 0; q < (edgeState[r]?.length || 0); q++) {
+              if (edgeState[r]?.[q]) {
+                originalCells.push({ q, r });
+              }
+            }
+          }
           
-          const vertices = getCellVerticesForEdge(coord);
-          const numEdges = vertices.length;
+          // Larger radius for better visibility
+          const semicircleRadius = cellSize * 0.18;
           
-          // Circle radius as a fraction of cell size
-          const circleRadius = cellSize * 0.12;
-          // How far to inset the circle from the edge (center distance)
-          const insetDistance = cellSize * 0.15;
-          
-          return cellEdges
-            .map((isMarked, edgeIdx) => ({ isMarked, edgeIdx }))
-            .filter(({ isMarked }) => isMarked)
-            .map(({ edgeIdx }) => {
-              const v1 = vertices[edgeIdx];
-              const v2 = vertices[(edgeIdx + 1) % numEdges];
+          return placements.flatMap((placement, pIndex) => {
+            // Get inverse edge permutation for this placement's transform
+            const inversePerm = getInverseEdgePermutation(grid, placement.transformIndex);
+            
+            return placement.cells.flatMap((cell, cellIdx) => {
+              // The cellIdx maps to the same index in the original cells list
+              // because transformations preserve cell count and order
+              if (cellIdx >= originalCells.length) return [];
               
-              // Edge midpoint
-              const midX = (v1.x + v2.x) / 2;
-              const midY = (v1.y + v2.y) / 2;
+              const origCell = originalCells[cellIdx];
+              const origEdges = edgeState[origCell.r]?.[origCell.q];
+              if (!origEdges) return [];
               
-              // Edge direction vector
-              const edgeDx = v2.x - v1.x;
-              const edgeDy = v2.y - v1.y;
-              const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+              const vertices = getCellVerticesForEdge(cell);
+              const numEdges = vertices.length;
               
-              // Perpendicular direction (90° clockwise = into cell interior)
-              // Rotating (dx, dy) by 90° CW gives (dy, -dx)
-              const perpX = edgeDy / edgeLen;
-              const perpY = -edgeDx / edgeLen;
-              
-              // Circle center: offset inward from edge midpoint
-              const cx = midX + perpX * insetDistance;
-              const cy = midY + perpY * insetDistance;
-              
-              return (
-                <circle
-                  key={`edge-mark-${coordKey(coord)}-${edgeIdx}`}
-                  cx={cx}
-                  cy={cy}
-                  r={circleRadius}
-                  fill="#f39c12"
-                  stroke="#c0392b"
-                  strokeWidth={1}
-                />
-              );
+              return Array.from({ length: numEdges }, (_, visualEdgeIdx) => {
+                // Use inverse permutation to find which original edge corresponds
+                // to this visual edge after the transform
+                const origEdgeIdx = inversePerm[visualEdgeIdx];
+                const isMarked = origEdges[origEdgeIdx] ?? false;
+                
+                if (!isMarked) return null;
+                
+                const v1 = vertices[visualEdgeIdx];
+                const v2 = vertices[(visualEdgeIdx + 1) % numEdges];
+                
+                // Edge midpoint
+                const midX = (v1.x + v2.x) / 2;
+                const midY = (v1.y + v2.y) / 2;
+                
+                // Edge direction for perpendicular calculation
+                const edgeDx = v2.x - v1.x;
+                const edgeDy = v2.y - v1.y;
+                
+                // Perpendicular angle pointing into cell (90° CW)
+                const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
+                
+                const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
+                
+                return (
+                  <path
+                    key={`edge-mark-${pIndex}-${cellIdx}-${visualEdgeIdx}`}
+                    d={path}
+                    fill="#f39c12"
+                    stroke="#c0392b"
+                    strokeWidth={1}
+                  />
+                );
+              });
             });
-        })}
+          });
+        })()}
       </svg>
     </div>
   );

@@ -503,14 +503,15 @@ export function getInverseEdgePermutation(
   const rotationCount = isFlipped ? transformIndex - numRotations : transformIndex;
   
   // If flipped, apply flip first
+  // Note: We use origin {q: 0, r: 0} but only care about the neighborPerm
   if (isFlipped) {
-    const flipResult = grid.flip({ row: 0, col: 0 });
+    const flipResult = grid.flip({ q: 0, r: 0 });
     forwardPerm = composePermutations(forwardPerm, flipResult.neighborPerm);
   }
   
   // Apply rotations
-  for (let r = 0; r < rotationCount; r++) {
-    const rotateResult = grid.rotate({ row: 0, col: 0 });
+  for (let rot = 0; rot < rotationCount; rot++) {
+    const rotateResult = grid.rotate({ q: 0, r: 0 });
     forwardPerm = composePermutations(forwardPerm, rotateResult.neighborPerm);
   }
   

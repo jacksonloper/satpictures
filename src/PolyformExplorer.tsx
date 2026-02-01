@@ -15,9 +15,6 @@ import {
   flipVertical,
 } from "./utils/polyformTransforms";
 import {
-  SquareGrid,
-  HexGrid,
-  TriangleGrid,
   TilingViewer,
   HexTilingViewer,
   TriTilingViewer,
@@ -42,6 +39,7 @@ import {
   squareGridDefinition,
   hexGridDefinition,
   triGridDefinition,
+  UnifiedGridEditor,
 } from "./polyform-explorer";
 
 /** Editor mode for the grid */
@@ -841,7 +839,7 @@ export function PolyformExplorer() {
         )}
       </div>
       
-      {/* Grid */}
+      {/* Grid - Using unified component for all grid types */}
       <div style={{ 
         padding: "16px", 
         backgroundColor: "#f8f9fa", 
@@ -849,33 +847,14 @@ export function PolyformExplorer() {
         border: `2px solid ${editorMode === 'edge' ? '#f39c12' : '#3498db'}`,
         display: "inline-block",
       }}>
-        {polyformType === "polyomino" && (
-          <SquareGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-            mode={editorMode}
-            edgeState={edgeState}
-            onEdgeClick={handleEdgeClick}
-          />
-        )}
-        {polyformType === "polyhex" && (
-          <HexGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-            mode={editorMode}
-            edgeState={edgeState}
-            onEdgeClick={handleEdgeClick}
-          />
-        )}
-        {polyformType === "polyiamond" && (
-          <TriangleGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-            mode={editorMode}
-            edgeState={edgeState}
-            onEdgeClick={handleEdgeClick}
-          />
-        )}
+        <UnifiedGridEditor
+          grid={getGridDef(polyformType)}
+          cells={cells}
+          onCellClick={handleCellClick}
+          mode={editorMode}
+          edgeState={edgeState}
+          onEdgeClick={handleEdgeClick}
+        />
       </div>
       
       {/* Tiling Solver Section */}

@@ -10,7 +10,27 @@
  */
 
 import React, { useCallback, useMemo } from "react";
-import type { GridDefinition, EdgeState } from "./types";
+import type { GridDefinition, EdgeState, Coord } from "./types";
+
+/**
+ * Create an SVG path for a semicircle centered at (cx, cy) with given radius.
+ * The semicircle faces the direction specified by the angle (in radians).
+ * angle=0 faces right, angle=PI/2 faces down, etc.
+ */
+function createSemicirclePath(cx: number, cy: number, radius: number, angle: number): string {
+  // Start and end points of the semicircle arc
+  // The semicircle spans 180 degrees centered on the given angle
+  const startAngle = angle - Math.PI / 2;
+  const endAngle = angle + Math.PI / 2;
+  
+  const x1 = cx + radius * Math.cos(startAngle);
+  const y1 = cy + radius * Math.sin(startAngle);
+  const x2 = cx + radius * Math.cos(endAngle);
+  const y2 = cy + radius * Math.sin(endAngle);
+  
+  // SVG arc: A rx ry x-axis-rotation large-arc-flag sweep-flag x y
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2} Z`;
+}
 
 export type EditorMode = 'cell' | 'edge';
 
@@ -66,11 +86,12 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
     }
     
     // Get cell vertices for corner cells to determine actual bounds
-    const corners = [
-      { row: 0, col: 0 },
-      { row: 0, col: width - 1 },
-      { row: height - 1, col: 0 },
-      { row: height - 1, col: width - 1 },
+    // Note: cells[r][q] so r is row and q is column
+    const corners: Coord[] = [
+      { q: 0, r: 0 },
+      { q: width - 1, r: 0 },
+      { q: 0, r: height - 1 },
+      { q: width - 1, r: height - 1 },
     ];
     
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -108,8 +129,9 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
   }, [grid, cellSize, width, height]);
   
   // Create SVG path for a cell
-  const createCellPath = useCallback((row: number, col: number): string => {
-    const vertices = grid.getCellVertices({ row, col }, cellSize);
+  // Note: cells array is indexed as cells[r][q], so row=r, col=q
+  const createCellPath = useCallback((r: number, q: number): string => {
+    const vertices = grid.getCellVertices({ q, r }, cellSize);
     const translatedVertices = vertices.map(v => ({
       x: v.x + svgDimensions.offsetX,
       y: v.y + svgDimensions.offsetY,
@@ -125,27 +147,13 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
   }, [grid, cellSize, svgDimensions]);
   
   // Get vertices for a cell (with offset applied)
-  const getCellVertices = useCallback((row: number, col: number) => {
-    const vertices = grid.getCellVertices({ row, col }, cellSize);
+  const getCellVertices = useCallback((r: number, q: number) => {
+    const vertices = grid.getCellVertices({ q, r }, cellSize);
     return vertices.map(v => ({
       x: v.x + svgDimensions.offsetX,
       y: v.y + svgDimensions.offsetY,
     }));
   }, [grid, cellSize, svgDimensions]);
-  
-  // Get the midpoint and normal direction for an edge (for click detection)
-  const getEdgeInfo = useCallback((row: number, col: number, edgeIndex: number) => {
-    const vertices = getCellVertices(row, col);
-    const numEdges = vertices.length;
-    const v1 = vertices[edgeIndex];
-    const v2 = vertices[(edgeIndex + 1) % numEdges];
-    
-    // Midpoint
-    const midX = (v1.x + v2.x) / 2;
-    const midY = (v1.y + v2.y) / 2;
-    
-    return { v1, v2, midX, midY };
-  }, [getCellVertices]);
   
   const fillColor = getDefaultFillColor(grid.name);
   const edgeHighlightColor = '#f39c12';  // Orange for marked edges
@@ -171,10 +179,13 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
         ))
       )}
       
-      {/* Layer 2: Edge highlights (marked edges) as inset circles
+      {/* Layer 2: Edge half-circles - ALWAYS visible
        * 
        * With vertices listed clockwise, the cell interior is to the RIGHT
-       * of each edge. We render filled circles inset from the edge.
+       * of each edge. We render half-circles facing into the cell.
+       * 
+       * In edge mode, all half-circles are shown (hollow or filled).
+       * In cell mode, only marked half-circles are shown.
        */}
       {edgeState && cells.flatMap((row, rowIdx) =>
         row.flatMap((_, colIdx) => {
@@ -184,72 +195,44 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
           const vertices = getCellVertices(rowIdx, colIdx);
           const numEdges = vertices.length;
           
-          // Circle radius as a fraction of cell size
-          const circleRadius = cellSize * 0.12;
-          // How far to inset the circle from the edge (center distance)
-          const insetDistance = cellSize * 0.15;
+          // Larger radius for better visibility and easier clicking
+          const semicircleRadius = cellSize * 0.18;
           
-          return cellEdges
-            .map((isMarked, edgeIdx) => ({ isMarked, edgeIdx }))
-            .filter(({ isMarked }) => isMarked)
-            .map(({ edgeIdx }) => {
-              const v1 = vertices[edgeIdx];
-              const v2 = vertices[(edgeIdx + 1) % numEdges];
-              
-              // Edge midpoint
-              const midX = (v1.x + v2.x) / 2;
-              const midY = (v1.y + v2.y) / 2;
-              
-              // Edge direction vector
-              const edgeDx = v2.x - v1.x;
-              const edgeDy = v2.y - v1.y;
-              const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
-              
-              // Perpendicular direction (90° clockwise = into cell interior)
-              const perpX = edgeDy / edgeLen;
-              const perpY = -edgeDx / edgeLen;
-              
-              // Circle center: offset inward from edge midpoint
-              const cx = midX + perpX * insetDistance;
-              const cy = midY + perpY * insetDistance;
-              
-              return (
-                <circle
-                  key={`edge-highlight-${rowIdx}-${colIdx}-${edgeIdx}`}
-                  cx={cx}
-                  cy={cy}
-                  r={circleRadius}
-                  fill={edgeHighlightColor}
-                  stroke="#c0392b"
-                  strokeWidth={1}
-                />
-              );
-            });
-        })
-      )}
-      
-      {/* Layer 3: Edge click targets (in edge mode) */}
-      {mode === 'edge' && cells.map((row, rowIdx) =>
-        row.map((_, colIdx) => {
-          const cellType = grid.getCellType({ row: rowIdx, col: colIdx });
-          const numEdges = grid.neighbors[cellType].length;
-          
-          return Array.from({ length: numEdges }, (_, edgeIdx) => {
-            const { v1, v2 } = getEdgeInfo(rowIdx, colIdx, edgeIdx);
+          return cellEdges.map((isMarked, edgeIdx) => {
+            // In cell mode, only show marked edges
+            if (mode !== 'edge' && !isMarked) return null;
+            
+            const v1 = vertices[edgeIdx];
+            const v2 = vertices[(edgeIdx + 1) % numEdges];
+            
+            // Edge midpoint
+            const midX = (v1.x + v2.x) / 2;
+            const midY = (v1.y + v2.y) / 2;
+            
+            // Edge direction for perpendicular calculation
+            const edgeDx = v2.x - v1.x;
+            const edgeDy = v2.y - v1.y;
+            
+            // Perpendicular direction (90° clockwise = into cell interior)
+            // Rotating (dx, dy) by 90° CW gives (dy, -dx)
+            const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
+            
+            // Semicircle path - facing into the cell
+            const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
             
             return (
-              <line
-                key={`edge-click-${rowIdx}-${colIdx}-${edgeIdx}`}
-                x1={v1.x}
-                y1={v1.y}
-                x2={v2.x}
-                y2={v2.y}
-                stroke="transparent"
-                strokeWidth={10}
-                style={{ cursor: "pointer" }}
+              <path
+                key={`edge-half-${rowIdx}-${colIdx}-${edgeIdx}`}
+                d={path}
+                fill={isMarked ? edgeHighlightColor : "white"}
+                stroke={isMarked ? "#c0392b" : "#bdc3c7"}
+                strokeWidth={1}
+                style={{ cursor: mode === 'edge' ? "pointer" : "default" }}
                 onClick={(e) => {
-                  e.stopPropagation();
-                  onEdgeClick?.(rowIdx, colIdx, edgeIdx);
+                  if (mode === 'edge') {
+                    e.stopPropagation();
+                    onEdgeClick?.(rowIdx, colIdx, edgeIdx);
+                  }
                 }}
               />
             );
