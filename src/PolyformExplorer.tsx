@@ -14,6 +14,7 @@ import {
   flipHorizontal,
   flipVertical,
 } from "./utils/polyformTransforms";
+import { type EdgeKey, makeEdgeKey } from "./utils/edgeKey";
 import {
   SquareGrid,
   HexGrid,
@@ -42,9 +43,12 @@ import {
  * Allows users to build polyomino, polyhex, or polyiamond shapes
  * with rotation and flip controls.
  */
+
 /** Represents a single tile with its grid and dimensions */
 interface TileState {
   cells: boolean[][];
+  /** Set of edge keys that have roads (edges between filled cells) */
+  roads: Set<EdgeKey>;
   gridWidth: number;
   gridHeight: number;
   widthInput: string;
@@ -57,6 +61,7 @@ interface TileState {
 function createEmptyTileState(width: number = 8, height: number = 8): TileState {
   return {
     cells: createEmptyBooleanGrid(width, height),
+    roads: new Set<EdgeKey>(),
     gridWidth: width,
     gridHeight: height,
     widthInput: String(width),
@@ -79,6 +84,7 @@ export function PolyformExplorer() {
   const gridWidth = activeTile.gridWidth;
   const gridHeight = activeTile.gridHeight;
   const cells = activeTile.cells;
+  const roads = activeTile.roads;
   const widthInput = activeTile.widthInput;
   const heightInput = activeTile.heightInput;
   const widthError = activeTile.widthError;
@@ -96,6 +102,14 @@ export function PolyformExplorer() {
       if (i !== activeTileIndex) return tile;
       const newCells = typeof updater === 'function' ? updater(tile.cells) : updater;
       return { ...tile, cells: newCells };
+    }));
+  }, [activeTileIndex]);
+  
+  const setRoads = useCallback((updater: Set<EdgeKey> | ((prev: Set<EdgeKey>) => Set<EdgeKey>)) => {
+    setTiles(prev => prev.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      const newRoads = typeof updater === 'function' ? updater(tile.roads) : updater;
+      return { ...tile, roads: newRoads };
     }));
   }, [activeTileIndex]);
   
@@ -358,14 +372,18 @@ export function PolyformExplorer() {
   const handleSolveTiling = useCallback(() => {
     // Gather all tiles with at least one filled cell
     const allTileCells = tiles.map(tile => tile.cells);
-    const tilesWithContent = allTileCells.filter(cells => 
-      cells.some(row => row.some(c => c))
-    );
+    const tilesWithContentIndices = allTileCells.map((cells, idx) => ({ cells, idx }))
+      .filter(({ cells }) => cells.some(row => row.some(c => c)));
     
-    if (tilesWithContent.length === 0) {
+    if (tilesWithContentIndices.length === 0) {
       setTilingError("Please draw at least one tile first by clicking cells above.");
       return;
     }
+    
+    const tilesWithContent = tilesWithContentIndices.map(({ cells }) => cells);
+    
+    // Get roads for each tile (as array of edge key strings)
+    const tileRoads = tiles.map(tile => Array.from(tile.roads));
     
     // Clear previous results
     setTilingResult(null);
@@ -412,6 +430,7 @@ export function PolyformExplorer() {
     // Send request with all tiles that have content
     worker.postMessage({
       tiles: tilesWithContent,
+      tileRoads,
       tilingWidth,
       tilingHeight,
       polyformType,
@@ -471,7 +490,35 @@ export function PolyformExplorer() {
       newCells[row][col] = !newCells[row][col];
       return newCells;
     });
-  }, [setCells]);
+    // When a cell is toggled off, remove any roads connected to it
+    setRoads(prev => {
+      const newRoads = new Set(prev);
+      // Remove any edges connected to this cell
+      for (const edgeKey of prev) {
+        const [part1, part2] = edgeKey.split('-');
+        const [r1, c1] = part1.split(',').map(Number);
+        const [r2, c2] = part2.split(',').map(Number);
+        if ((r1 === row && c1 === col) || (r2 === row && c2 === col)) {
+          newRoads.delete(edgeKey);
+        }
+      }
+      return newRoads;
+    });
+  }, [setCells, setRoads]);
+  
+  // Toggle road on edge between two adjacent cells
+  const handleEdgeClick = useCallback((row1: number, col1: number, row2: number, col2: number) => {
+    const edgeKey = makeEdgeKey(row1, col1, row2, col2);
+    setRoads(prev => {
+      const newRoads = new Set(prev);
+      if (newRoads.has(edgeKey)) {
+        newRoads.delete(edgeKey);
+      } else {
+        newRoads.add(edgeKey);
+      }
+      return newRoads;
+    });
+  }, [setRoads]);
   
   // Rotate the polyform
   const handleRotate = useCallback(() => {
@@ -502,7 +549,30 @@ export function PolyformExplorer() {
       setHeightError(false);
       return rotated;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    // Transform roads for polyomino rotation (90° clockwise)
+    if (polyformType === "polyomino") {
+      setRoads(prev => {
+        const newRoads = new Set<EdgeKey>();
+        const oldHeight = gridHeight;
+        for (const edgeKey of prev) {
+          const [part1, part2] = edgeKey.split('-');
+          const [r1, c1] = part1.split(',').map(Number);
+          const [r2, c2] = part2.split(',').map(Number);
+          // Rotation 90° CW: (row, col) -> (col, height - 1 - row)
+          const nr1 = c1;
+          const nc1 = oldHeight - 1 - r1;
+          const nr2 = c2;
+          const nc2 = oldHeight - 1 - r2;
+          const newKey = makeEdgeKey(nr1, nc1, nr2, nc2);
+          newRoads.add(newKey);
+        }
+        return newRoads;
+      });
+    } else {
+      // Clear roads for non-polyomino types
+      setRoads(new Set<EdgeKey>());
+    }
+  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError, setRoads, gridHeight]);
   
   // Flip horizontally (geometry-correct per polyform type)
   const handleFlipH = useCallback(() => {
@@ -533,7 +603,27 @@ export function PolyformExplorer() {
 
       return next;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    // Transform roads for polyomino horizontal flip
+    if (polyformType === "polyomino") {
+      setRoads(prev => {
+        const newRoads = new Set<EdgeKey>();
+        const oldWidth = gridWidth;
+        for (const edgeKey of prev) {
+          const [part1, part2] = edgeKey.split('-');
+          const [r1, c1] = part1.split(',').map(Number);
+          const [r2, c2] = part2.split(',').map(Number);
+          // Flip horizontally: (row, col) -> (row, width - 1 - col)
+          const nc1 = oldWidth - 1 - c1;
+          const nc2 = oldWidth - 1 - c2;
+          const newKey = makeEdgeKey(r1, nc1, r2, nc2);
+          newRoads.add(newKey);
+        }
+        return newRoads;
+      });
+    } else {
+      setRoads(new Set<EdgeKey>());
+    }
+  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError, setRoads, gridWidth]);
   
   // Flip vertically (geometry-correct per polyform type)
   const handleFlipV = useCallback(() => {
@@ -564,12 +654,33 @@ export function PolyformExplorer() {
 
       return next;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    // Transform roads for polyomino vertical flip
+    if (polyformType === "polyomino") {
+      setRoads(prev => {
+        const newRoads = new Set<EdgeKey>();
+        const oldHeight = gridHeight;
+        for (const edgeKey of prev) {
+          const [part1, part2] = edgeKey.split('-');
+          const [r1, c1] = part1.split(',').map(Number);
+          const [r2, c2] = part2.split(',').map(Number);
+          // Flip vertically: (row, col) -> (height - 1 - row, col)
+          const nr1 = oldHeight - 1 - r1;
+          const nr2 = oldHeight - 1 - r2;
+          const newKey = makeEdgeKey(nr1, c1, nr2, c2);
+          newRoads.add(newKey);
+        }
+        return newRoads;
+      });
+    } else {
+      setRoads(new Set<EdgeKey>());
+    }
+  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError, setRoads, gridHeight]);
   
   // Clear the grid
   const handleClear = useCallback(() => {
     setCells(createEmptyBooleanGrid(gridWidth, gridHeight));
-  }, [gridWidth, gridHeight, setCells]);
+    setRoads(new Set<EdgeKey>());
+  }, [gridWidth, gridHeight, setCells, setRoads]);
   
   // Change polyform type
   const handleTypeChange = useCallback((newType: PolyformType) => {
@@ -742,7 +853,9 @@ export function PolyformExplorer() {
         {polyformType === "polyomino" && (
           <SquareGrid
             cells={cells}
+            roads={roads}
             onCellClick={handleCellClick}
+            onEdgeClick={handleEdgeClick}
           />
         )}
         {polyformType === "polyhex" && (

@@ -43,6 +43,39 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
     };
   }, [placements, width, height]);
   
+  // Collect all road edges from placements
+  const roadLines = useMemo(() => {
+    const lines: Array<{ x1: number; y1: number; x2: number; y2: number; key: string }> = [];
+    
+    placements.forEach((p, pIndex) => {
+      if (!p.roads) return;
+      
+      for (const road of p.roads) {
+        // Calculate cell centroids in SVG coordinates
+        const svgCol1 = road.cell1.col + (-outerBounds.minCol);
+        const svgRow1 = road.cell1.row + (-outerBounds.minRow);
+        const svgCol2 = road.cell2.col + (-outerBounds.minCol);
+        const svgRow2 = road.cell2.row + (-outerBounds.minRow);
+        
+        // Centroid of each cell
+        const cx1 = svgCol1 * cellSize + cellSize / 2;
+        const cy1 = svgRow1 * cellSize + cellSize / 2;
+        const cx2 = svgCol2 * cellSize + cellSize / 2;
+        const cy2 = svgRow2 * cellSize + cellSize / 2;
+        
+        lines.push({
+          x1: cx1,
+          y1: cy1,
+          x2: cx2,
+          y2: cy2,
+          key: `road-${pIndex}-${road.cell1.row},${road.cell1.col}-${road.cell2.row},${road.cell2.col}`,
+        });
+      }
+    });
+    
+    return lines;
+  }, [placements, outerBounds, cellSize]);
+  
   const outerWidth = outerBounds.maxCol - outerBounds.minCol + 1;
   const outerHeight = outerBounds.maxRow - outerBounds.minRow + 1;
   
@@ -229,6 +262,20 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
             />
           ));
         })}
+        
+        {/* Layer 5: Draw roads (lines from cell centroid to cell centroid) */}
+        {roadLines.map(({ x1, y1, x2, y2, key }) => (
+          <line
+            key={key}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke="#e67e22"
+            strokeWidth={4}
+            strokeLinecap="round"
+          />
+        ))}
       </svg>
     </div>
   );

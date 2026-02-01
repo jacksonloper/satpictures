@@ -24,6 +24,8 @@ export interface PolyominoTilingSolverRequest {
   cells?: boolean[][];
   /** Multiple tiles to use for tiling (new: takes precedence over cells) */
   tiles?: boolean[][][];
+  /** Road edges for each tile (array of edge keys like "row1,col1-row2,col2") */
+  tileRoads?: string[][];
   /** Width of the tiling grid */
   tilingWidth: number;
   /** Height of the tiling grid */
@@ -263,7 +265,7 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
-  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
+  const { cells, tiles, tileRoads, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
   
   // Use tiles array if provided, otherwise fall back to single cells for backward compatibility
   const tilesToUse: boolean[][][] = tiles ?? (cells ? [cells] : []);
@@ -298,7 +300,7 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
     } else if (polyformType === "polyiamond") {
       result = solvePolyiamondTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
     } else {
-      result = solvePolyominoTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
+      result = solvePolyominoTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady, tileRoads);
     }
     
     // Clean up

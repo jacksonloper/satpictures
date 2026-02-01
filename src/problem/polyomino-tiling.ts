@@ -17,6 +17,12 @@ export interface Coord {
   col: number;
 }
 
+/** Represents an edge between two adjacent cells (sorted canonical form) */
+export interface Edge {
+  cell1: Coord;
+  cell2: Coord;
+}
+
 /** A single placement of a tile at a position with a specific transform */
 export interface Placement {
   /** Unique identifier for the placement */
@@ -27,6 +33,8 @@ export interface Placement {
   transformIndex: number;
   /** Coordinates this placement covers (absolute, after transform and translation) */
   cells: Coord[];
+  /** Road edges in this placement (absolute, after transform and translation) */
+  roads?: Edge[];
 }
 
 /** Result of tiling attempt */
@@ -118,6 +126,102 @@ function generateAllTransforms(baseCells: Coord[]): Coord[][] {
   for (let i = 0; i < 4; i++) {
     transforms.push(current);
     current = rotateCoords90(current);
+  }
+  
+  return transforms;
+}
+
+/**
+ * Parse a road edge key string like "row1,col1-row2,col2" into coordinates.
+ */
+function parseEdgeKey(key: string): { r1: number; c1: number; r2: number; c2: number } | null {
+  const parts = key.split('-');
+  if (parts.length !== 2) return null;
+  const [p1, p2] = parts;
+  const [r1, c1] = p1.split(',').map(Number);
+  const [r2, c2] = p2.split(',').map(Number);
+  if ([r1, c1, r2, c2].some(isNaN)) return null;
+  return { r1, c1, r2, c2 };
+}
+
+/**
+ * Apply a transform to road edges.
+ * transformIndex: 0-7 (same as for cells)
+ * - 0: identity
+ * - 1: rotate 90° CW
+ * - 2: rotate 180°
+ * - 3: rotate 270°
+ * - 4: flip H
+ * - 5: flip H + rotate 90°
+ * - 6: flip H + rotate 180°
+ * - 7: flip H + rotate 270°
+ */
+function transformRoads(
+  roadKeys: string[],
+  transformIndex: number,
+  originalBounds: { height: number; width: number }
+): Edge[] {
+  const edges: Edge[] = [];
+  
+  for (const key of roadKeys) {
+    const parsed = parseEdgeKey(key);
+    if (!parsed) continue;
+    
+    let { r1, c1, r2, c2 } = parsed;
+    const h = originalBounds.height;
+    const w = originalBounds.width;
+    
+    // Apply transform
+    const doFlip = transformIndex >= 4;
+    const rotations = transformIndex % 4;
+    
+    // Flip horizontally first (if needed)
+    if (doFlip) {
+      c1 = w - 1 - c1;
+      c2 = w - 1 - c2;
+    }
+    
+    // Apply rotations (each rotation: (r, c) -> (c, h-1-r) for 90° CW)
+    for (let i = 0; i < rotations; i++) {
+      const currentH = (i % 2 === 0) 
+        ? (doFlip ? w : h) 
+        : (doFlip ? h : w);
+      const nr1 = c1, nc1 = currentH - 1 - r1;
+      const nr2 = c2, nc2 = currentH - 1 - r2;
+      r1 = nr1; c1 = nc1;
+      r2 = nr2; c2 = nc2;
+    }
+    
+    // Normalize to get proper bounds after transform
+    // Since cells also get normalized, we need to track the offset
+    // This is handled in generateAllPlacementsWithRoads
+    
+    edges.push({
+      cell1: { row: r1, col: c1 },
+      cell2: { row: r2, col: c2 }
+    });
+  }
+  
+  return edges;
+}
+
+/**
+ * Generate all 8 transforms of roads (matching cell transforms).
+ */
+function generateAllRoadTransforms(
+  roadKeys: string[],
+  coords: Coord[]
+): Edge[][] {
+  if (roadKeys.length === 0) {
+    return Array(8).fill([]);
+  }
+  
+  // Get bounds of the original coords
+  const bb = getBoundingBox(coords);
+  
+  const transforms: Edge[][] = [];
+  for (let i = 0; i < 8; i++) {
+    transforms.push(transformRoads(roadKeys, i, bb));
   }
   
   return transforms;
@@ -280,6 +384,112 @@ export function generateAllPlacements(
 }
 
 /**
+ * Generate all valid placements with road edges for tiling a (W,H) grid.
+ * 
+ * A placement is valid if it covers at least one cell in the inner (W,H) grid.
+ * Placements can extend outside the inner grid (into a larger bounding area).
+ */
+export function generateAllPlacementsWithRoads(
+  tileCoords: Coord[],
+  tilingWidth: number,
+  tilingHeight: number,
+  roadKeys: string[]
+): Placement[] {
+  if (tileCoords.length === 0) return [];
+  
+  // Get all 8 transforms for both cells and roads
+  const allTransforms = generateAllTransforms(tileCoords);
+  const allRoadTransforms = generateAllRoadTransforms(roadKeys, tileCoords);
+  
+  // For deduplication, we need to track which transforms are unique
+  // We'll use indices to map back to original road transforms
+  const uniqueIndices: number[] = [];
+  const seenSets: Set<string>[] = [];
+  
+  for (let i = 0; i < allTransforms.length; i++) {
+    const transform = allTransforms[i];
+    const transformSet = new Set(transform.map(c => `${c.row},${c.col}`));
+    let isDuplicate = false;
+    
+    for (const existing of seenSets) {
+      if (transformSet.size === existing.size && [...transformSet].every(k => existing.has(k))) {
+        isDuplicate = true;
+        break;
+      }
+    }
+    
+    if (!isDuplicate) {
+      uniqueIndices.push(i);
+      seenSets.push(transformSet);
+    }
+  }
+  
+  // Build the unique transforms with corresponding road transforms
+  const transforms = uniqueIndices.map(i => allTransforms[i]);
+  const roadTransforms = uniqueIndices.map(i => allRoadTransforms[i]);
+  
+  // Find the maximum bounding box across all transforms
+  let maxTransformWidth = 0;
+  let maxTransformHeight = 0;
+  for (const t of transforms) {
+    const bb = getBoundingBox(t);
+    maxTransformWidth = Math.max(maxTransformWidth, bb.width);
+    maxTransformHeight = Math.max(maxTransformHeight, bb.height);
+  }
+  
+  // A = maxTransformWidth, B = maxTransformHeight
+  const A = maxTransformWidth;
+  const B = maxTransformHeight;
+  
+  const placements: Placement[] = [];
+  let placementId = 0;
+  
+  for (let transformIndex = 0; transformIndex < transforms.length; transformIndex++) {
+    const transformCoords = transforms[transformIndex];
+    const transformRoads = roadTransforms[transformIndex];
+    
+    // Try all translations
+    for (let offsetRow = -B + 1; offsetRow < tilingHeight; offsetRow++) {
+      for (let offsetCol = -A + 1; offsetCol < tilingWidth; offsetCol++) {
+        // Translate the coordinates
+        const translatedCells = transformCoords.map(c => ({
+          row: c.row + offsetRow,
+          col: c.col + offsetCol,
+        }));
+        
+        // Check if this placement covers at least one cell in the inner grid
+        let coversInnerGrid = false;
+        for (const cell of translatedCells) {
+          if (cell.row >= 0 && cell.row < tilingHeight &&
+              cell.col >= 0 && cell.col < tilingWidth) {
+            coversInnerGrid = true;
+            break;
+          }
+        }
+        
+        if (coversInnerGrid) {
+          // Translate road edges too
+          const translatedRoads: Edge[] = transformRoads.map(edge => ({
+            cell1: { row: edge.cell1.row + offsetRow, col: edge.cell1.col + offsetCol },
+            cell2: { row: edge.cell2.row + offsetRow, col: edge.cell2.col + offsetCol },
+          }));
+          
+          placements.push({
+            id: placementId++,
+            offset: { row: offsetRow, col: offsetCol },
+            transformIndex,
+            cells: translatedCells,
+            roads: translatedRoads.length > 0 ? translatedRoads : undefined,
+          });
+        }
+      }
+    }
+  }
+  
+  return placements;
+}
+
+/**
  * Solve the tiling problem using a SAT solver.
  * 
  * Variables: One boolean variable per placement (is this placement used?)
@@ -293,7 +503,8 @@ export function solvePolyominoTiling(
   tilingWidth: number,
   tilingHeight: number,
   solver: SATSolver,
-  onStatsReady?: (stats: { numVars: number; numClauses: number }) => void
+  onStatsReady?: (stats: { numVars: number; numClauses: number }) => void,
+  tileRoads?: string[][]
 ): TilingResult {
   // Validate inputs
   if (tilingWidth < 1 || tilingHeight < 1 || !Number.isInteger(tilingWidth) || !Number.isInteger(tilingHeight)) {
@@ -320,6 +531,14 @@ export function solvePolyominoTiling(
   // Convert each tile grid to normalized coordinates
   const allTileCoords: Coord[][] = tiles.map(cells => gridToCoords(cells));
   
+  // Track original indices for tiles (to map roads correctly)
+  const originalTileIndices: number[] = [];
+  for (let i = 0; i < allTileCoords.length; i++) {
+    if (allTileCoords[i].length > 0) {
+      originalTileIndices.push(i);
+    }
+  }
+  
   // Filter out empty tiles
   const nonEmptyTileCoords = allTileCoords.filter(coords => coords.length > 0);
   
@@ -337,7 +556,13 @@ export function solvePolyominoTiling(
   let placementId = 0;
   let maxA = 0, maxB = 0; // Track max bounding box across all tiles
   
-  for (const tileCoords of nonEmptyTileCoords) {
+  for (let tileIdx = 0; tileIdx < nonEmptyTileCoords.length; tileIdx++) {
+    const tileCoords = nonEmptyTileCoords[tileIdx];
+    const originalIdx = originalTileIndices[tileIdx];
+    
+    // Get roads for this tile (if provided)
+    const roadKeys = tileRoads?.[originalIdx] ?? [];
+    
     // Get transforms for this tile
     const allTransforms = generateAllTransforms(tileCoords);
     
@@ -349,7 +574,9 @@ export function solvePolyominoTiling(
     }
     
     // Generate placements for this tile, with continuous ID sequence
-    const tilePlacements = generateAllPlacements(tileCoords, tilingWidth, tilingHeight);
+    const tilePlacements = roadKeys.length > 0
+      ? generateAllPlacementsWithRoads(tileCoords, tilingWidth, tilingHeight, roadKeys)
+      : generateAllPlacements(tileCoords, tilingWidth, tilingHeight);
     
     // Track placement IDs for this tile type (for counting in solution)
     const tileTypePlacementIds: number[] = [];
