@@ -107,6 +107,19 @@ export function PolyformExplorer() {
   const widthError = activeTile.widthError;
   const heightError = activeTile.heightError;
   
+  // Compute the filled cell coordinates for the current tile
+  const tileCells = useMemo(() => {
+    const coords: Array<{ row: number; col: number }> = [];
+    for (let row = 0; row < cells.length; row++) {
+      for (let col = 0; col < cells[row].length; col++) {
+        if (cells[row][col]) {
+          coords.push({ row, col });
+        }
+      }
+    }
+    return coords;
+  }, [cells]);
+  
   // Setter helpers that update the active tile
   const updateActiveTile = useCallback((updates: Partial<TileState>) => {
     setTiles(prev => prev.map((tile, i) => 
@@ -1040,6 +1053,7 @@ export function PolyformExplorer() {
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
                     edgeState={edgeState}
+                    tileCells={tileCells}
                   />
                 )}
                 

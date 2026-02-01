@@ -33,6 +33,8 @@ export interface TilingViewerProps {
   edgeState?: EdgeState;
   /** Grid definition for computing edge permutations (defaults to squareGrid) */
   grid?: GridDefinition;
+  /** Original filled cells of the tile (needed to correctly map edge state) */
+  tileCells?: Array<{ row: number; col: number }>;
 }
 
 export const TilingViewer: React.FC<TilingViewerProps> = ({ 
@@ -44,6 +46,7 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
   highlightedPlacement,
   edgeState,
   grid = squareGridDefinition,
+  tileCells,
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -259,16 +262,10 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
          * Transform the edge state according to each placement's transformIndex
          * Uses grid-agnostic inverse permutation computation
          */}
-        {edgeState && (() => {
-          // Pre-compute the original cells once (cells with edge state defined)
-          const originalCells: { row: number; col: number }[] = [];
-          for (let r = 0; r < edgeState.length; r++) {
-            for (let c = 0; c < (edgeState[r]?.length || 0); c++) {
-              if (edgeState[r]?.[c]) {
-                originalCells.push({ row: r, col: c });
-              }
-            }
-          }
+        {edgeState && tileCells && tileCells.length > 0 && (() => {
+          // Use the provided tileCells as the original cells
+          // These should be in the same order as the cells appear after transform
+          const originalCells = tileCells;
           
           // Larger radius for better visibility and easier clicking
           const semicircleRadius = cellSize * 0.18;
