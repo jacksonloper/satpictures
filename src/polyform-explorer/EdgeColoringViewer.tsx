@@ -12,6 +12,10 @@ export interface EdgeColoringViewerProps {
   highlightedPlacement?: number | null;
   showEdgeColors?: boolean;
   numColors?: number;
+  /** Number of 90° clockwise rotations (0-3) */
+  rotation?: number;
+  /** Whether to flip horizontally */
+  flipH?: boolean;
 }
 
 export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({ 
@@ -23,6 +27,8 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
   highlightedPlacement,
   showEdgeColors = true,
   numColors = 2,
+  rotation = 0,
+  flipH = false,
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement, placementEdgeColors } = useMemo(() => {
@@ -65,6 +71,30 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
   const offsetCol = -outerBounds.minCol;
   const offsetRow = -outerBounds.minRow;
   
+  // Calculate SVG transform based on rotation and flip
+  const svgWidth = outerWidth * cellSize;
+  const svgHeight = outerHeight * cellSize;
+  
+  // Build transform string for the group
+  const transforms: string[] = [];
+  const centerX = svgWidth / 2;
+  const centerY = svgHeight / 2;
+  
+  // Move to center, apply transforms, move back
+  transforms.push(`translate(${centerX}, ${centerY})`);
+  
+  if (flipH) {
+    transforms.push("scale(-1, 1)");
+  }
+  
+  if (rotation !== 0) {
+    transforms.push(`rotate(${rotation * 90})`);
+  }
+  
+  transforms.push(`translate(${-centerX}, ${-centerY})`);
+  
+  const groupTransform = transforms.join(" ");
+  
   return (
     <div style={{ 
       padding: "16px", 
@@ -75,14 +105,15 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
     }}>
       <svg
         ref={svgRef}
-        width={outerWidth * cellSize}
-        height={outerHeight * cellSize}
+        width={svgWidth}
+        height={svgHeight}
         style={{ display: "block" }}
         role="img"
         aria-label={`Edge coloring tiling solution showing ${placements.length} tile placements on a ${width}×${height} grid`}
       >
         <title>Edge Coloring Tiling Solution</title>
         
+        <g transform={groupTransform}>
         {/* Layer 1: Draw all cell fills */}
         {Array.from({ length: outerHeight }, (_, svgRowIdx) =>
           Array.from({ length: outerWidth }, (_, svgColIdx) => {
@@ -249,6 +280,7 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
             );
           });
         })}
+        </g>
       </svg>
       
       {/* Color legend */}

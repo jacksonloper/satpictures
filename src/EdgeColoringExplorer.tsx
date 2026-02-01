@@ -46,6 +46,10 @@ export function EdgeColoringExplorer() {
   const workerRef = useRef<Worker | null>(null);
   const tilingSvgRef = useRef<SVGSVGElement | null>(null);
   
+  // View transform state for debugging
+  const [viewRotation, setViewRotation] = useState(0);
+  const [viewFlipH, setViewFlipH] = useState(false);
+  
   // Cleanup worker on unmount
   useEffect(() => {
     return () => {
@@ -571,7 +575,59 @@ export function EdgeColoringExplorer() {
                   svgRef={tilingSvgRef}
                   showEdgeColors={true}
                   numColors={numColors}
+                  rotation={viewRotation}
+                  flipH={viewFlipH}
                 />
+                
+                {/* View transform controls for debugging */}
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "bold", color: "#495057" }}>View Transform:</span>
+                  <button
+                    onClick={() => setViewRotation((r) => (r + 1) % 4)}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#3498db",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    🔄 Rotate 90° CW
+                  </button>
+                  <button
+                    onClick={() => setViewFlipH((f) => !f)}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: viewFlipH ? "#27ae60" : "#9b59b6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    ↔️ Flip H {viewFlipH ? "(ON)" : "(OFF)"}
+                  </button>
+                  <button
+                    onClick={() => { setViewRotation(0); setViewFlipH(false); }}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#6c757d",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Reset
+                  </button>
+                  <span style={{ fontSize: "12px", color: "#6c757d" }}>
+                    (Rotation: {viewRotation * 90}°)
+                  </span>
+                </div>
                 
                 {/* Download button */}
                 <div style={{ marginTop: "12px" }}>
