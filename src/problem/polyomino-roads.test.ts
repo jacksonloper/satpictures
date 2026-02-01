@@ -33,13 +33,13 @@ function createVertical3Tile(): boolean[][] {
 
 /**
  * Road key for edge between (r1,c1) and (r2,c2)
- * Uses canonical ordering
+ * Uses canonical ordering and '|' separator to support negative numbers
  */
 function makeEdgeKey(r1: number, c1: number, r2: number, c2: number): string {
   if (r1 < r2 || (r1 === r2 && c1 < c2)) {
-    return `${r1},${c1}-${r2},${c2}`;
+    return `${r1},${c1}|${r2},${c2}`;
   }
-  return `${r2},${c2}-${r1},${c1}`;
+  return `${r2},${c2}|${r1},${c1}`;
 }
 
 /**

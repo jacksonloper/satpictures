@@ -132,14 +132,29 @@ function generateAllTransforms(baseCells: Coord[]): Coord[][] {
 }
 
 /**
- * Parse a road edge key string like "row1,col1-row2,col2" into coordinates.
+ * Parse a road edge key string like "row1,col1|row2,col2" into coordinates.
+ * Supports both old format (r1,c1-r2,c2) and new format (r1,c1|r2,c2).
+ * Uses regex to handle negative numbers properly.
  */
 function parseEdgeKey(key: string): { r1: number; c1: number; r2: number; c2: number } | null {
-  const parts = key.split('-');
-  if (parts.length !== 2) return null;
-  const [p1, p2] = parts;
-  const [r1, c1] = p1.split(',').map(Number);
-  const [r2, c2] = p2.split(',').map(Number);
+  const match = key.match(/^(-?\d+),(-?\d+)[|](-?\d+),(-?\d+)$/);
+  if (!match) {
+    // Try old format with - separator (only works with non-negative numbers)
+    const oldMatch = key.match(/^(\d+),(\d+)-(\d+),(\d+)$/);
+    if (!oldMatch) return null;
+    const r1 = parseInt(oldMatch[1], 10);
+    const c1 = parseInt(oldMatch[2], 10);
+    const r2 = parseInt(oldMatch[3], 10);
+    const c2 = parseInt(oldMatch[4], 10);
+    if ([r1, c1, r2, c2].some(isNaN)) return null;
+    return { r1, c1, r2, c2 };
+  }
+  
+  const r1 = parseInt(match[1], 10);
+  const c1 = parseInt(match[2], 10);
+  const r2 = parseInt(match[3], 10);
+  const c2 = parseInt(match[4], 10);
+  
   if ([r1, c1, r2, c2].some(isNaN)) return null;
   return { r1, c1, r2, c2 };
 }
