@@ -27,6 +27,15 @@ export { squareGridDefinition } from './squareGridDef';
 export { hexGridDefinition, offsetToAxial, axialToOffset } from './hexGridDef';
 export { triGridDefinition, upTriNeighbors, downTriNeighbors } from './triGridDef';
 
+// Unified tiling solver
+export type { UnifiedPlacement, UnifiedTilingResult } from './unifiedTiling';
+export { 
+  gridToCoords, 
+  generateAllPlacements, 
+  solveUnifiedTiling, 
+  findPlacementOverlaps 
+} from './unifiedTiling';
+
 // Import for the lookup map
 import { squareGridDefinition } from './squareGridDef';
 import { hexGridDefinition } from './hexGridDef';
