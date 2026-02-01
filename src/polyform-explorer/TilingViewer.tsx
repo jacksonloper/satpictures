@@ -3,6 +3,54 @@ import type { Placement } from "../problem/polyomino-tiling";
 import { getPlacementColor } from "./placementColors";
 import type { EdgeState } from "./grids/types";
 
+/**
+ * Get the edge permutation for a given square grid transform.
+ * transformIndex: 0-3 are rotations (0°, 90°, 180°, 270° CW)
+ *                 4-7 are flip + rotations
+ * 
+ * Returns the permutation mapping: newEdgeIdx -> originalEdgeIdx
+ * (i.e., the INVERSE permutation for looking up original edge states)
+ */
+function getSquareEdgePermutationInverse(transformIndex: number): number[] {
+  // Forward permutations: originalEdgeIdx -> newEdgeIdx
+  // Edge indices: 0=top, 1=right, 2=bottom, 3=left
+  const forwardPerms: number[][] = [
+    [0, 1, 2, 3],  // 0: identity
+    [1, 2, 3, 0],  // 1: 90° CW rotation
+    [2, 3, 0, 1],  // 2: 180° rotation
+    [3, 0, 1, 2],  // 3: 270° CW rotation
+    [0, 3, 2, 1],  // 4: horizontal flip
+    [3, 2, 1, 0],  // 5: flip + 90° CW
+    [2, 1, 0, 3],  // 6: flip + 180°
+    [1, 0, 3, 2],  // 7: flip + 270° CW
+  ];
+  
+  const forward = forwardPerms[transformIndex] || [0, 1, 2, 3];
+  
+  // Compute inverse: inverse[forward[i]] = i
+  const inverse = [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) {
+    inverse[forward[i]] = i;
+  }
+  return inverse;
+}
+
+/**
+ * Create an SVG path for a semicircle centered at (cx, cy) with given radius.
+ * The semicircle faces the direction specified by the angle (in radians).
+ */
+function createSemicirclePath(cx: number, cy: number, radius: number, angle: number): string {
+  const startAngle = angle - Math.PI / 2;
+  const endAngle = angle + Math.PI / 2;
+  
+  const x1 = cx + radius * Math.cos(startAngle);
+  const y1 = cy + radius * Math.sin(startAngle);
+  const x2 = cx + radius * Math.cos(endAngle);
+  const y2 = cy + radius * Math.sin(endAngle);
+  
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2} Z`;
+}
+
 /** TilingViewer - displays the solved tiling */
 export interface TilingViewerProps {
   width: number;
@@ -11,7 +59,7 @@ export interface TilingViewerProps {
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
   highlightedPlacement?: number | null;
-  /** Edge state to render (optional) */
+  /** Edge state from the original tile definition (will be transformed per placement) */
   edgeState?: EdgeState;
 }
 
@@ -234,27 +282,63 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
           ));
         })}
         
-        {/* Layer 5: Edge markings as inset circles
-         * Square grid edges: 0=top, 1=right, 2=bottom, 3=left
-         * Vertices go clockwise, so interior is to the right of each edge.
+        {/* Layer 5: Edge markings as half circles for each placement
+         * Transform the edge state according to each placement's transformIndex
          */}
-        {edgeState && Array.from({ length: outerHeight }, (_, svgRowIdx) =>
-          Array.from({ length: outerWidth }, (_, svgColIdx) => {
-            const logicalRow = svgRowIdx - offsetRow;
-            const logicalCol = svgColIdx - offsetCol;
-            const cellEdges = edgeState[logicalRow]?.[logicalCol];
-            if (!cellEdges) return null;
+        {edgeState && placements.flatMap((placement, pIndex) => {
+          const inversePerm = getSquareEdgePermutationInverse(placement.transformIndex);
+          const semicircleRadius = cellSize * 0.12;
+          
+          return placement.cells.flatMap((cell, cellIdx) => {
+            // Find the original cell coordinates (before transform)
+            // The cells array in placement is already transformed,
+            // but the original tile's cell indices map 1:1 with these
+            // We need to look up edge state from original tile coordinates
             
-            const x = svgColIdx * cellSize;
-            const y = svgRowIdx * cellSize;
+            // Get original tile's bounding box to find the original cell
+            // For now, use a simple mapping: the cellIdx corresponds to 
+            // the same cell in the original coords list
+            // We need to get original coords from edgeState
             
-            // Circle radius and inset distance
-            const circleRadius = cellSize * 0.12;
-            const insetDistance = cellSize * 0.15;
+            // First, find what the original (pre-transform) coordinates were
+            // The placement stores transformed coords, but we need original coords
+            // to look up edge state. The original tile cells are stored in edgeState
+            // indexed by row, col.
             
-            // Edge coordinates for square grid (clockwise from top)
-            // Edge 0: top (left to right), Edge 1: right (top to bottom),
-            // Edge 2: bottom (right to left), Edge 3: left (bottom to top)
+            // Simple approach: edgeState is defined on a grid where the original
+            // tile was drawn. We need to find which original cell this placement cell
+            // corresponds to.
+            
+            // Since placements are generated from transforms of the original,
+            // we can find original coords by looking at which original cells
+            // exist in edgeState (non-null entries)
+            
+            // Get the original tile cells from edgeState
+            const originalCells: { row: number; col: number }[] = [];
+            for (let r = 0; r < edgeState.length; r++) {
+              for (let c = 0; c < (edgeState[r]?.length || 0); c++) {
+                if (edgeState[r]?.[c]) {
+                  originalCells.push({ row: r, col: c });
+                }
+              }
+            }
+            
+            // The cellIdx in placement.cells should match the order of original cells
+            // after the transform was applied. Since transforms preserve cell count
+            // and order, we can use cellIdx directly.
+            if (cellIdx >= originalCells.length) return [];
+            
+            const origCell = originalCells[cellIdx];
+            const origEdges = edgeState[origCell.row]?.[origCell.col];
+            if (!origEdges) return [];
+            
+            // Screen position for this cell in the solution view
+            const svgCol = cell.col + offsetCol;
+            const svgRow = cell.row + offsetRow;
+            const x = svgCol * cellSize;
+            const y = svgRow * cellSize;
+            
+            // Edge coordinates for square grid
             const edgeCoords = [
               { x1: x, y1: y, x2: x + cellSize, y2: y },                    // top
               { x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize }, // right
@@ -262,42 +346,41 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
               { x1: x, y1: y + cellSize, x2: x, y2: y },                    // left
             ];
             
-            return cellEdges.map((isMarked, edgeIdx) => {
+            return [0, 1, 2, 3].map(visualEdgeIdx => {
+              // Use inverse permutation to find which original edge corresponds
+              // to this visual edge after the transform
+              const origEdgeIdx = inversePerm[visualEdgeIdx];
+              const isMarked = origEdges[origEdgeIdx] ?? false;
+              
               if (!isMarked) return null;
               
-              const edge = edgeCoords[edgeIdx];
+              const edge = edgeCoords[visualEdgeIdx];
               
               // Edge midpoint
               const midX = (edge.x1 + edge.x2) / 2;
               const midY = (edge.y1 + edge.y2) / 2;
               
-              // Edge direction vector
+              // Edge direction for perpendicular calculation
               const edgeDx = edge.x2 - edge.x1;
               const edgeDy = edge.y2 - edge.y1;
-              const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
               
-              // Perpendicular direction (90° clockwise = into cell interior)
-              const perpX = edgeDy / edgeLen;
-              const perpY = -edgeDx / edgeLen;
+              // Perpendicular angle pointing into cell (90° CW)
+              const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
               
-              // Circle center: offset inward from edge midpoint
-              const cx = midX + perpX * insetDistance;
-              const cy = midY + perpY * insetDistance;
+              const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
               
               return (
-                <circle
-                  key={`edge-mark-${logicalRow}-${logicalCol}-${edgeIdx}`}
-                  cx={cx}
-                  cy={cy}
-                  r={circleRadius}
+                <path
+                  key={`edge-mark-${pIndex}-${cellIdx}-${visualEdgeIdx}`}
+                  d={path}
                   fill="#f39c12"
                   stroke="#c0392b"
                   strokeWidth={1}
                 />
               );
             });
-          })
-        )}
+          });
+        })}
       </svg>
     </div>
   );

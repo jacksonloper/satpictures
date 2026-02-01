@@ -16,6 +16,26 @@ interface SquareGridProps {
   onEdgeClick?: (row: number, col: number, edgeIndex: number) => void;
 }
 
+/**
+ * Create an SVG path for a semicircle centered at (cx, cy) with given radius.
+ * The semicircle faces the direction specified by the angle (in radians).
+ * angle=0 faces right, angle=PI/2 faces down, etc.
+ */
+function createSemicirclePath(cx: number, cy: number, radius: number, angle: number): string {
+  // Start and end points of the semicircle arc
+  // The semicircle spans 180 degrees centered on the given angle
+  const startAngle = angle - Math.PI / 2;
+  const endAngle = angle + Math.PI / 2;
+  
+  const x1 = cx + radius * Math.cos(startAngle);
+  const y1 = cy + radius * Math.sin(startAngle);
+  const x2 = cx + radius * Math.cos(endAngle);
+  const y2 = cy + radius * Math.sin(endAngle);
+  
+  // SVG arc: A rx ry x-axis-rotation large-arc-flag sweep-flag x y
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2} Z`;
+}
+
 export const SquareGrid: React.FC<SquareGridProps> = ({ 
   cells, 
   onCellClick, 
@@ -75,79 +95,56 @@ export const SquareGrid: React.FC<SquareGridProps> = ({
         ))
       )}
       
-      {/* Layer 2: Edge highlights (marked edges) as inset circles
-       * Square grid vertices go clockwise, so interior is to the right.
+      {/* Layer 2: Half-circle edge markers on both sides of each edge
+       * Each edge has a half circle facing into the cell (this cell's marker)
+       * showing filled if marked, hollow outline if not (in edge mode)
        */}
-      {edgeState && cells.map((row, rowIdx) =>
-        row.map((_, colIdx) => {
-          const cellEdges = edgeState[rowIdx]?.[colIdx];
-          if (!cellEdges) return null;
+      {cells.flatMap((row, rowIdx) =>
+        row.flatMap((_, colIdx) => {
+          const cellEdges = edgeState?.[rowIdx]?.[colIdx];
+          const semicircleRadius = cellSize * 0.12;
           
-          // Circle radius and inset distance as fractions of cell size
-          const circleRadius = cellSize * 0.12;
-          const insetDistance = cellSize * 0.15;
-          
-          return cellEdges.map((isMarked, edgeIdx) => {
-            if (!isMarked) return null;
-            
+          return [0, 1, 2, 3].map(edgeIdx => {
             const { x1, y1, x2, y2 } = getEdgeCoords(rowIdx, colIdx, edgeIdx);
+            const isMarked = cellEdges?.[edgeIdx] ?? false;
             
             // Edge midpoint
             const midX = (x1 + x2) / 2;
             const midY = (y1 + y2) / 2;
             
-            // Edge direction vector
+            // Edge direction for angle calculation
             const edgeDx = x2 - x1;
             const edgeDy = y2 - y1;
-            const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
             
-            // Perpendicular direction (90° clockwise = into cell interior)
-            const perpX = edgeDy / edgeLen;
-            const perpY = -edgeDx / edgeLen;
+            // Perpendicular direction pointing INTO the cell (90° clockwise)
+            // For vertices going clockwise, interior is to the right
+            const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
             
-            // Circle center: offset inward from edge midpoint
-            const cx = midX + perpX * insetDistance;
-            const cy = midY + perpY * insetDistance;
+            // Semicircle path - facing into the cell
+            const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
+            
+            // In edge mode, always show the half circle (filled or outline)
+            // In cell mode, only show if marked
+            if (mode !== 'edge' && !isMarked) return null;
             
             return (
-              <circle
-                key={`edge-highlight-${rowIdx}-${colIdx}-${edgeIdx}`}
-                cx={cx}
-                cy={cy}
-                r={circleRadius}
-                fill="#f39c12"
-                stroke="#c0392b"
+              <path
+                key={`edge-half-${rowIdx}-${colIdx}-${edgeIdx}`}
+                d={path}
+                fill={isMarked ? "#f39c12" : "white"}
+                stroke={isMarked ? "#c0392b" : "#bdc3c7"}
                 strokeWidth={1}
+                style={{ cursor: mode === 'edge' ? "pointer" : "default" }}
+                onClick={(e) => {
+                  if (mode === 'edge') {
+                    e.stopPropagation();
+                    onEdgeClick?.(rowIdx, colIdx, edgeIdx);
+                  }
+                }}
               />
             );
           });
         })
-      )}
-      
-      {/* Layer 3: Edge click targets (in edge mode) */}
-      {mode === 'edge' && cells.map((row, rowIdx) =>
-        row.map((_, colIdx) => (
-          [0, 1, 2, 3].map(edgeIdx => {
-            const { x1, y1, x2, y2 } = getEdgeCoords(rowIdx, colIdx, edgeIdx);
-            
-            return (
-              <line
-                key={`edge-click-${rowIdx}-${colIdx}-${edgeIdx}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke="transparent"
-                strokeWidth={10}
-                style={{ cursor: "pointer" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdgeClick?.(rowIdx, colIdx, edgeIdx);
-                }}
-              />
-            );
-          })
-        ))
       )}
     </svg>
   );
