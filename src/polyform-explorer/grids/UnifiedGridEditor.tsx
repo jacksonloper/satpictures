@@ -86,9 +86,9 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
     }
     
     // Also check middle cells for non-rectangular grids
-    const midRow = Math.floor(height / 2);
-    const midCol = Math.floor(width / 2);
-    const midVertices = grid.getCellVertices({ row: midRow, col: midCol }, cellSize);
+    const midR = Math.floor(height / 2);
+    const midQ = Math.floor(width / 2);
+    const midVertices = grid.getCellVertices({ q: midQ, r: midR }, cellSize);
     for (const v of midVertices) {
       minX = Math.min(minX, v.x);
       minY = Math.min(minY, v.y);

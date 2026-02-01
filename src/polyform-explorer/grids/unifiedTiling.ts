@@ -92,27 +92,27 @@ export function generateAllPlacements(
   // about which translations preserve valid positions.
   // 
   // For square and hex grids, we can translate by any amount.
-  // For triangle grids, translations must preserve (row + col) % 2 parity.
+  // For triangle grids, translations must preserve (q + r) % 2 parity.
   
   for (const { coords: transformCoords, transformIndex } of allTransforms) {
     // Try all translations that might cover the inner grid
     // We use a range that ensures all valid placements are found
     
-    for (let offsetRow = -maxTransformHeight + 1; offsetRow < tilingHeight; offsetRow++) {
-      for (let offsetCol = -maxTransformWidth + 1; offsetCol < tilingWidth + maxTransformWidth; offsetCol++) {
+    for (let offsetR = -maxTransformHeight + 1; offsetR < tilingHeight; offsetR++) {
+      for (let offsetQ = -maxTransformWidth + 1; offsetQ < tilingWidth + maxTransformWidth; offsetQ++) {
         // For grids with parity (numCellTypes > 1), check if this translation is valid
         if (grid.numCellTypes > 1) {
           // For triangle grids, translation must preserve parity
-          // (offsetRow + offsetCol) must be even
-          if ((offsetRow + offsetCol) % 2 !== 0) {
+          // (offsetQ + offsetR) must be even
+          if ((offsetQ + offsetR) % 2 !== 0) {
             continue;
           }
         }
         
         // Translate the coordinates
         const translatedCells = transformCoords.map(c => ({
-          row: c.row + offsetRow,
-          col: c.col + offsetCol,
+          q: c.q + offsetQ,
+          r: c.r + offsetR,
         }));
         
         // Check if this placement covers at least one cell in the inner grid
@@ -244,7 +244,7 @@ export function solveUnifiedTiling(
   
   for (const p of allPlacements) {
     for (const cell of p.cells) {
-      const key = `${cell.row},${cell.col}`;
+      const key = `${cell.q},${cell.r}`;
       if (!cellToPlacements.has(key)) {
         cellToPlacements.set(key, []);
       }
@@ -253,9 +253,9 @@ export function solveUnifiedTiling(
   }
   
   // CONSTRAINT 1: Coverage - each cell in inner grid must be covered
-  for (let row = 0; row < tilingHeight; row++) {
-    for (let col = 0; col < tilingWidth; col++) {
-      const key = `${row},${col}`;
+  for (let r = 0; r < tilingHeight; r++) {
+    for (let q = 0; q < tilingWidth; q++) {
+      const key = `${q},${r}`;
       const coveringPlacements = cellToPlacements.get(key) || [];
       
       if (coveringPlacements.length === 0) {
@@ -339,12 +339,12 @@ export function findPlacementOverlaps(placements: UnifiedPlacement[]): string[] 
   for (let i = 0; i < placements.length; i++) {
     const p = placements[i];
     for (const cell of p.cells) {
-      const key = `${cell.row},${cell.col}`;
+      const key = `${cell.q},${cell.r}`;
       const existing = seen.get(key);
       
       if (existing) {
         overlaps.push(
-          `Cell (row=${cell.row}, col=${cell.col}) covered by placement ${existing.placementIndex} (id=${existing.placementId}) ` +
+          `Cell (q=${cell.q}, r=${cell.r}) covered by placement ${existing.placementIndex} (id=${existing.placementId}) ` +
           `and placement ${i} (id=${p.id})`
         );
       } else {

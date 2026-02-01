@@ -2,12 +2,13 @@
  * Hexagonal Grid Definition
  * 
  * Defines the geometry for polyhex tilings on a hexagonal grid.
- * Uses pointy-top hexagons with odd-r offset coordinate storage.
+ * Uses pointy-top hexagons with axial coordinates (q, r).
  * Each cell has 6 neighbors.
  * 
- * Coordinate system:
- * - Storage: odd-r offset coordinates (row, col) where odd rows are shifted right
- * - For transforms, we convert to axial coordinates (q, r) internally
+ * Axial coordinates:
+ * - q: column axis (horizontal-ish)
+ * - r: row axis (diagonal, increases downward)
+ * - The third cube coordinate s = -q - r (implicit)
  */
 
 import type { GridDefinition, Coord, TransformResult, Vertex, NeighborInfo } from './types';
@@ -15,27 +16,26 @@ import type { GridDefinition, Coord, TransformResult, Vertex, NeighborInfo } fro
 /**
  * Hex Grid Geometry
  * 
- * Uses pointy-top hexagons with odd-r offset coordinate storage.
- * Neighbors are stored in axial coordinate offsets (dq, dr where r = row).
+ * Uses pointy-top hexagons with axial coordinates (q, r).
  * 
  * The 6 neighbors in clockwise order from NE:
- * - Index 0: NE (q+1, r-1) -> offset (dRow:-1, dCol:+1)
- * - Index 1: E  (q+1, r)   -> offset (dRow:0, dCol:+1)
- * - Index 2: SE (q, r+1)   -> offset (dRow:+1, dCol:0)
- * - Index 3: SW (q-1, r+1) -> offset (dRow:+1, dCol:-1)
- * - Index 4: W  (q-1, r)   -> offset (dRow:0, dCol:-1)
- * - Index 5: NW (q, r-1)   -> offset (dRow:-1, dCol:0)
+ * - Index 0: NE (q+1, r-1)
+ * - Index 1: E  (q+1, r)
+ * - Index 2: SE (q, r+1)
+ * - Index 3: SW (q-1, r+1)
+ * - Index 4: W  (q-1, r)
+ * - Index 5: NW (q, r-1)
  * 
  * Vertices for pointy-top hex start at top and go clockwise.
  * Edge i connects vertex i to vertex (i+1) % 6 and faces neighbor i.
  */
-const hexNeighborsAxial: NeighborInfo[] = [
-  { dRow: -1, dCol: 1 },  // NE (index 0)
-  { dRow: 0, dCol: 1 },   // E  (index 1)
-  { dRow: 1, dCol: 0 },   // SE (index 2)
-  { dRow: 1, dCol: -1 },  // SW (index 3)
-  { dRow: 0, dCol: -1 },  // W  (index 4)
-  { dRow: -1, dCol: 0 },  // NW (index 5)
+const hexNeighbors: NeighborInfo[] = [
+  { dq: 1, dr: -1 },   // NE (index 0)
+  { dq: 1, dr: 0 },    // E  (index 1)
+  { dq: 0, dr: 1 },    // SE (index 2)
+  { dq: -1, dr: 1 },   // SW (index 3)
+  { dq: -1, dr: 0 },   // W  (index 4)
+  { dq: 0, dr: -1 },   // NW (index 5)
 ];
 
 // Vertices for pointy-top hex (unit size), starting from top and going clockwise
@@ -52,22 +52,6 @@ const hexVerticesUnit: Vertex[] = (() => {
   return vertices;
 })();
 
-// Offset to axial conversion: q = col - floor(row/2), r = row
-function offsetToAxial(coord: Coord): { q: number; r: number } {
-  return {
-    q: coord.col - Math.floor(coord.row / 2),
-    r: coord.row,
-  };
-}
-
-// Axial to offset conversion: row = r, col = q + floor(r/2)
-function axialToOffset(q: number, r: number): Coord {
-  return {
-    row: r,
-    col: q + Math.floor(r / 2),
-  };
-}
-
 /**
  * Rotate 60° clockwise in axial coordinates.
  * Cube coords: (x, y, z) -> (-z, -x, -y)
@@ -79,10 +63,9 @@ function axialToOffset(q: number, r: number): Coord {
  * So neighborPerm[i] = (i + 1) % 6
  */
 function rotateHex(coord: Coord): TransformResult {
-  const axial = offsetToAxial(coord);
   // Axial to cube: x = q, z = r, y = -x - z
-  const x = axial.q;
-  const z = axial.r;
+  const x = coord.q;
+  const z = coord.r;
   const y = -x - z;
   
   // Rotate 60° CW: (x, y, z) -> (-z, -x, -y)
@@ -90,11 +73,8 @@ function rotateHex(coord: Coord): TransformResult {
   const newZ = -y;
   
   // Cube to axial: q = x, r = z
-  const newAxial = { q: newX, r: newZ };
-  const newOffset = axialToOffset(newAxial.q, newAxial.r);
-  
   return {
-    coord: newOffset,
+    coord: { q: newX, r: newZ },
     neighborPerm: [1, 2, 3, 4, 5, 0],
   };
 }
@@ -108,12 +88,8 @@ function rotateHex(coord: Coord): TransformResult {
  * NE(0) <-> NW(5), E(1) <-> W(4), SE(2) <-> SW(3)
  */
 function flipHex(coord: Coord): TransformResult {
-  const axial = offsetToAxial(coord);
-  const newAxial = { q: -axial.q - axial.r, r: axial.r };
-  const newOffset = axialToOffset(newAxial.q, newAxial.r);
-  
   return {
-    coord: newOffset,
+    coord: { q: -coord.q - coord.r, r: coord.r },
     // Flip swaps: 0<->5, 1<->4, 2<->3
     neighborPerm: [5, 4, 3, 2, 1, 0],
   };
@@ -124,11 +100,10 @@ function flipHex(coord: Coord): TransformResult {
  * For pointy-top hex: x = size * sqrt(3) * (q + r/2), y = size * 3/2 * r
  */
 function getCellCenter(coord: Coord, cellSize: number): { x: number; y: number } {
-  const axial = offsetToAxial(coord);
   const hexSize = cellSize * 0.5;
   return {
-    x: hexSize * Math.sqrt(3) * (axial.q + axial.r / 2),
-    y: hexSize * 1.5 * axial.r,
+    x: hexSize * Math.sqrt(3) * (coord.q + coord.r / 2),
+    y: hexSize * 1.5 * coord.r,
   };
 }
 
@@ -150,21 +125,18 @@ export const hexGridDefinition: GridDefinition = {
   
   getCellType: () => 0,  // All cells are type 0
   
-  // Neighbors are stored in axial coordinate offsets
-  // The actual neighbor computation uses the offset conversion
-  neighbors: [hexNeighborsAxial],
+  // Neighbors use axial coordinate offsets
+  neighbors: [hexNeighbors],
   
   numRotations: 6,  // 60° steps
   
   rotate: rotateHex,
   flip: flipHex,
   
-  // Translation vectors that preserve coordinate validity
-  // For hex grid in odd-r offset, we need to move by 2 in row
-  // or appropriately in column
+  // Translation vectors in axial coordinates
   translateVectors: [
-    { row: 0, col: 1 },   // Move right (in offset coords)
-    { row: 2, col: 0 },   // Move down by 2 rows (maintains column offset pattern)
+    { q: 1, r: 0 },   // Move right (in axial coords)
+    { q: 0, r: 1 },   // Move down
   ],
   
   vertices: [hexVerticesUnit],
@@ -172,6 +144,3 @@ export const hexGridDefinition: GridDefinition = {
   getCellCenter,
   getCellVertices,
 };
-
-// Export utilities for external use
-export { offsetToAxial, axialToOffset };

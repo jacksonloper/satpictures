@@ -6,21 +6,21 @@
  * display code to work generically with any grid type.
  */
 
-/** A 2D coordinate in the grid */
+/** A 2D coordinate in the grid using axial coordinates */
 export interface Coord {
-  row: number;
-  col: number;
+  q: number;
+  r: number;
 }
 
 /**
  * Neighbor information for a given cell type.
- * Each entry describes how to reach a neighboring cell.
+ * Each entry describes how to reach a neighboring cell using axial coordinate offsets.
  */
 export interface NeighborInfo {
-  /** Row offset to reach this neighbor */
-  dRow: number;
-  /** Col offset to reach this neighbor */
-  dCol: number;
+  /** q offset to reach this neighbor */
+  dq: number;
+  /** r offset to reach this neighbor */
+  dr: number;
 }
 
 /**
@@ -150,34 +150,34 @@ export function applyTransformN(
 }
 
 /**
- * Normalize a set of coordinates to have minimum row and col at 0,
+ * Normalize a set of coordinates to have minimum q and r at 0,
  * while preserving cell type parity for grids that require it.
  */
 export function normalizeCoords(grid: GridDefinition, coords: Coord[]): Coord[] {
   if (coords.length === 0) return [];
   
   // Find minimum values
-  let minRow = Infinity, minCol = Infinity;
+  let minQ = Infinity, minR = Infinity;
   for (const c of coords) {
-    minRow = Math.min(minRow, c.row);
-    minCol = Math.min(minCol, c.col);
+    minQ = Math.min(minQ, c.q);
+    minR = Math.min(minR, c.r);
   }
   
   // Base offsets
-  const offRow = -minRow;
-  let offCol = -minCol;
+  const offQ = -minQ;
+  let offR = -minR;
   
-  // For triangle grids, we need to preserve (row+col) % 2 parity
+  // For triangle grids, we need to preserve (q+r) % 2 parity
   if (grid.numCellTypes === 2) {
     // Check if the offset changes parity
-    if ((offRow + offCol) % 2 !== 0) {
-      offCol += 1;
+    if ((offQ + offR) % 2 !== 0) {
+      offR += 1;
     }
   }
   
   return coords.map(c => ({
-    row: c.row + offRow,
-    col: c.col + offCol,
+    q: c.q + offQ,
+    r: c.r + offR,
   }));
 }
 
@@ -196,7 +196,7 @@ export function generateAllTransforms(
   
   const coordsToKey = (cs: Coord[]): string => {
     const sorted = [...cs]
-      .map(c => `${c.row},${c.col}`)
+      .map(c => `${c.q},${c.r}`)
       .sort();
     return sorted.join(';');
   };
@@ -234,34 +234,34 @@ export function generateAllTransforms(
  * Get bounding box of a set of coordinates.
  */
 export function getBoundingBox(coords: Coord[]): {
-  minRow: number;
-  maxRow: number;
-  minCol: number;
-  maxCol: number;
+  minQ: number;
+  maxQ: number;
+  minR: number;
+  maxR: number;
   width: number;
   height: number;
 } {
   if (coords.length === 0) {
-    return { minRow: 0, maxRow: 0, minCol: 0, maxCol: 0, width: 0, height: 0 };
+    return { minQ: 0, maxQ: 0, minR: 0, maxR: 0, width: 0, height: 0 };
   }
   
-  let minRow = Infinity, maxRow = -Infinity;
-  let minCol = Infinity, maxCol = -Infinity;
+  let minQ = Infinity, maxQ = -Infinity;
+  let minR = Infinity, maxR = -Infinity;
   
   for (const c of coords) {
-    minRow = Math.min(minRow, c.row);
-    maxRow = Math.max(maxRow, c.row);
-    minCol = Math.min(minCol, c.col);
-    maxCol = Math.max(maxCol, c.col);
+    minQ = Math.min(minQ, c.q);
+    maxQ = Math.max(maxQ, c.q);
+    minR = Math.min(minR, c.r);
+    maxR = Math.max(maxR, c.r);
   }
   
   return {
-    minRow,
-    maxRow,
-    minCol,
-    maxCol,
-    width: maxCol - minCol + 1,
-    height: maxRow - minRow + 1,
+    minQ,
+    maxQ,
+    minR,
+    maxR,
+    width: maxQ - minQ + 1,
+    height: maxR - minR + 1,
   };
 }
 
@@ -269,8 +269,8 @@ export function getBoundingBox(coords: Coord[]): {
  * Check if a coordinate is within a given rectangular grid.
  */
 export function isInGrid(coord: Coord, width: number, height: number): boolean {
-  return coord.row >= 0 && coord.row < height && 
-         coord.col >= 0 && coord.col < width;
+  return coord.r >= 0 && coord.r < height && 
+         coord.q >= 0 && coord.q < width;
 }
 
 // ============================================================================
@@ -303,10 +303,10 @@ export function createEmptyEdgeState(
   height: number
 ): EdgeState {
   const result: EdgeState = [];
-  for (let row = 0; row < height; row++) {
+  for (let r = 0; r < height; r++) {
     const rowEdges: CellEdges[] = [];
-    for (let col = 0; col < width; col++) {
-      const cellType = grid.getCellType({ row, col });
+    for (let q = 0; q < width; q++) {
+      const cellType = grid.getCellType({ q, r });
       const numEdges = grid.neighbors[cellType].length;
       rowEdges.push(new Array(numEdges).fill(false));
     }
@@ -318,20 +318,20 @@ export function createEmptyEdgeState(
 /**
  * Toggle an edge on a cell.
  * @param edgeState Current edge state
- * @param row Cell row
- * @param col Cell column
+ * @param q Cell q coordinate
+ * @param r Cell r coordinate
  * @param edgeIndex Edge index to toggle
  * @returns New edge state with the edge toggled
  */
 export function toggleEdge(
   edgeState: EdgeState,
-  row: number,
-  col: number,
+  q: number,
+  r: number,
   edgeIndex: number
 ): EdgeState {
-  return edgeState.map((rowEdges, r) =>
-    rowEdges.map((cellEdges, c) => {
-      if (r === row && c === col) {
+  return edgeState.map((rowEdges, row) =>
+    rowEdges.map((cellEdges, col) => {
+      if (row === r && col === q) {
         return cellEdges.map((val, i) => i === edgeIndex ? !val : val);
       }
       return cellEdges;
@@ -364,11 +364,11 @@ export function transformEdgeState(
     newEdges: boolean[];
   }> = [];
   
-  for (let row = 0; row < height; row++) {
-    for (let col = 0; col < width; col++) {
-      const coord = { row, col };
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) {
+      const coord = { q, r };
       const result = transform(coord);
-      const oldEdges = edgeState[row][col];
+      const oldEdges = edgeState[r][q];
       
       // Apply the neighbor permutation to edges
       // neighborPerm[i] tells us where old edge i goes in the new orientation
@@ -386,35 +386,35 @@ export function transformEdgeState(
   }
   
   // Find bounds of transformed coordinates
-  let minRow = Infinity, minCol = Infinity;
-  let maxRow = -Infinity, maxCol = -Infinity;
+  let minQ = Infinity, minR = Infinity;
+  let maxQ = -Infinity, maxR = -Infinity;
   for (const { newCoord } of transformedCells) {
-    minRow = Math.min(minRow, newCoord.row);
-    maxRow = Math.max(maxRow, newCoord.row);
-    minCol = Math.min(minCol, newCoord.col);
-    maxCol = Math.max(maxCol, newCoord.col);
+    minQ = Math.min(minQ, newCoord.q);
+    maxQ = Math.max(maxQ, newCoord.q);
+    minR = Math.min(minR, newCoord.r);
+    maxR = Math.max(maxR, newCoord.r);
   }
   
   // Compute offset for normalization (preserve parity for triangle grids)
-  // For triangle grids, the cell type (up vs down) is determined by (row + col) % 2.
+  // For triangle grids, the cell type (up vs down) is determined by (q + r) % 2.
   // If we shift by an offset that changes this parity, up triangles would become down
   // triangles and vice versa, which would break the edge indexing. By ensuring
-  // (offRow + offCol) is even, we preserve the original cell types.
-  const offRow = -minRow;
-  let offCol = -minCol;
-  if (grid.numCellTypes === 2 && (offRow + offCol) % 2 !== 0) {
-    offCol += 1;
+  // (offQ + offR) is even, we preserve the original cell types.
+  const offR = -minR;
+  let offQ = -minQ;
+  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
+    offQ += 1;
   }
   
   // Create new edge state grid
-  const newHeight = maxRow - minRow + 1;
-  const newWidth = maxCol + offCol + 1;
+  const newHeight = maxR - minR + 1;
+  const newWidth = maxQ + offQ + 1;
   
   const newEdgeState: EdgeState = [];
   for (let r = 0; r < newHeight; r++) {
     const rowEdges: CellEdges[] = [];
-    for (let c = 0; c < newWidth; c++) {
-      const cellType = grid.getCellType({ row: r, col: c });
+    for (let q = 0; q < newWidth; q++) {
+      const cellType = grid.getCellType({ q, r });
       const numEdges = grid.neighbors[cellType].length;
       rowEdges.push(new Array(numEdges).fill(false));
     }
@@ -423,10 +423,10 @@ export function transformEdgeState(
   
   // Place transformed edges into new grid
   for (const { newCoord, newEdges } of transformedCells) {
-    const r = newCoord.row + offRow;
-    const c = newCoord.col + offCol;
-    if (r >= 0 && r < newHeight && c >= 0 && c < newWidth) {
-      newEdgeState[r][c] = newEdges;
+    const r = newCoord.r + offR;
+    const q = newCoord.q + offQ;
+    if (r >= 0 && r < newHeight && q >= 0 && q < newWidth) {
+      newEdgeState[r][q] = newEdges;
     }
   }
   

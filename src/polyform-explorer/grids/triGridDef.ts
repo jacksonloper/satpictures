@@ -5,24 +5,24 @@
  * The grid consists of alternating up-pointing and down-pointing triangles.
  * 
  * Coordinate system:
- * - (row, col) where triangles tessellate
- * - Triangle orientation: (row + col) % 2 === 0 means UP-pointing, otherwise DOWN-pointing
+ * - Axial coordinates (q, r) where triangles tessellate
+ * - Triangle orientation: (q + r) % 2 === 0 means UP-pointing, otherwise DOWN-pointing
  * - Each triangle has 3 neighbors
  * 
  * For transforms, we use a vertex-based approach where each triangle is
  * represented by its 3 lattice vertices, transform the vertices, then
- * convert back to (row, col) coordinates.
+ * convert back to (q, r) coordinates.
  */
 
 import type { GridDefinition, Coord, TransformResult, Vertex, NeighborInfo } from './types';
 
 /**
  * Determine if a triangle is up-pointing or down-pointing.
- * Type 0: up-pointing (row + col is even)
- * Type 1: down-pointing (row + col is odd)
+ * Type 0: up-pointing (q + r is even)
+ * Type 1: down-pointing (q + r is odd)
  */
 function getTriCellType(coord: Coord): number {
-  return (coord.row + coord.col) % 2 === 0 ? 0 : 1;
+  return (coord.q + coord.r) % 2 === 0 ? 0 : 1;
 }
 
 /**
@@ -33,15 +33,15 @@ function getTriCellType(coord: Coord): number {
  * 
  * For UP-pointing triangles (type 0):
  * - v0: apex (top), v1: bottom-left, v2: bottom-right
- * - Edge 0 (v0->v1): left edge, faces left neighbor (row, col-1)
- * - Edge 1 (v1->v2): bottom edge, faces bottom neighbor (row+1, col)
- * - Edge 2 (v2->v0): right edge, faces right neighbor (row, col+1)
+ * - Edge 0 (v0->v1): left edge, faces left neighbor (q-1, r)
+ * - Edge 1 (v1->v2): bottom edge, faces bottom neighbor (q, r+1)
+ * - Edge 2 (v2->v0): right edge, faces right neighbor (q+1, r)
  * 
  * For DOWN-pointing triangles (type 1):
  * - v0: top-left, v1: top-right, v2: apex (bottom)
- * - Edge 0 (v0->v1): top edge, faces top neighbor (row-1, col)
- * - Edge 1 (v1->v2): right edge, faces right neighbor (row, col+1)
- * - Edge 2 (v2->v0): left edge, faces left neighbor (row, col-1)
+ * - Edge 0 (v0->v1): top edge, faces top neighbor (q, r-1)
+ * - Edge 1 (v1->v2): right edge, faces right neighbor (q+1, r)
+ * - Edge 2 (v2->v0): left edge, faces left neighbor (q-1, r)
  */
 
 // Height of unit equilateral triangle with base 1
@@ -61,19 +61,19 @@ const downTriVertices: Vertex[] = [
   { x: 0, y: TRI_HEIGHT * 2/3 },            // apex (bottom)
 ];
 
-// Redefine neighbors to match vertex edge order:
+// Redefine neighbors to match vertex edge order (using axial q, r):
 // For up triangle: v0->v1 (left), v1->v2 (bottom), v2->v0 (right)
 const upTriNeighborsReordered: NeighborInfo[] = [
-  { dRow: 0, dCol: -1 },   // left (edge 0: v0->v1)
-  { dRow: 1, dCol: 0 },    // bottom (edge 1: v1->v2)
-  { dRow: 0, dCol: 1 },    // right (edge 2: v2->v0)
+  { dq: -1, dr: 0 },   // left (edge 0: v0->v1)
+  { dq: 0, dr: 1 },    // bottom (edge 1: v1->v2)
+  { dq: 1, dr: 0 },    // right (edge 2: v2->v0)
 ];
 
 // For down triangle: v0->v1 (top), v1->v2 (right), v2->v0 (left)
 const downTriNeighborsReordered: NeighborInfo[] = [
-  { dRow: -1, dCol: 0 },   // top (edge 0: v0->v1)
-  { dRow: 0, dCol: 1 },    // right (edge 1: v1->v2)
-  { dRow: 0, dCol: -1 },   // left (edge 2: v2->v0)
+  { dq: 0, dr: -1 },   // top (edge 0: v0->v1)
+  { dq: 1, dr: 0 },    // right (edge 1: v1->v2)
+  { dq: -1, dr: 0 },   // left (edge 2: v2->v0)
 ];
 
 // ----- Vertex-based transform system -----
@@ -112,30 +112,30 @@ function flipUVH(p: UV): UV {
 }
 
 /**
- * Convert (row, col) cell to 3 vertices in half-edge coords.
+ * Convert (q, r) cell to 3 vertices in half-edge coords.
  */
-function cellToVertices(row: number, col: number): IntVertex[] {
-  const isUp = (row + col) % 2 === 0;
+function cellToVertices(q: number, r: number): IntVertex[] {
+  const isUp = (q + r) % 2 === 0;
   
   if (isUp) {
-    // Up triangle vertices: apex at (col+1, row), base at row+1
+    // Up triangle vertices: apex at (q+1, r), base at r+1
     return [
-      { X: col + 1, Y: row },
-      { X: col, Y: row + 1 },
-      { X: col + 2, Y: row + 1 },
+      { X: q + 1, Y: r },
+      { X: q, Y: r + 1 },
+      { X: q + 2, Y: r + 1 },
     ];
   } else {
-    // Down triangle vertices: apex at (col+1, row+1), base at row
+    // Down triangle vertices: apex at (q+1, r+1), base at r
     return [
-      { X: col, Y: row },
-      { X: col + 2, Y: row },
-      { X: col + 1, Y: row + 1 },
+      { X: q, Y: r },
+      { X: q + 2, Y: r },
+      { X: q + 1, Y: r + 1 },
     ];
   }
 }
 
 /**
- * Convert 3 vertices back to (row, col) cell.
+ * Convert 3 vertices back to (q, r) cell.
  */
 function verticesToCell(verts: IntVertex[]): Coord | null {
   if (verts.length !== 3) return null;
@@ -152,14 +152,14 @@ function verticesToCell(verts: IntVertex[]): Coord | null {
   
   if (low.length === 1 && high.length === 2) {
     // Up triangle: base at maxY
-    const col = Math.min(high[0].X, high[1].X);
-    const row = minY;
-    return { row, col };
+    const q = Math.min(high[0].X, high[1].X);
+    const r = minY;
+    return { q, r };
   } else if (low.length === 2 && high.length === 1) {
     // Down triangle: base at minY
-    const col = Math.min(low[0].X, low[1].X);
-    const row = minY;
-    return { row, col };
+    const q = Math.min(low[0].X, low[1].X);
+    const r = minY;
+    return { q, r };
   }
   
   return null;
@@ -179,7 +179,7 @@ function verticesToCell(verts: IntVertex[]): Coord | null {
  * handles the type change automatically.
  */
 function rotateTri(coord: Coord): TransformResult {
-  const verts = cellToVertices(coord.row, coord.col);
+  const verts = cellToVertices(coord.q, coord.r);
   
   // Transform all vertices
   const transformedVerts = verts.map(v => {
@@ -210,7 +210,7 @@ function rotateTri(coord: Coord): TransformResult {
  * keeping position 1 in place. This corresponds to mirroring left/right edges.
  */
 function flipTri(coord: Coord): TransformResult {
-  const verts = cellToVertices(coord.row, coord.col);
+  const verts = cellToVertices(coord.q, coord.r);
   
   // Transform all vertices
   const transformedVerts = verts.map(v => {
@@ -239,11 +239,11 @@ function flipTri(coord: Coord): TransformResult {
 function getCellCenter(coord: Coord, cellSize: number): { x: number; y: number } {
   const triWidth = cellSize;
   const triHeight = cellSize * Math.sqrt(3) / 2;
-  const isUp = (coord.row + coord.col) % 2 === 0;
+  const isUp = (coord.q + coord.r) % 2 === 0;
   
   // Position based on tessellation
-  const x = (coord.col + 1) * (triWidth / 2);
-  const y = coord.row * triHeight + (isUp ? triHeight * 2/3 : triHeight * 1/3);
+  const x = (coord.q + 1) * (triWidth / 2);
+  const y = coord.r * triHeight + (isUp ? triHeight * 2/3 : triHeight * 1/3);
   
   return { x, y };
 }
@@ -254,10 +254,10 @@ function getCellCenter(coord: Coord, cellSize: number): { x: number; y: number }
 function getCellVertices(coord: Coord, cellSize: number): Array<{ x: number; y: number }> {
   const triWidth = cellSize;
   const triHeight = cellSize * Math.sqrt(3) / 2;
-  const isUp = (coord.row + coord.col) % 2 === 0;
+  const isUp = (coord.q + coord.r) % 2 === 0;
   
-  const x = coord.col * (triWidth / 2);
-  const y = coord.row * triHeight;
+  const x = coord.q * (triWidth / 2);
+  const y = coord.r * triHeight;
   
   if (isUp) {
     return [
@@ -288,12 +288,12 @@ export const triGridDefinition: GridDefinition = {
   rotate: rotateTri,
   flip: flipTri,
   
-  // Translation vectors that preserve parity (row + col must stay same mod 2)
-  // Moving by (2, 0) preserves parity: (r+2 + c) % 2 = (r + c) % 2
-  // Moving by (1, 1) preserves parity: (r+1 + c+1) % 2 = (r + c) % 2
+  // Translation vectors that preserve parity (q + r must stay same mod 2)
+  // Moving by (2, 0) preserves parity: (q+2 + r) % 2 = (q + r) % 2
+  // Moving by (1, 1) preserves parity: (q+1 + r+1) % 2 = (q + r) % 2
   translateVectors: [
-    { row: 0, col: 2 },   // Move right by 2 (preserves parity)
-    { row: 1, col: 1 },   // Move diagonally (preserves parity)
+    { q: 2, r: 0 },   // Move right by 2 (preserves parity)
+    { q: 1, r: 1 },   // Move diagonally (preserves parity)
   ],
   
   vertices: [upTriVertices, downTriVertices],

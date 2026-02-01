@@ -33,7 +33,7 @@ export interface UnifiedTilingViewerProps {
  * Get a unique key for a coordinate.
  */
 function coordKey(coord: Coord): string {
-  return `${coord.row},${coord.col}`;
+  return `${coord.q},${coord.r}`;
 }
 
 export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
@@ -52,8 +52,8 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
     const cells: Array<{ coord: Coord; placementIndex: number }> = [];
     
     // Start with inner grid bounds
-    let minRow = 0, maxRow = height - 1;
-    let minCol = 0, maxCol = width - 1;
+    let minR = 0, maxR = height - 1;
+    let minQ = 0, maxQ = width - 1;
     
     // Process placements
     placements.forEach((p, index) => {
@@ -61,23 +61,23 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
         const key = coordKey(cell);
         map.set(key, index);
         cells.push({ coord: cell, placementIndex: index });
-        minRow = Math.min(minRow, cell.row);
-        maxRow = Math.max(maxRow, cell.row);
-        minCol = Math.min(minCol, cell.col);
-        maxCol = Math.max(maxCol, cell.col);
+        minR = Math.min(minR, cell.r);
+        maxR = Math.max(maxR, cell.r);
+        minQ = Math.min(minQ, cell.q);
+        maxQ = Math.max(maxQ, cell.q);
       }
     });
     
     return {
-      bounds: { minRow, maxRow, minCol, maxCol },
+      bounds: { minR, maxR, minQ, maxQ },
       cellToPlacement: map,
       allCells: cells,
     };
   }, [placements, width, height]);
   
   // Check if a cell is in the inner grid
-  const isInInnerGrid = useCallback((row: number, col: number): boolean => {
-    return row >= 0 && row < height && col >= 0 && col < width;
+  const isInInnerGrid = useCallback((q: number, r: number): boolean => {
+    return r >= 0 && r < height && q >= 0 && q < width;
   }, [width, height]);
   
   // Get neighbors for a cell
@@ -85,16 +85,16 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
     const cellType = grid.getCellType(coord);
     const neighborInfos = grid.neighbors[cellType];
     return neighborInfos.map(n => ({
-      row: coord.row + n.dRow,
-      col: coord.col + n.dCol,
+      q: coord.q + n.dq,
+      r: coord.r + n.dr,
     }));
   }, [grid]);
   
   // Calculate SVG dimensions based on grid type
   const svgDimensions = useMemo(() => {
     // Get cell vertices for corner cells to determine actual bounds
-    const topLeft = grid.getCellVertices({ row: bounds.minRow, col: bounds.minCol }, cellSize);
-    const bottomRight = grid.getCellVertices({ row: bounds.maxRow, col: bounds.maxCol }, cellSize);
+    const topLeft = grid.getCellVertices({ q: bounds.minQ, r: bounds.minR }, cellSize);
+    const bottomRight = grid.getCellVertices({ q: bounds.maxQ, r: bounds.maxR }, cellSize);
     
     // Find actual pixel bounds
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -129,19 +129,19 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
         result.push({ 
           coord, 
           placementIndex, 
-          isInner: isInInnerGrid(coord.row, coord.col) 
+          isInner: isInInnerGrid(coord.q, coord.r) 
         });
       }
     }
     
     // Add empty inner grid cells
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        const key = coordKey({ row, col });
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) {
+        const key = coordKey({ q, r });
         if (!seen.has(key)) {
           seen.add(key);
           result.push({ 
-            coord: { row, col }, 
+            coord: { q, r }, 
             placementIndex: undefined, 
             isInner: true 
           });
@@ -296,7 +296,7 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
             
             for (let edgeIndex = 0; edgeIndex < numEdges; edgeIndex++) {
               const neighbor = neighbors[edgeIndex];
-              if (!isInInnerGrid(neighbor.row, neighbor.col)) {
+              if (!isInInnerGrid(neighbor.q, neighbor.r)) {
                 const v1 = vertices[edgeIndex];
                 const v2 = vertices[(edgeIndex + 1) % numEdges];
                 boundaryEdges.push({ x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y });
@@ -377,7 +377,7 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
          * 4. Draw a filled circle to indicate the edge is marked
          */}
         {edgeState && cellsToRender.flatMap(({ coord }) => {
-          const cellEdges = edgeState[coord.row]?.[coord.col];
+          const cellEdges = edgeState[coord.r]?.[coord.q];
           if (!cellEdges) return [];
           
           const vertices = getCellVerticesForEdge(coord);

@@ -3,6 +3,8 @@
  * 
  * Defines the geometry for polyomino tilings on a square grid.
  * Each cell is a unit square with 4 neighbors (up, right, down, left).
+ * 
+ * Uses axial coordinates (q, r) where q is horizontal and r is vertical.
  */
 
 import type { GridDefinition, Coord, TransformResult, Vertex, NeighborInfo } from './types';
@@ -10,10 +12,10 @@ import type { GridDefinition, Coord, TransformResult, Vertex, NeighborInfo } fro
 // Neighbor offsets for square grid: [up, right, down, left]
 // In a square grid, all cells have the same neighbors
 const squareNeighbors: NeighborInfo[] = [
-  { dRow: -1, dCol: 0 },  // up (neighbor 0)
-  { dRow: 0, dCol: 1 },   // right (neighbor 1)
-  { dRow: 1, dCol: 0 },   // down (neighbor 2)
-  { dRow: 0, dCol: -1 },  // left (neighbor 3)
+  { dq: 0, dr: -1 },   // up (neighbor 0)
+  { dq: 1, dr: 0 },    // right (neighbor 1)
+  { dq: 0, dr: 1 },    // down (neighbor 2)
+  { dq: -1, dr: 0 },   // left (neighbor 3)
 ];
 
 // Vertices for a unit square centered at origin (before translation)
@@ -27,7 +29,7 @@ const squareVertices: Vertex[] = [
 ];
 
 /**
- * Rotate 90° clockwise: (row, col) -> (col, -row)
+ * Rotate 90° clockwise: (q, r) -> (r, -q)
  * Then normalize so the result can be used relative to origin.
  * 
  * Neighbor permutation for 90° CW rotation:
@@ -40,15 +42,15 @@ const squareVertices: Vertex[] = [
 function rotateSquare(coord: Coord): TransformResult {
   return {
     coord: {
-      row: coord.col,
-      col: -coord.row,
+      q: coord.r,
+      r: -coord.q,
     },
     neighborPerm: [1, 2, 3, 0],
   };
 }
 
 /**
- * Flip horizontally: (row, col) -> (row, -col)
+ * Flip horizontally: (q, r) -> (-q, r)
  * 
  * Neighbor permutation for horizontal flip:
  * - What was up (0) stays up (0)
@@ -59,8 +61,8 @@ function rotateSquare(coord: Coord): TransformResult {
 function flipSquare(coord: Coord): TransformResult {
   return {
     coord: {
-      row: coord.row,
-      col: -coord.col,
+      q: -coord.q,
+      r: coord.r,
     },
     neighborPerm: [0, 3, 2, 1],
   };
@@ -71,8 +73,8 @@ function flipSquare(coord: Coord): TransformResult {
  */
 function getCellCenter(coord: Coord, cellSize: number): { x: number; y: number } {
   return {
-    x: (coord.col + 0.5) * cellSize,
-    y: (coord.row + 0.5) * cellSize,
+    x: (coord.q + 0.5) * cellSize,
+    y: (coord.r + 0.5) * cellSize,
   };
 }
 
@@ -102,8 +104,8 @@ export const squareGridDefinition: GridDefinition = {
   
   // For square grid, simple unit translations
   translateVectors: [
-    { row: 0, col: 1 },  // Right
-    { row: 1, col: 0 },  // Down
+    { q: 1, r: 0 },  // Right
+    { q: 0, r: 1 },  // Down
   ],
   
   vertices: [squareVertices],  // One vertex list for the single cell type

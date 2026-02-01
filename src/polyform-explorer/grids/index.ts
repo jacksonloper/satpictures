@@ -31,7 +31,7 @@ export {
 
 // Grid definitions
 export { squareGridDefinition } from './squareGridDef';
-export { hexGridDefinition, offsetToAxial, axialToOffset } from './hexGridDef';
+export { hexGridDefinition } from './hexGridDef';
 export { triGridDefinition, upTriNeighbors, downTriNeighbors } from './triGridDef';
 
 // Unified tiling solver
