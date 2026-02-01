@@ -276,6 +276,11 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
             // Use grid-agnostic inverse permutation computation
             const inversePerm = getInverseEdgePermutation(grid, placement.transformIndex);
             
+            // Placements should have same cell count as original, log if mismatch
+            if (placement.cells.length !== originalCells.length) {
+              console.warn(`Placement ${pIndex} has ${placement.cells.length} cells but original has ${originalCells.length}`);
+            }
+            
             return placement.cells.flatMap((cell, cellIdx) => {
               // The cellIdx maps to the same index in the original cells list
               // because transformations preserve cell count and order

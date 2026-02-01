@@ -108,6 +108,8 @@ export function PolyformExplorer() {
   const heightError = activeTile.heightError;
   
   // Compute the filled cell coordinates for the current tile
+  // Note: Uses {row, col} format to match TilingViewer's expectation
+  // where row = r (vertical) and col = q (horizontal) in axial terms
   const tileCells = useMemo(() => {
     const coords: Array<{ row: number; col: number }> = [];
     for (let row = 0; row < cells.length; row++) {
