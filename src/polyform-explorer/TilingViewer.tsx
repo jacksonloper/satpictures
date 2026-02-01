@@ -285,102 +285,81 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
         {/* Layer 5: Edge markings as half circles for each placement
          * Transform the edge state according to each placement's transformIndex
          */}
-        {edgeState && placements.flatMap((placement, pIndex) => {
-          const inversePerm = getSquareEdgePermutationInverse(placement.transformIndex);
-          const semicircleRadius = cellSize * 0.12;
-          
-          return placement.cells.flatMap((cell, cellIdx) => {
-            // Find the original cell coordinates (before transform)
-            // The cells array in placement is already transformed,
-            // but the original tile's cell indices map 1:1 with these
-            // We need to look up edge state from original tile coordinates
-            
-            // Get original tile's bounding box to find the original cell
-            // For now, use a simple mapping: the cellIdx corresponds to 
-            // the same cell in the original coords list
-            // We need to get original coords from edgeState
-            
-            // First, find what the original (pre-transform) coordinates were
-            // The placement stores transformed coords, but we need original coords
-            // to look up edge state. The original tile cells are stored in edgeState
-            // indexed by row, col.
-            
-            // Simple approach: edgeState is defined on a grid where the original
-            // tile was drawn. We need to find which original cell this placement cell
-            // corresponds to.
-            
-            // Since placements are generated from transforms of the original,
-            // we can find original coords by looking at which original cells
-            // exist in edgeState (non-null entries)
-            
-            // Get the original tile cells from edgeState
-            const originalCells: { row: number; col: number }[] = [];
-            for (let r = 0; r < edgeState.length; r++) {
-              for (let c = 0; c < (edgeState[r]?.length || 0); c++) {
-                if (edgeState[r]?.[c]) {
-                  originalCells.push({ row: r, col: c });
-                }
+        {edgeState && (() => {
+          // Pre-compute the original cells once (cells with edge state defined)
+          const originalCells: { row: number; col: number }[] = [];
+          for (let r = 0; r < edgeState.length; r++) {
+            for (let c = 0; c < (edgeState[r]?.length || 0); c++) {
+              if (edgeState[r]?.[c]) {
+                originalCells.push({ row: r, col: c });
               }
             }
+          }
+          
+          const semicircleRadius = cellSize * 0.12;
+          
+          return placements.flatMap((placement, pIndex) => {
+            const inversePerm = getSquareEdgePermutationInverse(placement.transformIndex);
             
-            // The cellIdx in placement.cells should match the order of original cells
-            // after the transform was applied. Since transforms preserve cell count
-            // and order, we can use cellIdx directly.
-            if (cellIdx >= originalCells.length) return [];
-            
-            const origCell = originalCells[cellIdx];
-            const origEdges = edgeState[origCell.row]?.[origCell.col];
-            if (!origEdges) return [];
-            
-            // Screen position for this cell in the solution view
-            const svgCol = cell.col + offsetCol;
-            const svgRow = cell.row + offsetRow;
-            const x = svgCol * cellSize;
-            const y = svgRow * cellSize;
-            
-            // Edge coordinates for square grid
-            const edgeCoords = [
-              { x1: x, y1: y, x2: x + cellSize, y2: y },                    // top
-              { x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize }, // right
-              { x1: x + cellSize, y1: y + cellSize, x2: x, y2: y + cellSize }, // bottom
-              { x1: x, y1: y + cellSize, x2: x, y2: y },                    // left
-            ];
-            
-            return [0, 1, 2, 3].map(visualEdgeIdx => {
-              // Use inverse permutation to find which original edge corresponds
-              // to this visual edge after the transform
-              const origEdgeIdx = inversePerm[visualEdgeIdx];
-              const isMarked = origEdges[origEdgeIdx] ?? false;
+            return placement.cells.flatMap((cell, cellIdx) => {
+              // The cellIdx maps to the same index in the original cells list
+              // because transformations preserve cell count and order
+              if (cellIdx >= originalCells.length) return [];
               
-              if (!isMarked) return null;
+              const origCell = originalCells[cellIdx];
+              const origEdges = edgeState[origCell.row]?.[origCell.col];
+              if (!origEdges) return [];
               
-              const edge = edgeCoords[visualEdgeIdx];
+              // Screen position for this cell in the solution view
+              const svgCol = cell.col + offsetCol;
+              const svgRow = cell.row + offsetRow;
+              const x = svgCol * cellSize;
+              const y = svgRow * cellSize;
               
-              // Edge midpoint
-              const midX = (edge.x1 + edge.x2) / 2;
-              const midY = (edge.y1 + edge.y2) / 2;
+              // Edge coordinates for square grid
+              const edgeCoords = [
+                { x1: x, y1: y, x2: x + cellSize, y2: y },                    // top
+                { x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize }, // right
+                { x1: x + cellSize, y1: y + cellSize, x2: x, y2: y + cellSize }, // bottom
+                { x1: x, y1: y + cellSize, x2: x, y2: y },                    // left
+              ];
               
-              // Edge direction for perpendicular calculation
-              const edgeDx = edge.x2 - edge.x1;
-              const edgeDy = edge.y2 - edge.y1;
-              
-              // Perpendicular angle pointing into cell (90° CW)
-              const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
-              
-              const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
-              
-              return (
-                <path
-                  key={`edge-mark-${pIndex}-${cellIdx}-${visualEdgeIdx}`}
-                  d={path}
-                  fill="#f39c12"
-                  stroke="#c0392b"
-                  strokeWidth={1}
-                />
-              );
+              return [0, 1, 2, 3].map(visualEdgeIdx => {
+                // Use inverse permutation to find which original edge corresponds
+                // to this visual edge after the transform
+                const origEdgeIdx = inversePerm[visualEdgeIdx];
+                const isMarked = origEdges[origEdgeIdx] ?? false;
+                
+                if (!isMarked) return null;
+                
+                const edge = edgeCoords[visualEdgeIdx];
+                
+                // Edge midpoint
+                const midX = (edge.x1 + edge.x2) / 2;
+                const midY = (edge.y1 + edge.y2) / 2;
+                
+                // Edge direction for perpendicular calculation
+                const edgeDx = edge.x2 - edge.x1;
+                const edgeDy = edge.y2 - edge.y1;
+                
+                // Perpendicular angle pointing into cell (90° CW)
+                const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
+                
+                const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
+                
+                return (
+                  <path
+                    key={`edge-mark-${pIndex}-${cellIdx}-${visualEdgeIdx}`}
+                    d={path}
+                    fill="#f39c12"
+                    stroke="#c0392b"
+                    strokeWidth={1}
+                  />
+                );
+              });
             });
           });
-        })}
+        })()}
       </svg>
     </div>
   );
