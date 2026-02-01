@@ -13,47 +13,32 @@
 import type { GridDefinition, Coord, TransformResult, Vertex, NeighborInfo } from './types';
 
 /**
- * Neighbor offsets for hex grid in odd-r offset coordinates.
- * These depend on whether the row is even or odd.
- * We handle this by providing neighbors for type 0 (even rows) and type 1 (odd rows)
- * but logically this is one cell type.
+ * Hex Grid Geometry
  * 
- * Actually, for simplicity in this unified model, we'll use a single neighbor list
- * that works via the axial coordinate system internally. The neighbors array
- * will be dynamically computed based on the actual coordinate.
+ * Uses pointy-top hexagons with odd-r offset coordinate storage.
+ * Neighbors are stored in axial coordinate offsets (dq, dr where r = row).
  * 
- * For the unified interface, we store the 6 neighbors in axial offset form:
- * [NE, E, SE, SW, W, NW] in terms of the axial neighbors.
+ * The 6 neighbors in clockwise order from NE:
+ * - Index 0: NE (q+1, r-1) -> offset (dRow:-1, dCol:+1)
+ * - Index 1: E  (q+1, r)   -> offset (dRow:0, dCol:+1)
+ * - Index 2: SE (q, r+1)   -> offset (dRow:+1, dCol:0)
+ * - Index 3: SW (q-1, r+1) -> offset (dRow:+1, dCol:-1)
+ * - Index 4: W  (q-1, r)   -> offset (dRow:0, dCol:-1)
+ * - Index 5: NW (q, r-1)   -> offset (dRow:-1, dCol:0)
+ * 
+ * Vertices for pointy-top hex start at top and go clockwise.
+ * Edge i connects vertex i to vertex (i+1) % 6 and faces neighbor i.
  */
-
-// For odd-r offset, neighbors depend on whether row is even or odd.
-// We'll use a neighbor function instead of static offsets.
-// But to fit the interface, we provide the "logical" 6 directions.
-
-// In pointy-top axial coords, the 6 neighbors are at:
-// (q+1, r-1), (q+1, r), (q, r+1), (q-1, r+1), (q-1, r), (q, r-1)
-// These correspond to: NE, E, SE, SW, W, NW
-
-// The static neighbor list represents neighbors in axial form,
-// then we convert to/from offset as needed.
 const hexNeighborsAxial: NeighborInfo[] = [
-  { dRow: -1, dCol: 1 },  // NE: (q+1, r-1) - but using row=r, we need to think in offset
-  { dRow: 0, dCol: 1 },   // E: (q+1, r)
-  { dRow: 1, dCol: 0 },   // SE: (q, r+1)
-  { dRow: 1, dCol: -1 },  // SW: (q-1, r+1)
-  { dRow: 0, dCol: -1 },  // W: (q-1, r)
-  { dRow: -1, dCol: 0 },  // NW: (q, r-1)
+  { dRow: -1, dCol: 1 },  // NE (index 0)
+  { dRow: 0, dCol: 1 },   // E  (index 1)
+  { dRow: 1, dCol: 0 },   // SE (index 2)
+  { dRow: 1, dCol: -1 },  // SW (index 3)
+  { dRow: 0, dCol: -1 },  // W  (index 4)
+  { dRow: -1, dCol: 0 },  // NW (index 5)
 ];
 
-/**
- * For hex grid, the neighbor offsets in odd-r offset coordinates vary by row parity.
- * To fit the unified model, we'll use a different approach:
- * The neighbors array stores the neighbors in AXIAL coordinate offsets (dq, dr).
- * Then getCellNeighbor will convert appropriately.
- * 
- * Vertices for pointy-top hex, starting from top and going clockwise.
- * Edge i connects vertex i to vertex (i+1) % 6.
- */
+// Vertices for pointy-top hex (unit size), starting from top and going clockwise
 const hexVerticesUnit: Vertex[] = (() => {
   const vertices: Vertex[] = [];
   for (let i = 0; i < 6; i++) {

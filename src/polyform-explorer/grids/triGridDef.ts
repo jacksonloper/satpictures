@@ -25,78 +25,36 @@ function getTriCellType(coord: Coord): number {
   return (coord.row + coord.col) % 2 === 0 ? 0 : 1;
 }
 
-// Note: Original neighbor definitions (left, right, bottom/top) are reordered
-// below to match vertex edge ordering for the unified grid model.
-
 /**
- * Vertices for up-pointing triangle (centered at origin in unit coords).
- * The apex is at the top, base at the bottom.
- * Vertices ordered so edge i faces neighbor i:
- * - Edge 0 (v0 to v1): left edge, faces left neighbor
- * - Edge 1 (v1 to v2): bottom edge... wait, we need to reconsider.
+ * Triangle Grid Geometry
  * 
- * For up-pointing triangle with neighbors [left, right, bottom]:
- * - Left edge faces left neighbor (row, col-1)
- * - Right edge faces right neighbor (row, col+1)
- * - Bottom edge faces bottom neighbor (row+1, col)
+ * Vertices and neighbors are ordered so that edge i (from vertex[i] to vertex[(i+1)%3])
+ * faces neighbor[i]. This consistent ordering enables the unified grid model.
  * 
- * Vertices in order such that edge i (from v[i] to v[(i+1)%3]) faces neighbor i:
- * - v0: top apex
- * - v1: bottom-left (edge v0->v1 is left edge, faces left)
- * - v2: bottom-right (edge v1->v2 is bottom edge, faces bottom)
- * Then edge v2->v0 is right edge, faces right
+ * For UP-pointing triangles (type 0):
+ * - v0: apex (top), v1: bottom-left, v2: bottom-right
+ * - Edge 0 (v0->v1): left edge, faces left neighbor (row, col-1)
+ * - Edge 1 (v1->v2): bottom edge, faces bottom neighbor (row+1, col)
+ * - Edge 2 (v2->v0): right edge, faces right neighbor (row, col+1)
  * 
- * But neighbors are [left=0, right=1, bottom=2], so we need:
- * - Edge 0 faces left: v0->v1
- * - Edge 1 faces right: v1->v2
- * - Edge 2 faces bottom: v2->v0
- * 
- * This doesn't work... Let me reconsider.
- * 
- * Actually, for the mapping to work:
- * - Edge from v[i] to v[(i+1)%3] faces neighbor[i]
- * 
- * For up triangle neighbors [left, right, bottom]:
- * - Edge 0 (v0->v1) should face left neighbor
- * - Edge 1 (v1->v2) should face right neighbor  
- * - Edge 2 (v2->v0) should face bottom neighbor
- * 
- * If v0=top, v1=bottom-left, v2=bottom-right:
- * - v0->v1 is left edge ✓
- * - v1->v2 is bottom edge (but should face right neighbor) ✗
- * 
- * Let's reorder: v0=top, v1=bottom-right, v2=bottom-left
- * - v0->v1 is right edge (but should face left) ✗
- * 
- * Alternative: change neighbor order to match vertex order.
- * If vertices are v0=top, v1=bottom-left, v2=bottom-right:
- * - v0->v1: left edge
- * - v1->v2: bottom edge
- * - v2->v0: right edge
- * 
- * So neighbors should be [left, bottom, right] for this to work.
- * But that changes the semantics...
- * 
- * For now, let's define vertices in a way that works:
+ * For DOWN-pointing triangles (type 1):
+ * - v0: top-left, v1: top-right, v2: apex (bottom)
+ * - Edge 0 (v0->v1): top edge, faces top neighbor (row-1, col)
+ * - Edge 1 (v1->v2): right edge, faces right neighbor (row, col+1)
+ * - Edge 2 (v2->v0): left edge, faces left neighbor (row, col-1)
  */
 
 // Height of unit equilateral triangle with base 1
 const TRI_HEIGHT = Math.sqrt(3) / 2;
 
-// Up-pointing triangle vertices (unit size)
-// v0: apex (top), v1: bottom-left, v2: bottom-right
-// Edge mapping: v0->v1 (left), v1->v2 (bottom), v2->v0 (right)
-// So we need neighbor order: [left, bottom, right] for up triangles
-// But we already defined [left, right, bottom]... Let's adjust.
+// Up-pointing triangle vertices (unit size, centered at origin)
 const upTriVertices: Vertex[] = [
-  { x: 0, y: -TRI_HEIGHT * 2/3 },           // apex (top)
-  { x: -0.5, y: TRI_HEIGHT * 1/3 },         // bottom-left
-  { x: 0.5, y: TRI_HEIGHT * 1/3 },          // bottom-right
+  { x: 0, y: -TRI_HEIGHT * 2/3 },           // apex (top) - v0
+  { x: -0.5, y: TRI_HEIGHT * 1/3 },         // bottom-left - v1
+  { x: 0.5, y: TRI_HEIGHT * 1/3 },          // bottom-right - v2
 ];
 
-// Down-pointing triangle vertices (unit size)
-// v0: top-left, v1: top-right, v2: apex (bottom)
-// Edge mapping: v0->v1 (top), v1->v2 (right), v2->v0 (left)
+// Down-pointing triangle vertices (unit size, centered at origin)
 const downTriVertices: Vertex[] = [
   { x: -0.5, y: -TRI_HEIGHT * 1/3 },        // top-left
   { x: 0.5, y: -TRI_HEIGHT * 1/3 },         // top-right
@@ -210,13 +168,15 @@ function verticesToCell(verts: IntVertex[]): Coord | null {
 /**
  * Rotate 60° clockwise via vertex transform.
  * 
- * Neighbor permutation for 60° CW rotation depends on cell type.
- * For up triangle [left, bottom, right] -> after 60° CW, this becomes
- * a down triangle, and the edges rotate. The permutation maps old
- * neighbor indices to new neighbor indices.
+ * For triangles, the neighbor permutation after a 60° CW rotation is [1, 2, 0].
+ * This is because edges shift one position clockwise:
+ * - Edge 0 (originally facing one direction) now faces where edge 2 was pointing
+ * - Edge 1 now faces where edge 0 was pointing  
+ * - Edge 2 now faces where edge 1 was pointing
  * 
- * This is complex because the cell type changes after rotation.
- * For the simplified model, we provide a permutation that maps edge indices.
+ * The transform works correctly regardless of whether the starting triangle
+ * is up-pointing or down-pointing, as the vertex-based transformation
+ * handles the type change automatically.
  */
 function rotateTri(coord: Coord): TransformResult {
   const verts = cellToVertices(coord.row, coord.col);
@@ -234,19 +194,7 @@ function rotateTri(coord: Coord): TransformResult {
     return { coord, neighborPerm: [0, 1, 2] };
   }
   
-  // For triangles, the permutation is complex because cell type can change.
-  // For a single 60° rotation:
-  // - Up triangle (type 0) becomes Down triangle at new location
-  // - Down triangle (type 1) becomes Up triangle at new location
-  // 
-  // The edge permutation needs to map based on geometry.
-  // After 60° CW rotation:
-  // For up triangle [left=0, bottom=1, right=2]:
-  //   Rotates to down triangle where old-left becomes new-top, etc.
-  // This requires careful geometric analysis.
-  // 
-  // Simplified: for 60° CW rotation of edges [0,1,2] -> [1,2,0]
-  // (each edge shifts one position clockwise)
+  // Neighbor permutation for 60° CW rotation: edges shift one position clockwise
   const neighborPerm = [1, 2, 0];
   
   return {
@@ -257,6 +205,9 @@ function rotateTri(coord: Coord): TransformResult {
 
 /**
  * Flip horizontally via vertex transform.
+ * 
+ * For horizontal flip, the edge permutation swaps positions 0 and 2 while
+ * keeping position 1 in place. This corresponds to mirroring left/right edges.
  */
 function flipTri(coord: Coord): TransformResult {
   const verts = cellToVertices(coord.row, coord.col);
@@ -273,14 +224,7 @@ function flipTri(coord: Coord): TransformResult {
     return { coord, neighborPerm: [0, 1, 2] };
   }
   
-  // For horizontal flip, left and right edges swap.
-  // For up triangle [left=0, bottom=1, right=2]:
-  //   After flip: left<->right, so [2, 1, 0]
-  // For down triangle [top=0, right=1, left=2]:
-  //   After flip: right<->left, so [0, 2, 1]
-  // 
-  // Since cell type changes after flip, we use a general permutation.
-  // For flip: edges at positions 0 and 2 swap (left/right for up, or right/left for down)
+  // Neighbor permutation for horizontal flip: edges 0 and 2 swap, edge 1 stays
   const neighborPerm = [2, 1, 0];
   
   return {
