@@ -1,5 +1,6 @@
 import React from "react";
 import type { EdgeColor, EdgeDirection, CellEdgeColors } from "../problem/edge-colored-polyomino-tiling";
+import { EDGE_COLORS } from "../problem/edge-colored-polyomino-tiling";
 
 /** Props for edge color display */
 interface EdgeColorInfo {
@@ -20,14 +21,6 @@ interface SquareGridEdgesProps {
   cellSize?: number;
   edgeColorInfo?: EdgeColorInfo;
 }
-
-/** Color palette for edge colors */
-const EDGE_COLORS: Record<EdgeColor, string> = {
-  0: "#2c3e50", // Default dark (no specific color)
-  1: "#e74c3c", // Red
-  2: "#27ae60", // Green  
-  3: "#3498db", // Blue
-};
 
 export const SquareGridEdges: React.FC<SquareGridEdgesProps> = ({ 
   cells, 
@@ -183,5 +176,3 @@ export const SquareGridEdges: React.FC<SquareGridEdgesProps> = ({
     </svg>
   );
 };
-
-export { EDGE_COLORS };

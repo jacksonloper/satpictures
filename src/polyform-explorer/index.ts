@@ -1,5 +1,5 @@
 export { SquareGrid } from "./SquareGrid";
-export { SquareGridEdges, EDGE_COLORS } from "./SquareGridEdges";
+export { SquareGridEdges } from "./SquareGridEdges";
 export { HexGrid } from "./HexGrid";
 export { TriangleGrid } from "./TriangleGrid";
 export { TilingViewer } from "./TilingViewer";
@@ -25,3 +25,5 @@ export { generateTriMaze } from "./triMazeGenerator";
 export type { TriWall, TriMazeResult } from "./triMazeGenerator";
 export { TriMazeViewer } from "./TriMazeViewer";
 export type { TriMazeViewerProps } from "./TriMazeViewer";
+// Re-export edge coloring constants from shared location
+export { EDGE_COLORS } from "../problem/edge-colored-polyomino-tiling";

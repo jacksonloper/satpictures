@@ -15,8 +15,19 @@ import { gridToCoords, generateAllPlacements } from "./polyomino-tiling";
 /** Edge direction in a polyomino cell */
 export type EdgeDirection = "top" | "right" | "bottom" | "left";
 
+/** Number of edge colors (including default) */
+export const NUM_EDGE_COLORS = 4;
+
 /** Edge color (0-3, with 0 meaning "no color" or default) */
 export type EdgeColor = 0 | 1 | 2 | 3;
+
+/** Color palette for rendering edge colors (shared across components) */
+export const EDGE_COLORS: Record<EdgeColor, string> = {
+  0: "#2c3e50", // Default dark (no specific color)
+  1: "#e74c3c", // Red
+  2: "#27ae60", // Green  
+  3: "#3498db", // Blue
+};
 
 /** Edge colors for a single cell */
 export interface CellEdgeColors {
@@ -407,13 +418,13 @@ export function solveEdgeColoredPolyominoTiling(
   }
   
   // Create edge color variables
-  // For each edge, create variables for colors 0-3
+  // For each edge, create variables for each possible color
   // edgeColorVars[edgeKey][color] = variable number
   const edgeColorVars: Map<string, Map<EdgeColor, number>> = new Map();
   
   for (const edgeKey of edgeToPlacementColors.keys()) {
     const colorVars = new Map<EdgeColor, number>();
-    for (let color = 0; color < 4; color++) {
+    for (let color = 0; color < NUM_EDGE_COLORS; color++) {
       colorVars.set(color as EdgeColor, solver.newVariable());
     }
     edgeColorVars.set(edgeKey, colorVars);

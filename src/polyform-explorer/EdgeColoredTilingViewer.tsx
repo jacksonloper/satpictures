@@ -1,15 +1,7 @@
 import React, { useMemo } from "react";
 import type { EdgeColoredPlacement, EdgeColor } from "../problem/edge-colored-polyomino-tiling";
-import { getEdgeKey } from "../problem/edge-colored-polyomino-tiling";
+import { getEdgeKey, EDGE_COLORS } from "../problem/edge-colored-polyomino-tiling";
 import { getPlacementColor } from "./placementColors";
-
-/** Color palette for edge colors (matching SquareGridEdges) */
-const EDGE_COLORS: Record<EdgeColor, string> = {
-  0: "#2c3e50", // Default dark
-  1: "#e74c3c", // Red
-  2: "#27ae60", // Green  
-  3: "#3498db", // Blue
-};
 
 /** EdgeColoredTilingViewer - displays the solved tiling with edge colors */
 export interface EdgeColoredTilingViewerProps {
@@ -295,5 +287,3 @@ export const EdgeColoredTilingViewer: React.FC<EdgeColoredTilingViewerProps> = (
     </div>
   );
 };
-
-export { EDGE_COLORS };
