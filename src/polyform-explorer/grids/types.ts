@@ -329,9 +329,9 @@ export function toggleEdge(
   r: number,
   edgeIndex: number
 ): EdgeState {
-  return edgeState.map((rowEdges, row) =>
-    rowEdges.map((cellEdges, col) => {
-      if (row === r && col === q) {
+  return edgeState.map((rowEdges, rIndex) =>
+    rowEdges.map((cellEdges, qIndex) => {
+      if (rIndex === r && qIndex === q) {
         return cellEdges.map((val, i) => i === edgeIndex ? !val : val);
       }
       return cellEdges;
@@ -411,10 +411,10 @@ export function transformEdgeState(
   const newWidth = maxQ + offQ + 1;
   
   const newEdgeState: EdgeState = [];
-  for (let r = 0; r < newHeight; r++) {
+  for (let rIndex = 0; rIndex < newHeight; rIndex++) {
     const rowEdges: CellEdges[] = [];
-    for (let q = 0; q < newWidth; q++) {
-      const cellType = grid.getCellType({ q, r });
+    for (let qIndex = 0; qIndex < newWidth; qIndex++) {
+      const cellType = grid.getCellType({ q: qIndex, r: rIndex });
       const numEdges = grid.neighbors[cellType].length;
       rowEdges.push(new Array(numEdges).fill(false));
     }
@@ -423,10 +423,10 @@ export function transformEdgeState(
   
   // Place transformed edges into new grid
   for (const { newCoord, newEdges } of transformedCells) {
-    const r = newCoord.r + offR;
-    const q = newCoord.q + offQ;
-    if (r >= 0 && r < newHeight && q >= 0 && q < newWidth) {
-      newEdgeState[r][q] = newEdges;
+    const rPos = newCoord.r + offR;
+    const qPos = newCoord.q + offQ;
+    if (rPos >= 0 && rPos < newHeight && qPos >= 0 && qPos < newWidth) {
+      newEdgeState[rPos][qPos] = newEdges;
     }
   }
   
