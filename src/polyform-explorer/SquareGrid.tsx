@@ -1,5 +1,5 @@
 import React from "react";
-import type { EdgeKey } from "../utils/edgeKey";
+import { type EdgeKey, makeEdgeKey } from "../utils/edgeKey";
 
 /** Square grid for polyomino */
 interface SquareGridProps {
@@ -13,14 +13,6 @@ interface SquareGridProps {
 export const SquareGrid: React.FC<SquareGridProps> = ({ cells, roads, onCellClick, onEdgeClick, cellSize = 40 }) => {
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
-  
-  // Helper to make canonical edge key
-  const makeEdgeKey = (row1: number, col1: number, row2: number, col2: number): string => {
-    if (row1 < row2 || (row1 === row2 && col1 < col2)) {
-      return `${row1},${col1}-${row2},${col2}`;
-    }
-    return `${row2},${col2}-${row1},${col1}`;
-  };
   
   // Generate edges between adjacent filled cells
   const edges: Array<{

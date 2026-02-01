@@ -14,7 +14,7 @@ import {
   flipHorizontal,
   flipVertical,
 } from "./utils/polyformTransforms";
-import { type EdgeKey, makeEdgeKey } from "./utils/edgeKey";
+import { type EdgeKey, makeEdgeKey, parseEdgeKey } from "./utils/edgeKey";
 import {
   SquareGrid,
   HexGrid,
@@ -495,9 +495,9 @@ export function PolyformExplorer() {
       const newRoads = new Set(prev);
       // Remove any edges connected to this cell
       for (const edgeKey of prev) {
-        const [part1, part2] = edgeKey.split('-');
-        const [r1, c1] = part1.split(',').map(Number);
-        const [r2, c2] = part2.split(',').map(Number);
+        const parsed = parseEdgeKey(edgeKey);
+        if (!parsed) continue;
+        const { r1, c1, r2, c2 } = parsed;
         if ((r1 === row && c1 === col) || (r2 === row && c2 === col)) {
           newRoads.delete(edgeKey);
         }
@@ -555,9 +555,9 @@ export function PolyformExplorer() {
         const newRoads = new Set<EdgeKey>();
         const oldHeight = gridHeight;
         for (const edgeKey of prev) {
-          const [part1, part2] = edgeKey.split('-');
-          const [r1, c1] = part1.split(',').map(Number);
-          const [r2, c2] = part2.split(',').map(Number);
+          const parsed = parseEdgeKey(edgeKey);
+          if (!parsed) continue;
+          const { r1, c1, r2, c2 } = parsed;
           // Rotation 90° CW: (row, col) -> (col, height - 1 - row)
           const nr1 = c1;
           const nc1 = oldHeight - 1 - r1;
@@ -609,9 +609,9 @@ export function PolyformExplorer() {
         const newRoads = new Set<EdgeKey>();
         const oldWidth = gridWidth;
         for (const edgeKey of prev) {
-          const [part1, part2] = edgeKey.split('-');
-          const [r1, c1] = part1.split(',').map(Number);
-          const [r2, c2] = part2.split(',').map(Number);
+          const parsed = parseEdgeKey(edgeKey);
+          if (!parsed) continue;
+          const { r1, c1, r2, c2 } = parsed;
           // Flip horizontally: (row, col) -> (row, width - 1 - col)
           const nc1 = oldWidth - 1 - c1;
           const nc2 = oldWidth - 1 - c2;
@@ -660,9 +660,9 @@ export function PolyformExplorer() {
         const newRoads = new Set<EdgeKey>();
         const oldHeight = gridHeight;
         for (const edgeKey of prev) {
-          const [part1, part2] = edgeKey.split('-');
-          const [r1, c1] = part1.split(',').map(Number);
-          const [r2, c2] = part2.split(',').map(Number);
+          const parsed = parseEdgeKey(edgeKey);
+          if (!parsed) continue;
+          const { r1, c1, r2, c2 } = parsed;
           // Flip vertically: (row, col) -> (height - 1 - row, col)
           const nr1 = oldHeight - 1 - r1;
           const nr2 = oldHeight - 1 - r2;

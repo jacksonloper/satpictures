@@ -52,10 +52,10 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
       
       for (const road of p.roads) {
         // Calculate cell centroids in SVG coordinates
-        const svgCol1 = road.cell1.col + (-outerBounds.minCol);
-        const svgRow1 = road.cell1.row + (-outerBounds.minRow);
-        const svgCol2 = road.cell2.col + (-outerBounds.minCol);
-        const svgRow2 = road.cell2.row + (-outerBounds.minRow);
+        const svgCol1 = road.cell1.col - outerBounds.minCol;
+        const svgRow1 = road.cell1.row - outerBounds.minRow;
+        const svgCol2 = road.cell2.col - outerBounds.minCol;
+        const svgRow2 = road.cell2.row - outerBounds.minRow;
         
         // Centroid of each cell
         const cx1 = svgCol1 * cellSize + cellSize / 2;

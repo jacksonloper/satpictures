@@ -182,6 +182,10 @@ function transformRoads(
     }
     
     // Apply rotations (each rotation: (r, c) -> (c, h-1-r) for 90° CW)
+    // After each 90° rotation, height and width swap. The current height used
+    // for the transform depends on how many rotations have been applied and
+    // whether a flip was done first. For even rotation counts, use original h/w;
+    // for odd counts, the dimensions have swapped.
     for (let i = 0; i < rotations; i++) {
       const currentH = (i % 2 === 0) 
         ? (doFlip ? w : h) 
