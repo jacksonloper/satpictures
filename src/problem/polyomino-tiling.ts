@@ -145,87 +145,94 @@ function parseEdgeKey(key: string): { r1: number; c1: number; r2: number; c2: nu
 }
 
 /**
- * Apply a transform to road edges.
- * transformIndex: 0-7 (same as for cells)
- * - 0: identity
- * - 1: rotate 90° CW
- * - 2: rotate 180°
- * - 3: rotate 270°
- * - 4: flip H
- * - 5: flip H + rotate 90°
- * - 6: flip H + rotate 180°
- * - 7: flip H + rotate 270°
+ * Rotate road edge coordinates 90° clockwise (matching rotateCoords90).
+ * Formula: (row, col) -> (col, -row)
  */
-function transformRoads(
-  roadKeys: string[],
-  transformIndex: number,
-  originalBounds: { height: number; width: number }
-): Edge[] {
-  const edges: Edge[] = [];
-  
-  for (const key of roadKeys) {
-    const parsed = parseEdgeKey(key);
-    if (!parsed) continue;
-    
-    let { r1, c1, r2, c2 } = parsed;
-    const h = originalBounds.height;
-    const w = originalBounds.width;
-    
-    // Apply transform
-    const doFlip = transformIndex >= 4;
-    const rotations = transformIndex % 4;
-    
-    // Flip horizontally first (if needed)
-    if (doFlip) {
-      c1 = w - 1 - c1;
-      c2 = w - 1 - c2;
-    }
-    
-    // Apply rotations (each rotation: (r, c) -> (c, h-1-r) for 90° CW)
-    // After each 90° rotation, height and width swap. The current height used
-    // for the transform depends on how many rotations have been applied and
-    // whether a flip was done first. For even rotation counts, use original h/w;
-    // for odd counts, the dimensions have swapped.
-    for (let i = 0; i < rotations; i++) {
-      const currentH = (i % 2 === 0) 
-        ? (doFlip ? w : h) 
-        : (doFlip ? h : w);
-      const nr1 = c1, nc1 = currentH - 1 - r1;
-      const nr2 = c2, nc2 = currentH - 1 - r2;
-      r1 = nr1; c1 = nc1;
-      r2 = nr2; c2 = nc2;
-    }
-    
-    // Normalize to get proper bounds after transform
-    // Since cells also get normalized, we need to track the offset
-    // This is handled in generateAllPlacementsWithRoads
-    
-    edges.push({
-      cell1: { row: r1, col: c1 },
-      cell2: { row: r2, col: c2 }
-    });
-  }
-  
-  return edges;
+function rotateEdgeCoords90(edge: Edge): Edge {
+  return {
+    cell1: { row: edge.cell1.col, col: -edge.cell1.row },
+    cell2: { row: edge.cell2.col, col: -edge.cell2.row },
+  };
 }
 
 /**
- * Generate all 8 transforms of roads (matching cell transforms).
+ * Flip road edge coordinates horizontally (matching flipCoordsH).
+ * Formula: (row, col) -> (row, -col)
+ */
+function flipEdgeCoordsH(edge: Edge): Edge {
+  return {
+    cell1: { row: edge.cell1.row, col: -edge.cell1.col },
+    cell2: { row: edge.cell2.row, col: -edge.cell2.col },
+  };
+}
+
+/**
+ * Normalize edge coordinates to start at (0,0) using the same offset
+ * as the corresponding cell coordinates.
+ */
+function normalizeEdges(edges: Edge[], minRow: number, minCol: number): Edge[] {
+  return edges.map(edge => ({
+    cell1: { row: edge.cell1.row - minRow, col: edge.cell1.col - minCol },
+    cell2: { row: edge.cell2.row - minRow, col: edge.cell2.col - minCol },
+  }));
+}
+
+/**
+ * Generate all 8 transforms of roads (matching cell transforms exactly).
+ * Uses the same rotation and flip formulas as generateAllTransforms.
  */
 function generateAllRoadTransforms(
-  roadKeys: string[],
-  coords: Coord[]
+  roadKeys: string[]
 ): Edge[][] {
   if (roadKeys.length === 0) {
     return Array(8).fill([]);
   }
   
-  // Get bounds of the original coords
-  const bb = getBoundingBox(coords);
+  // Parse road keys into edges
+  const baseEdges: Edge[] = [];
+  for (const key of roadKeys) {
+    const parsed = parseEdgeKey(key);
+    if (!parsed) continue;
+    baseEdges.push({
+      cell1: { row: parsed.r1, col: parsed.c1 },
+      cell2: { row: parsed.r2, col: parsed.c2 },
+    });
+  }
+  
+  if (baseEdges.length === 0) {
+    return Array(8).fill([]);
+  }
   
   const transforms: Edge[][] = [];
-  for (let i = 0; i < 8; i++) {
-    transforms.push(transformRoads(roadKeys, i, bb));
+  let currentEdges = baseEdges;
+  
+  // 4 rotations (transforms 0-3)
+  for (let i = 0; i < 4; i++) {
+    // Normalize edges (find min row/col across all edge endpoints)
+    let minRow = Infinity, minCol = Infinity;
+    for (const edge of currentEdges) {
+      minRow = Math.min(minRow, edge.cell1.row, edge.cell2.row);
+      minCol = Math.min(minCol, edge.cell1.col, edge.cell2.col);
+    }
+    transforms.push(normalizeEdges(currentEdges, minRow, minCol));
+    
+    // Rotate for next iteration
+    currentEdges = currentEdges.map(rotateEdgeCoords90);
+  }
+  
+  // Flip and 4 more rotations (transforms 4-7)
+  currentEdges = baseEdges.map(flipEdgeCoordsH);
+  for (let i = 0; i < 4; i++) {
+    // Normalize edges
+    let minRow = Infinity, minCol = Infinity;
+    for (const edge of currentEdges) {
+      minRow = Math.min(minRow, edge.cell1.row, edge.cell2.row);
+      minCol = Math.min(minCol, edge.cell1.col, edge.cell2.col);
+    }
+    transforms.push(normalizeEdges(currentEdges, minRow, minCol));
+    
+    // Rotate for next iteration
+    currentEdges = currentEdges.map(rotateEdgeCoords90);
   }
   
   return transforms;
@@ -403,7 +410,7 @@ export function generateAllPlacementsWithRoads(
   
   // Get all 8 transforms for both cells and roads
   const allTransforms = generateAllTransforms(tileCoords);
-  const allRoadTransforms = generateAllRoadTransforms(roadKeys, tileCoords);
+  const allRoadTransforms = generateAllRoadTransforms(roadKeys);
   
   // For deduplication, we need to track which transforms are unique
   // We'll use indices to map back to original road transforms
