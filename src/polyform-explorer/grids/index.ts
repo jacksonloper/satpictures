@@ -36,6 +36,12 @@ export {
   findPlacementOverlaps 
 } from './unifiedTiling';
 
+// Unified React components
+export { UnifiedTilingViewer } from './UnifiedTilingViewer';
+export type { UnifiedTilingViewerProps } from './UnifiedTilingViewer';
+export { UnifiedGridEditor } from './UnifiedGridEditor';
+export type { UnifiedGridEditorProps } from './UnifiedGridEditor';
+
 // Import for the lookup map
 import { squareGridDefinition } from './squareGridDef';
 import { hexGridDefinition } from './hexGridDef';
