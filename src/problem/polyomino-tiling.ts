@@ -167,8 +167,7 @@ function flipEdgeCoordsH(edge: Edge): Edge {
 }
 
 /**
- * Normalize edge coordinates to start at (0,0) using the same offset
- * as the corresponding cell coordinates.
+ * Normalize edge coordinates using the given offset.
  */
 function normalizeEdges(edges: Edge[], minRow: number, minCol: number): Edge[] {
   return edges.map(edge => ({
@@ -178,13 +177,15 @@ function normalizeEdges(edges: Edge[], minRow: number, minCol: number): Edge[] {
 }
 
 /**
- * Generate all 8 transforms of roads (matching cell transforms exactly).
- * Uses the same rotation and flip formulas as generateAllTransforms.
+ * Generate all 8 transforms of roads, using the SAME normalization offsets
+ * as the corresponding cell transforms. This ensures roads are positioned
+ * correctly relative to the transformed cells.
  */
 function generateAllRoadTransforms(
-  roadKeys: string[]
+  roadKeys: string[],
+  baseCells: Coord[]
 ): Edge[][] {
-  if (roadKeys.length === 0) {
+  if (roadKeys.length === 0 || baseCells.length === 0) {
     return Array(8).fill([]);
   }
   
@@ -204,34 +205,47 @@ function generateAllRoadTransforms(
   }
   
   const transforms: Edge[][] = [];
+  
+  // We need to transform edges using the SAME normalization as cells.
+  // So we transform both cells and edges together, then use cell-based normalization.
+  
+  let currentCells = baseCells;
   let currentEdges = baseEdges;
   
   // 4 rotations (transforms 0-3)
   for (let i = 0; i < 4; i++) {
-    // Normalize edges (find min row/col across all edge endpoints)
+    // Find normalization offset from CELL coordinates
     let minRow = Infinity, minCol = Infinity;
-    for (const edge of currentEdges) {
-      minRow = Math.min(minRow, edge.cell1.row, edge.cell2.row);
-      minCol = Math.min(minCol, edge.cell1.col, edge.cell2.col);
+    for (const c of currentCells) {
+      minRow = Math.min(minRow, c.row);
+      minCol = Math.min(minCol, c.col);
     }
+    
+    // Normalize edges using the same offset
     transforms.push(normalizeEdges(currentEdges, minRow, minCol));
     
-    // Rotate for next iteration
+    // Rotate both cells and edges for next iteration
+    currentCells = currentCells.map(({ row, col }) => ({ row: col, col: -row }));
     currentEdges = currentEdges.map(rotateEdgeCoords90);
   }
   
   // Flip and 4 more rotations (transforms 4-7)
+  currentCells = baseCells.map(({ row, col }) => ({ row, col: -col }));
   currentEdges = baseEdges.map(flipEdgeCoordsH);
+  
   for (let i = 0; i < 4; i++) {
-    // Normalize edges
+    // Find normalization offset from CELL coordinates
     let minRow = Infinity, minCol = Infinity;
-    for (const edge of currentEdges) {
-      minRow = Math.min(minRow, edge.cell1.row, edge.cell2.row);
-      minCol = Math.min(minCol, edge.cell1.col, edge.cell2.col);
+    for (const c of currentCells) {
+      minRow = Math.min(minRow, c.row);
+      minCol = Math.min(minCol, c.col);
     }
+    
+    // Normalize edges using the same offset
     transforms.push(normalizeEdges(currentEdges, minRow, minCol));
     
-    // Rotate for next iteration
+    // Rotate both cells and edges for next iteration
+    currentCells = currentCells.map(({ row, col }) => ({ row: col, col: -row }));
     currentEdges = currentEdges.map(rotateEdgeCoords90);
   }
   
@@ -410,7 +424,7 @@ export function generateAllPlacementsWithRoads(
   
   // Get all 8 transforms for both cells and roads
   const allTransforms = generateAllTransforms(tileCoords);
-  const allRoadTransforms = generateAllRoadTransforms(roadKeys);
+  const allRoadTransforms = generateAllRoadTransforms(roadKeys, tileCoords);
   
   // For deduplication, we need to track which transforms are unique
   // We'll use indices to map back to original road transforms
