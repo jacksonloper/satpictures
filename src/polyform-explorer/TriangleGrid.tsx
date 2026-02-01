@@ -97,27 +97,49 @@ export const TriangleGrid: React.FC<TriangleGridProps> = ({
         ))
       )}
       
-      {/* Layer 2: Edge highlights (marked edges) */}
+      {/* Layer 2: Edge highlights (marked edges) as inset circles
+       * Triangle grid vertices go clockwise, so interior is to the right.
+       */}
       {edgeState && cells.map((row, rowIdx) =>
         row.map((_, colIdx) => {
           const cellEdges = edgeState[rowIdx]?.[colIdx];
           if (!cellEdges) return null;
+          
+          // Circle radius and inset distance as fractions of cell size
+          const circleRadius = cellSize * 0.1;
+          const insetDistance = cellSize * 0.12;
           
           return cellEdges.map((isMarked, edgeIdx) => {
             if (!isMarked) return null;
             
             const { x1, y1, x2, y2 } = getEdgeCoords(rowIdx, colIdx, edgeIdx);
             
+            // Edge midpoint
+            const midX = (x1 + x2) / 2;
+            const midY = (y1 + y2) / 2;
+            
+            // Edge direction vector
+            const edgeDx = x2 - x1;
+            const edgeDy = y2 - y1;
+            const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+            
+            // Perpendicular direction (90° clockwise = into cell interior)
+            const perpX = edgeDy / edgeLen;
+            const perpY = -edgeDx / edgeLen;
+            
+            // Circle center: offset inward from edge midpoint
+            const cx = midX + perpX * insetDistance;
+            const cy = midY + perpY * insetDistance;
+            
             return (
-              <line
+              <circle
                 key={`edge-highlight-${rowIdx}-${colIdx}-${edgeIdx}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke="#f39c12"
-                strokeWidth={4}
-                strokeLinecap="round"
+                cx={cx}
+                cy={cy}
+                r={circleRadius}
+                fill="#f39c12"
+                stroke="#c0392b"
+                strokeWidth={1}
               />
             );
           });

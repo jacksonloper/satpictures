@@ -362,13 +362,31 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
           ));
         })()}
         
-        {/* Layer 5: Edge markings (orange lines for marked edges) */}
+        {/* Layer 5: Edge markings as inset circles
+         * 
+         * Since neighboring cells may have different edge values, we render
+         * the marker as a circle that protrudes into this cell's interior.
+         * 
+         * With vertices listed clockwise, the cell interior is to the RIGHT
+         * of each edge (when going from vertex[i] to vertex[i+1]).
+         * 
+         * For each marked edge:
+         * 1. Find the edge midpoint
+         * 2. Calculate the perpendicular direction (90° CW = into cell interior)
+         * 3. Offset the circle center inward from the edge
+         * 4. Draw a filled circle to indicate the edge is marked
+         */}
         {edgeState && cellsToRender.flatMap(({ coord }) => {
           const cellEdges = edgeState[coord.row]?.[coord.col];
           if (!cellEdges) return [];
           
           const vertices = getCellVerticesForEdge(coord);
           const numEdges = vertices.length;
+          
+          // Circle radius as a fraction of cell size
+          const circleRadius = cellSize * 0.12;
+          // How far to inset the circle from the edge (center distance)
+          const insetDistance = cellSize * 0.15;
           
           return cellEdges
             .map((isMarked, edgeIdx) => ({ isMarked, edgeIdx }))
@@ -377,16 +395,33 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
               const v1 = vertices[edgeIdx];
               const v2 = vertices[(edgeIdx + 1) % numEdges];
               
+              // Edge midpoint
+              const midX = (v1.x + v2.x) / 2;
+              const midY = (v1.y + v2.y) / 2;
+              
+              // Edge direction vector
+              const edgeDx = v2.x - v1.x;
+              const edgeDy = v2.y - v1.y;
+              const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+              
+              // Perpendicular direction (90° clockwise = into cell interior)
+              // Rotating (dx, dy) by 90° CW gives (dy, -dx)
+              const perpX = edgeDy / edgeLen;
+              const perpY = -edgeDx / edgeLen;
+              
+              // Circle center: offset inward from edge midpoint
+              const cx = midX + perpX * insetDistance;
+              const cy = midY + perpY * insetDistance;
+              
               return (
-                <line
+                <circle
                   key={`edge-mark-${coordKey(coord)}-${edgeIdx}`}
-                  x1={v1.x}
-                  y1={v1.y}
-                  x2={v2.x}
-                  y2={v2.y}
-                  stroke="#f39c12"
-                  strokeWidth={4}
-                  strokeLinecap="round"
+                  cx={cx}
+                  cy={cy}
+                  r={circleRadius}
+                  fill="#f39c12"
+                  stroke="#c0392b"
+                  strokeWidth={1}
                 />
               );
             });

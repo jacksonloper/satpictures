@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import type { Placement } from "../problem/polyomino-tiling";
 import { getPlacementColor } from "./placementColors";
+import type { EdgeState } from "./grids/types";
 
 /** TilingViewer - displays the solved tiling */
 export interface TilingViewerProps {
@@ -10,6 +11,8 @@ export interface TilingViewerProps {
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
   highlightedPlacement?: number | null;
+  /** Edge state to render (optional) */
+  edgeState?: EdgeState;
 }
 
 export const TilingViewer: React.FC<TilingViewerProps> = ({ 
@@ -18,7 +21,8 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
   placements, 
   cellSize = 30,
   svgRef,
-  highlightedPlacement 
+  highlightedPlacement,
+  edgeState,
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -229,6 +233,71 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
             />
           ));
         })}
+        
+        {/* Layer 5: Edge markings as inset circles
+         * Square grid edges: 0=top, 1=right, 2=bottom, 3=left
+         * Vertices go clockwise, so interior is to the right of each edge.
+         */}
+        {edgeState && Array.from({ length: outerHeight }, (_, svgRowIdx) =>
+          Array.from({ length: outerWidth }, (_, svgColIdx) => {
+            const logicalRow = svgRowIdx - offsetRow;
+            const logicalCol = svgColIdx - offsetCol;
+            const cellEdges = edgeState[logicalRow]?.[logicalCol];
+            if (!cellEdges) return null;
+            
+            const x = svgColIdx * cellSize;
+            const y = svgRowIdx * cellSize;
+            
+            // Circle radius and inset distance
+            const circleRadius = cellSize * 0.12;
+            const insetDistance = cellSize * 0.15;
+            
+            // Edge coordinates for square grid (clockwise from top)
+            // Edge 0: top (left to right), Edge 1: right (top to bottom),
+            // Edge 2: bottom (right to left), Edge 3: left (bottom to top)
+            const edgeCoords = [
+              { x1: x, y1: y, x2: x + cellSize, y2: y },                    // top
+              { x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize }, // right
+              { x1: x + cellSize, y1: y + cellSize, x2: x, y2: y + cellSize }, // bottom
+              { x1: x, y1: y + cellSize, x2: x, y2: y },                    // left
+            ];
+            
+            return cellEdges.map((isMarked, edgeIdx) => {
+              if (!isMarked) return null;
+              
+              const edge = edgeCoords[edgeIdx];
+              
+              // Edge midpoint
+              const midX = (edge.x1 + edge.x2) / 2;
+              const midY = (edge.y1 + edge.y2) / 2;
+              
+              // Edge direction vector
+              const edgeDx = edge.x2 - edge.x1;
+              const edgeDy = edge.y2 - edge.y1;
+              const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+              
+              // Perpendicular direction (90° clockwise = into cell interior)
+              const perpX = edgeDy / edgeLen;
+              const perpY = -edgeDx / edgeLen;
+              
+              // Circle center: offset inward from edge midpoint
+              const cx = midX + perpX * insetDistance;
+              const cy = midY + perpY * insetDistance;
+              
+              return (
+                <circle
+                  key={`edge-mark-${logicalRow}-${logicalCol}-${edgeIdx}`}
+                  cx={cx}
+                  cy={cy}
+                  r={circleRadius}
+                  fill="#f39c12"
+                  stroke="#c0392b"
+                  strokeWidth={1}
+                />
+              );
+            });
+          })
+        )}
       </svg>
     </div>
   );

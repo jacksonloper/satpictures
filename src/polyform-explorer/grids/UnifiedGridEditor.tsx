@@ -171,7 +171,11 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
         ))
       )}
       
-      {/* Layer 2: Edge highlights (marked edges) */}
+      {/* Layer 2: Edge highlights (marked edges) as inset circles
+       * 
+       * With vertices listed clockwise, the cell interior is to the RIGHT
+       * of each edge. We render filled circles inset from the edge.
+       */}
       {edgeState && cells.flatMap((row, rowIdx) =>
         row.flatMap((_, colIdx) => {
           const cellEdges = edgeState[rowIdx]?.[colIdx];
@@ -180,6 +184,11 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
           const vertices = getCellVertices(rowIdx, colIdx);
           const numEdges = vertices.length;
           
+          // Circle radius as a fraction of cell size
+          const circleRadius = cellSize * 0.12;
+          // How far to inset the circle from the edge (center distance)
+          const insetDistance = cellSize * 0.15;
+          
           return cellEdges
             .map((isMarked, edgeIdx) => ({ isMarked, edgeIdx }))
             .filter(({ isMarked }) => isMarked)
@@ -187,16 +196,32 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
               const v1 = vertices[edgeIdx];
               const v2 = vertices[(edgeIdx + 1) % numEdges];
               
+              // Edge midpoint
+              const midX = (v1.x + v2.x) / 2;
+              const midY = (v1.y + v2.y) / 2;
+              
+              // Edge direction vector
+              const edgeDx = v2.x - v1.x;
+              const edgeDy = v2.y - v1.y;
+              const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+              
+              // Perpendicular direction (90° clockwise = into cell interior)
+              const perpX = edgeDy / edgeLen;
+              const perpY = -edgeDx / edgeLen;
+              
+              // Circle center: offset inward from edge midpoint
+              const cx = midX + perpX * insetDistance;
+              const cy = midY + perpY * insetDistance;
+              
               return (
-                <line
+                <circle
                   key={`edge-highlight-${rowIdx}-${colIdx}-${edgeIdx}`}
-                  x1={v1.x}
-                  y1={v1.y}
-                  x2={v2.x}
-                  y2={v2.y}
-                  stroke={edgeHighlightColor}
-                  strokeWidth={4}
-                  strokeLinecap="round"
+                  cx={cx}
+                  cy={cy}
+                  r={circleRadius}
+                  fill={edgeHighlightColor}
+                  stroke="#c0392b"
+                  strokeWidth={1}
                 />
               );
             });

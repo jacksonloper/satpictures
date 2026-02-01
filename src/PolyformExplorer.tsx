@@ -1060,6 +1060,7 @@ export function PolyformExplorer() {
                     placements={(tilingResult as TilingResult).placements || []}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
+                    edgeState={edgeState}
                   />
                 )}
                 
