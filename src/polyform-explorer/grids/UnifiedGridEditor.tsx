@@ -172,33 +172,34 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
       )}
       
       {/* Layer 2: Edge highlights (marked edges) */}
-      {edgeState && cells.map((row, rowIdx) =>
-        row.map((_, colIdx) => {
+      {edgeState && cells.flatMap((row, rowIdx) =>
+        row.flatMap((_, colIdx) => {
           const cellEdges = edgeState[rowIdx]?.[colIdx];
-          if (!cellEdges) return null;
+          if (!cellEdges) return [];
           
           const vertices = getCellVertices(rowIdx, colIdx);
           const numEdges = vertices.length;
           
-          return cellEdges.map((isMarked, edgeIdx) => {
-            if (!isMarked) return null;
-            
-            const v1 = vertices[edgeIdx];
-            const v2 = vertices[(edgeIdx + 1) % numEdges];
-            
-            return (
-              <line
-                key={`edge-highlight-${rowIdx}-${colIdx}-${edgeIdx}`}
-                x1={v1.x}
-                y1={v1.y}
-                x2={v2.x}
-                y2={v2.y}
-                stroke={edgeHighlightColor}
-                strokeWidth={4}
-                strokeLinecap="round"
-              />
-            );
-          });
+          return cellEdges
+            .map((isMarked, edgeIdx) => ({ isMarked, edgeIdx }))
+            .filter(({ isMarked }) => isMarked)
+            .map(({ edgeIdx }) => {
+              const v1 = vertices[edgeIdx];
+              const v2 = vertices[(edgeIdx + 1) % numEdges];
+              
+              return (
+                <line
+                  key={`edge-highlight-${rowIdx}-${colIdx}-${edgeIdx}`}
+                  x1={v1.x}
+                  y1={v1.y}
+                  x2={v2.x}
+                  y2={v2.y}
+                  stroke={edgeHighlightColor}
+                  strokeWidth={4}
+                  strokeLinecap="round"
+                />
+              );
+            });
         })
       )}
       

@@ -622,8 +622,11 @@ export function PolyformExplorer() {
       return next;
     });
     
-    // For edge state, vertical flip = horizontal flip + 180° rotation
-    // Apply horizontal flip first, then rotate 180° (numRotations/2 times)
+    // For edge state, vertical flip = horizontal flip + 180° rotation.
+    // The grid definition only provides a horizontal flip operator, but a vertical
+    // flip is geometrically equivalent to: flip horizontally, then rotate 180°.
+    // For a square grid (4 rotations), 180° = 2 rotations.
+    // For hex/triangle grids (6 rotations), 180° = 3 rotations.
     setEdgeState(prev => {
       let state = flipEdgeState(grid, prev);
       const halfRotations = Math.floor(grid.numRotations / 2);

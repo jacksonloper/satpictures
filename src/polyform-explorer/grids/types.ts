@@ -396,6 +396,10 @@ export function transformEdgeState(
   }
   
   // Compute offset for normalization (preserve parity for triangle grids)
+  // For triangle grids, the cell type (up vs down) is determined by (row + col) % 2.
+  // If we shift by an offset that changes this parity, up triangles would become down
+  // triangles and vice versa, which would break the edge indexing. By ensuring
+  // (offRow + offCol) is even, we preserve the original cell types.
   const offRow = -minRow;
   let offCol = -minCol;
   if (grid.numCellTypes === 2 && (offRow + offCol) % 2 !== 0) {
