@@ -239,16 +239,17 @@ function generateColoredPlacements(
   // Build edge color lookup for base tile
   // Key: "row,col,direction" -> color
   const baseEdgeColors = new Map<string, number>();
+  
+  // Pre-compute the normalized coordinates once (reuse baseCoords which is already normalized)
   for (const ec of tile.edgeColors) {
-    // Find the actual coordinate of the cell
+    // Find the actual coordinate of the cell by iterating through filled cells
     let idx = 0;
     for (let row = 0; row < tile.cells.length; row++) {
       for (let col = 0; col < tile.cells[row].length; col++) {
         if (tile.cells[row][col]) {
           if (idx === ec.cellIndex) {
-            // Normalize the coordinate
-            const normalizedCoords = gridToCoords(tile.cells);
-            const normalizedCoord = normalizedCoords[idx];
+            // Use the pre-computed normalized coordinate
+            const normalizedCoord = baseCoords[idx];
             baseEdgeColors.set(`${normalizedCoord.row},${normalizedCoord.col},${ec.direction}`, ec.color);
           }
           idx++;

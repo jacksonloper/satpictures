@@ -1,16 +1,5 @@
 import React from "react";
-
-/** Edge color palette - distinct colors for edges */
-const EDGE_COLORS = [
-  "#e74c3c", // Red
-  "#3498db", // Blue
-  "#2ecc71", // Green
-  "#f39c12", // Orange
-  "#9b59b6", // Purple
-  "#1abc9c", // Teal
-  "#e91e63", // Pink
-  "#795548", // Brown
-];
+import { EDGE_COLORS } from "./edgeColorConstants";
 
 type EdgeDirection = "top" | "right" | "bottom" | "left";
 
@@ -177,5 +166,5 @@ export const EdgeColoringGrid: React.FC<EdgeColoringGridProps> = ({
   );
 };
 
-export { EDGE_COLORS };
+export { EDGE_COLORS } from "./edgeColorConstants";
 export type { EdgeDirection };

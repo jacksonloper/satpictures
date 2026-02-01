@@ -1,18 +1,7 @@
 import React, { useMemo } from "react";
 import type { EdgeColoringPlacement } from "../problem/edge-coloring-tiling";
 import { getPlacementColor } from "./placementColors";
-
-/** Edge color palette - distinct colors for edges */
-const EDGE_COLORS = [
-  "#e74c3c", // Red
-  "#3498db", // Blue
-  "#2ecc71", // Green
-  "#f39c12", // Orange
-  "#9b59b6", // Purple
-  "#1abc9c", // Teal
-  "#e91e63", // Pink
-  "#795548", // Brown
-];
+import { EDGE_COLORS } from "./edgeColorConstants";
 
 export interface EdgeColoringViewerProps {
   width: number;
@@ -281,5 +270,3 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
     </div>
   );
 };
-
-export { EDGE_COLORS };
