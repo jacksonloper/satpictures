@@ -3,6 +3,7 @@ import "./App.css";
 import type { TilingResult } from "./problem/polyomino-tiling";
 import type { HexTilingResult } from "./problem/polyhex-tiling";
 import type { TriTilingResult } from "./problem/polyiamond-tiling";
+import type { EdgeColoredTilingResult, EdgeColor, EdgeDirection, CellEdgeColors } from "./problem/edge-colored-polyomino-tiling";
 import {
   type PolyformType,
   createEmptyBooleanGrid,
@@ -16,9 +17,12 @@ import {
 } from "./utils/polyformTransforms";
 import {
   SquareGrid,
+  SquareGridEdges,
+  EDGE_COLORS,
   HexGrid,
   TriangleGrid,
   TilingViewer,
+  EdgeColoredTilingViewer,
   HexTilingViewer,
   TriTilingViewer,
   downloadSvg,
@@ -51,6 +55,13 @@ interface TileState {
   heightInput: string;
   widthError: boolean;
   heightError: boolean;
+  /** Edge colors for filled cells (polyomino only) */
+  edgeColors: Map<string, CellEdgeColors>;
+}
+
+/** Create default edge colors for a cell */
+function defaultEdgeColors(): CellEdgeColors {
+  return { top: 0, right: 0, bottom: 0, left: 0 };
 }
 
 /** Create a new empty tile state */
@@ -63,6 +74,7 @@ function createEmptyTileState(width: number = 8, height: number = 8): TileState 
     heightInput: String(height),
     widthError: false,
     heightError: false,
+    edgeColors: new Map(),
   };
 }
 
@@ -131,12 +143,18 @@ export function PolyformExplorer() {
   const [tilingWidthError, setTilingWidthError] = useState(false);
   const [tilingHeightError, setTilingHeightError] = useState(false);
   const [solving, setSolving] = useState(false);
-  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | TriTilingResult | null>(null);
+  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | TriTilingResult | EdgeColoredTilingResult | null>(null);
   const [tilingError, setTilingError] = useState<string | null>(null);
   const [tilingStats, setTilingStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [solvedPolyformType, setSolvedPolyformType] = useState<PolyformType | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const tilingSvgRef = useRef<SVGSVGElement | null>(null);
+  
+  // Edge coloring state (polyomino only)
+  const [edgeColoringEnabled, setEdgeColoringEnabled] = useState(false);
+  const [selectedEdgeColor, setSelectedEdgeColor] = useState<EdgeColor>(1);
+  const [solvedEdgeColors, setSolvedEdgeColors] = useState<Map<string, EdgeColor> | null>(null);
+  const edgeColors = activeTile.edgeColors;
   
   // Debugging state
   const [highlightedPlacement, setHighlightedPlacement] = useState<number | null>(null);
@@ -357,9 +375,8 @@ export function PolyformExplorer() {
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
     // Gather all tiles with at least one filled cell
-    const allTileCells = tiles.map(tile => tile.cells);
-    const tilesWithContent = allTileCells.filter(cells => 
-      cells.some(row => row.some(c => c))
+    const tilesWithContent = tiles.filter(tile => 
+      tile.cells.some(row => row.some(c => c))
     );
     
     if (tilesWithContent.length === 0) {
@@ -372,6 +389,7 @@ export function PolyformExplorer() {
     setTilingError(null);
     setTilingStats(null);
     setSolvedPolyformType(null);
+    setSolvedEdgeColors(null);
     setMazeResult(null); // Clear maze when starting new solve
     setHexMazeResult(null); // Clear hex maze when starting new solve
     setTriMazeResult(null); // Clear tri maze when starting new solve
@@ -394,6 +412,14 @@ export function PolyformExplorer() {
         if (response.success) {
           setTilingResult(response.result);
           setSolvedPolyformType(response.polyformType || "polyomino");
+          // Convert edge colors result to Map if present
+          if (response.edgeColorsResult) {
+            const edgeColorsMap = new Map<string, EdgeColor>();
+            for (const [key, color] of Object.entries(response.edgeColorsResult)) {
+              edgeColorsMap.set(key, color as EdgeColor);
+            }
+            setSolvedEdgeColors(edgeColorsMap);
+          }
         } else {
           setTilingError(response.error || "Unknown error");
         }
@@ -409,14 +435,27 @@ export function PolyformExplorer() {
       workerRef.current = null;
     };
     
+    // Prepare edge colors for worker (convert Map to serializable object)
+    const tileEdgeColors = edgeColoringEnabled && polyformType === "polyomino"
+      ? tilesWithContent.map(tile => {
+          const edgeData: { [key: string]: CellEdgeColors } = {};
+          for (const [key, colors] of tile.edgeColors) {
+            edgeData[key] = colors;
+          }
+          return edgeData;
+        })
+      : undefined;
+    
     // Send request with all tiles that have content
     worker.postMessage({
-      tiles: tilesWithContent,
+      tiles: tilesWithContent.map(t => t.cells),
       tilingWidth,
       tilingHeight,
       polyformType,
+      edgeColoringEnabled: edgeColoringEnabled && polyformType === "polyomino",
+      tileEdgeColors,
     });
-  }, [tiles, tilingWidth, tilingHeight, polyformType]);
+  }, [tiles, tilingWidth, tilingHeight, polyformType, edgeColoringEnabled]);
   
   // Validate and apply width on blur
   const handleWidthBlur = useCallback(() => {
@@ -471,7 +510,38 @@ export function PolyformExplorer() {
       newCells[row][col] = !newCells[row][col];
       return newCells;
     });
-  }, [setCells]);
+    // When toggling cell off, also remove its edge colors
+    setTiles(prev => prev.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      const key = `${row},${col}`;
+      if (!tile.cells[row]?.[col]) {
+        // Cell is being turned on - add default edge colors
+        const newEdgeColors = new Map(tile.edgeColors);
+        newEdgeColors.set(key, defaultEdgeColors());
+        return { ...tile, edgeColors: newEdgeColors };
+      } else {
+        // Cell is being turned off - remove edge colors
+        const newEdgeColors = new Map(tile.edgeColors);
+        newEdgeColors.delete(key);
+        return { ...tile, edgeColors: newEdgeColors };
+      }
+    }));
+  }, [setCells, activeTileIndex]);
+  
+  // Handle edge click (for edge coloring)
+  const handleEdgeClick = useCallback((row: number, col: number, direction: EdgeDirection) => {
+    setTiles(prev => prev.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      const key = `${row},${col}`;
+      const existingColors = tile.edgeColors.get(key) || defaultEdgeColors();
+      const currentColor = existingColors[direction];
+      // Cycle through colors: if clicking with same color, reset to 0
+      const newColor: EdgeColor = currentColor === selectedEdgeColor ? 0 : selectedEdgeColor;
+      const newEdgeColors = new Map(tile.edgeColors);
+      newEdgeColors.set(key, { ...existingColors, [direction]: newColor });
+      return { ...tile, edgeColors: newEdgeColors };
+    }));
+  }, [activeTileIndex, selectedEdgeColor]);
   
   // Rotate the polyform
   const handleRotate = useCallback(() => {
@@ -730,6 +800,55 @@ export function PolyformExplorer() {
         )}
       </div>
 
+      {/* Edge Coloring Controls (polyomino only) */}
+      {polyformType === "polyomino" && (
+        <div style={{ 
+          marginTop: "16px",
+          marginBottom: "8px",
+          padding: "12px",
+          backgroundColor: "#f8f9fa",
+          borderRadius: "8px",
+          border: "1px solid #dee2e6",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={edgeColoringEnabled}
+                onChange={(e) => setEdgeColoringEnabled(e.target.checked)}
+                style={{ width: "16px", height: "16px", cursor: "pointer" }}
+              />
+              <span style={{ fontWeight: "bold" }}>🎨 Edge Coloring Mode</span>
+            </label>
+            
+            {edgeColoringEnabled && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>Paint color:</span>
+                {([1, 2, 3] as EdgeColor[]).map(color => (
+                  <button
+                    key={color}
+                    onClick={() => setSelectedEdgeColor(color)}
+                    style={{
+                      width: "28px",
+                      height: "28px",
+                      backgroundColor: EDGE_COLORS[color],
+                      border: selectedEdgeColor === color ? "3px solid #2c3e50" : "2px solid #bdc3c7",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                    }}
+                    title={`Color ${color}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+          {edgeColoringEnabled && (
+            <p style={{ fontSize: "12px", color: "#6c757d", margin: "8px 0 0 0" }}>
+              Click on edges of filled cells to color them. Adjacent edges must match colors when tiling.
+            </p>
+          )}
+        </div>
+      )}
       
       {/* Grid */}
       <div style={{ 
@@ -740,10 +859,23 @@ export function PolyformExplorer() {
         display: "inline-block",
       }}>
         {polyformType === "polyomino" && (
-          <SquareGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-          />
+          edgeColoringEnabled ? (
+            <SquareGridEdges
+              cells={cells}
+              onCellClick={handleCellClick}
+              edgeColorInfo={{
+                enabled: true,
+                edgeColors: edgeColors,
+                selectedColor: selectedEdgeColor,
+                onEdgeClick: handleEdgeClick,
+              }}
+            />
+          ) : (
+            <SquareGrid
+              cells={cells}
+              onCellClick={handleCellClick}
+            />
+          )
         )}
         {polyformType === "polyhex" && (
           <HexGrid
@@ -933,6 +1065,16 @@ export function PolyformExplorer() {
                     placements={(tilingResult as TriTilingResult).placements || []}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
+                  />
+                ) : solvedEdgeColors ? (
+                  <EdgeColoredTilingViewer
+                    width={tilingWidth}
+                    height={tilingHeight}
+                    placements={(tilingResult as EdgeColoredTilingResult).placements || []}
+                    edgeColors={solvedEdgeColors}
+                    svgRef={tilingSvgRef}
+                    highlightedPlacement={highlightedPlacement}
+                    showFills={false}
                   />
                 ) : (
                   <TilingViewer

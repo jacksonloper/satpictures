@@ -1,8 +1,11 @@
 export { SquareGrid } from "./SquareGrid";
+export { SquareGridEdges, EDGE_COLORS } from "./SquareGridEdges";
 export { HexGrid } from "./HexGrid";
 export { TriangleGrid } from "./TriangleGrid";
 export { TilingViewer } from "./TilingViewer";
 export type { TilingViewerProps } from "./TilingViewer";
+export { EdgeColoredTilingViewer } from "./EdgeColoredTilingViewer";
+export type { EdgeColoredTilingViewerProps } from "./EdgeColoredTilingViewer";
 export { getPlacementColor } from "./placementColors";
 export { HexTilingViewer } from "./HexTilingViewer";
 export type { HexTilingViewerProps, EdgeInfo } from "./HexTilingViewer";

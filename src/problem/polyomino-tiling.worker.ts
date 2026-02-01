@@ -13,11 +13,19 @@ import { solvePolyhexTiling } from "./polyhex-tiling";
 import type { HexTilingResult, HexPlacement } from "./polyhex-tiling";
 import { solvePolyiamondTiling } from "./polyiamond-tiling";
 import type { TriTilingResult, TriPlacement } from "./polyiamond-tiling";
+import { solveEdgeColoredPolyominoTiling } from "./edge-colored-polyomino-tiling";
+import type { EdgeColoredTilingResult, EdgeColoredPlacement, EdgeColoredTile, EdgeColor, CellEdgeColors } from "./edge-colored-polyomino-tiling";
 import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 /** Polyform type for the solver */
 export type PolyformType = "polyomino" | "polyhex" | "polyiamond";
+
+/** Serializable edge color data for tiles */
+export interface SerializableEdgeColorData {
+  /** Edge colors keyed by "row,col" */
+  [key: string]: CellEdgeColors;
+}
 
 export interface PolyominoTilingSolverRequest {
   /** The tile cells (boolean grid) - kept for backward compatibility */
@@ -30,11 +38,20 @@ export interface PolyominoTilingSolverRequest {
   tilingHeight: number;
   /** Polyform type (default: "polyomino" for backward compatibility) */
   polyformType?: PolyformType;
+  /** Edge coloring mode (only for polyomino) */
+  edgeColoringEnabled?: boolean;
+  /** Edge colors for each tile (only when edgeColoringEnabled) */
+  tileEdgeColors?: SerializableEdgeColorData[];
+}
+
+/** Serializable edge color result */
+export interface SerializableEdgeColorResult {
+  [key: string]: EdgeColor;
 }
 
 export interface PolyominoTilingSolverResponse {
   success: boolean;
-  result: TilingResult | HexTilingResult | TriTilingResult | null;
+  result: TilingResult | HexTilingResult | TriTilingResult | EdgeColoredTilingResult | null;
   error?: string;
   /** Type of message: 'progress' for stats before solving, 'result' for final result */
   messageType?: "progress" | "result";
@@ -42,10 +59,14 @@ export interface PolyominoTilingSolverResponse {
   stats?: { numVars: number; numClauses: number };
   /** Polyform type that was solved */
   polyformType?: PolyformType;
+  /** Whether edge coloring was used */
+  edgeColoringEnabled?: boolean;
+  /** Serializable edge colors (converted from Map) */
+  edgeColorsResult?: SerializableEdgeColorResult;
 }
 
 // Re-export types for consumers
-export type { TilingResult, Placement, HexTilingResult, HexPlacement, TriTilingResult, TriPlacement };
+export type { TilingResult, Placement, HexTilingResult, HexPlacement, TriTilingResult, TriPlacement, EdgeColoredTilingResult, EdgeColoredPlacement, EdgeColoredTile, EdgeColor, CellEdgeColors };
 
 // Type definitions for the Emscripten module
 interface CadicalModule {
@@ -263,7 +284,7 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
-  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
+  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino", edgeColoringEnabled = false, tileEdgeColors } = event.data;
   
   // Use tiles array if provided, otherwise fall back to single cells for backward compatibility
   const tilesToUse: boolean[][][] = tiles ?? (cells ? [cells] : []);
@@ -286,17 +307,51 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
         messageType: "progress",
         stats,
         polyformType,
+        edgeColoringEnabled,
       };
       self.postMessage(progressResponse);
     };
     
     // Solve the tiling problem based on polyform type
-    let result: TilingResult | HexTilingResult | TriTilingResult;
+    let result: TilingResult | HexTilingResult | TriTilingResult | EdgeColoredTilingResult;
+    let edgeColorsResult: SerializableEdgeColorResult | undefined;
     
     if (polyformType === "polyhex") {
       result = solvePolyhexTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
     } else if (polyformType === "polyiamond") {
       result = solvePolyiamondTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
+    } else if (edgeColoringEnabled && tileEdgeColors) {
+      // Edge-colored polyomino tiling
+      const edgeColoredTiles: EdgeColoredTile[] = tilesToUse.map((tileCells, index) => {
+        const edgeData = tileEdgeColors[index] || {};
+        const edgeMap = new Map<string, CellEdgeColors>();
+        for (const [key, colors] of Object.entries(edgeData)) {
+          edgeMap.set(key, colors as CellEdgeColors);
+        }
+        // Fill in default colors for any missing cells
+        for (let row = 0; row < tileCells.length; row++) {
+          for (let col = 0; col < (tileCells[row]?.length || 0); col++) {
+            if (tileCells[row][col]) {
+              const key = `${row},${col}`;
+              if (!edgeMap.has(key)) {
+                edgeMap.set(key, { top: 0, right: 0, bottom: 0, left: 0 });
+              }
+            }
+          }
+        }
+        return { cells: tileCells, edgeColors: edgeMap };
+      });
+      
+      const ecResult = solveEdgeColoredPolyominoTiling(edgeColoredTiles, tilingWidth, tilingHeight, solver, onStatsReady);
+      result = ecResult;
+      
+      // Convert edge colors Map to serializable object
+      if (ecResult.edgeColors) {
+        edgeColorsResult = {};
+        for (const [key, color] of ecResult.edgeColors) {
+          edgeColorsResult[key] = color;
+        }
+      }
     } else {
       result = solvePolyominoTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
     }
@@ -309,6 +364,8 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
       result,
       messageType: "result",
       polyformType,
+      edgeColoringEnabled,
+      edgeColorsResult,
     };
     self.postMessage(response);
   } catch (error) {
