@@ -106,7 +106,8 @@ export const TriangleGrid: React.FC<TriangleGridProps> = ({
           if (!cellEdges) return null;
           
           // Circle radius and inset distance as fractions of cell size
-          const circleRadius = cellSize * 0.1;
+          // Slightly smaller for triangles since the cells are smaller
+          const circleRadius = cellSize * 0.10;
           const insetDistance = cellSize * 0.12;
           
           return cellEdges.map((isMarked, edgeIdx) => {
