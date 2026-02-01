@@ -102,7 +102,8 @@ export const SquareGrid: React.FC<SquareGridProps> = ({
       {cells.flatMap((row, rowIdx) =>
         row.flatMap((_, colIdx) => {
           const cellEdges = edgeState?.[rowIdx]?.[colIdx];
-          const semicircleRadius = cellSize * 0.12;
+          // Larger radius for better visibility and easier clicking
+          const semicircleRadius = cellSize * 0.18;
           
           return [0, 1, 2, 3].map(edgeIdx => {
             const { x1, y1, x2, y2 } = getEdgeCoords(rowIdx, colIdx, edgeIdx);

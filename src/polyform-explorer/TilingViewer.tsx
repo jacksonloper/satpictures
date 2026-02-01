@@ -1,39 +1,9 @@
 import React, { useMemo } from "react";
 import type { Placement } from "../problem/polyomino-tiling";
 import { getPlacementColor } from "./placementColors";
-import type { EdgeState } from "./grids/types";
-
-/**
- * Get the edge permutation for a given square grid transform.
- * transformIndex: 0-3 are rotations (0°, 90°, 180°, 270° CW)
- *                 4-7 are flip + rotations
- * 
- * Returns the permutation mapping: newEdgeIdx -> originalEdgeIdx
- * (i.e., the INVERSE permutation for looking up original edge states)
- */
-function getSquareEdgePermutationInverse(transformIndex: number): number[] {
-  // Forward permutations: originalEdgeIdx -> newEdgeIdx
-  // Edge indices: 0=top, 1=right, 2=bottom, 3=left
-  const forwardPerms: number[][] = [
-    [0, 1, 2, 3],  // 0: identity
-    [1, 2, 3, 0],  // 1: 90° CW rotation
-    [2, 3, 0, 1],  // 2: 180° rotation
-    [3, 0, 1, 2],  // 3: 270° CW rotation
-    [0, 3, 2, 1],  // 4: horizontal flip
-    [3, 2, 1, 0],  // 5: flip + 90° CW
-    [2, 1, 0, 3],  // 6: flip + 180°
-    [1, 0, 3, 2],  // 7: flip + 270° CW
-  ];
-  
-  const forward = forwardPerms[transformIndex] || [0, 1, 2, 3];
-  
-  // Compute inverse: inverse[forward[i]] = i
-  const inverse = [0, 0, 0, 0];
-  for (let i = 0; i < 4; i++) {
-    inverse[forward[i]] = i;
-  }
-  return inverse;
-}
+import type { EdgeState, GridDefinition } from "./grids/types";
+import { getInverseEdgePermutation } from "./grids/types";
+import { squareGridDefinition } from "./grids/squareGridDef";
 
 /**
  * Create an SVG path for a semicircle centered at (cx, cy) with given radius.
@@ -61,6 +31,8 @@ export interface TilingViewerProps {
   highlightedPlacement?: number | null;
   /** Edge state from the original tile definition (will be transformed per placement) */
   edgeState?: EdgeState;
+  /** Grid definition for computing edge permutations (defaults to squareGrid) */
+  grid?: GridDefinition;
 }
 
 export const TilingViewer: React.FC<TilingViewerProps> = ({ 
@@ -71,6 +43,7 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
   svgRef,
   highlightedPlacement,
   edgeState,
+  grid = squareGridDefinition,
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -284,6 +257,7 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
         
         {/* Layer 5: Edge markings as half circles for each placement
          * Transform the edge state according to each placement's transformIndex
+         * Uses grid-agnostic inverse permutation computation
          */}
         {edgeState && (() => {
           // Pre-compute the original cells once (cells with edge state defined)
@@ -296,10 +270,13 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
             }
           }
           
-          const semicircleRadius = cellSize * 0.12;
+          // Larger radius for better visibility and easier clicking
+          const semicircleRadius = cellSize * 0.18;
+          const numEdges = grid.neighbors[0].length;
           
           return placements.flatMap((placement, pIndex) => {
-            const inversePerm = getSquareEdgePermutationInverse(placement.transformIndex);
+            // Use grid-agnostic inverse permutation computation
+            const inversePerm = getInverseEdgePermutation(grid, placement.transformIndex);
             
             return placement.cells.flatMap((cell, cellIdx) => {
               // The cellIdx maps to the same index in the original cells list
@@ -324,7 +301,7 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
                 { x1: x, y1: y + cellSize, x2: x, y2: y },                    // left
               ];
               
-              return [0, 1, 2, 3].map(visualEdgeIdx => {
+              return Array.from({ length: numEdges }, (_, visualEdgeIdx) => {
                 // Use inverse permutation to find which original edge corresponds
                 // to this visual edge after the transform
                 const origEdgeIdx = inversePerm[visualEdgeIdx];
@@ -333,6 +310,7 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
                 if (!isMarked) return null;
                 
                 const edge = edgeCoords[visualEdgeIdx];
+                if (!edge) return null;
                 
                 // Edge midpoint
                 const midX = (edge.x1 + edge.x2) / 2;

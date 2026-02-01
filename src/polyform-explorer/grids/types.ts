@@ -452,3 +452,67 @@ export function flipEdgeState(
 ): EdgeState {
   return transformEdgeState(grid, edgeState, grid.flip);
 }
+
+/**
+ * Compose two permutations: result[i] = b[a[i]]
+ * (Apply a first, then b)
+ */
+function composePermutations(a: number[], b: number[]): number[] {
+  return a.map(ai => b[ai]);
+}
+
+/**
+ * Compute the inverse of a permutation.
+ * If perm[i] = j, then inverse[j] = i.
+ */
+function invertPermutation(perm: number[]): number[] {
+  const inverse = new Array(perm.length).fill(0);
+  for (let i = 0; i < perm.length; i++) {
+    inverse[perm[i]] = i;
+  }
+  return inverse;
+}
+
+/**
+ * Get the inverse edge permutation for a given transform index.
+ * 
+ * Transform indices are canonically ordered:
+ * - 0 to numRotations-1: rotate 0, 1, 2, ... times
+ * - numRotations to 2*numRotations-1: flip, then rotate 0, 1, 2, ... times
+ * 
+ * The "inverse" permutation maps: visualEdgeIdx -> originalEdgeIdx
+ * This tells us which original edge corresponds to a visual edge after the transform.
+ * 
+ * @param grid The grid definition (provides rotate/flip functions and numRotations)
+ * @param transformIndex The transform index (0 to 2*numRotations-1)
+ * @returns The inverse permutation array
+ */
+export function getInverseEdgePermutation(
+  grid: GridDefinition,
+  transformIndex: number
+): number[] {
+  const numRotations = grid.numRotations;
+  const numEdges = grid.neighbors[0].length;
+  
+  // Start with identity permutation
+  let forwardPerm = Array.from({ length: numEdges }, (_, i) => i);
+  
+  // Determine if this is a flipped transform
+  const isFlipped = transformIndex >= numRotations;
+  const rotationCount = isFlipped ? transformIndex - numRotations : transformIndex;
+  
+  // If flipped, apply flip first
+  if (isFlipped) {
+    const flipResult = grid.flip({ row: 0, col: 0 });
+    forwardPerm = composePermutations(forwardPerm, flipResult.neighborPerm);
+  }
+  
+  // Apply rotations
+  for (let r = 0; r < rotationCount; r++) {
+    const rotateResult = grid.rotate({ row: 0, col: 0 });
+    forwardPerm = composePermutations(forwardPerm, rotateResult.neighborPerm);
+  }
+  
+  // Return the inverse of the forward permutation
+  return invertPermutation(forwardPerm);
+}
