@@ -580,7 +580,11 @@ export function EdgeColoringExplorer() {
                 />
                 
                 {/* View transform controls for debugging */}
-                <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                <div 
+                  style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}
+                  role="group"
+                  aria-label="View transform controls"
+                >
                   <span style={{ fontSize: "14px", fontWeight: "bold", color: "#495057" }}>View Transform:</span>
                   <button
                     onClick={() => setViewRotation((r) => (r + 1) % 4)}
@@ -607,6 +611,7 @@ export function EdgeColoringExplorer() {
                       cursor: "pointer",
                       fontSize: "14px",
                     }}
+                    aria-pressed={viewFlipH}
                   >
                     ↔️ Flip H {viewFlipH ? "(ON)" : "(OFF)"}
                   </button>

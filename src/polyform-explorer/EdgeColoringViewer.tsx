@@ -12,7 +12,7 @@ export interface EdgeColoringViewerProps {
   highlightedPlacement?: number | null;
   showEdgeColors?: boolean;
   numColors?: number;
-  /** Number of 90° clockwise rotations (0-3) */
+  /** Number of 90° clockwise rotations (0-3). Values outside this range are normalized. */
   rotation?: number;
   /** Whether to flip horizontally */
   flipH?: boolean;
@@ -30,6 +30,9 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
   rotation = 0,
   flipH = false,
 }) => {
+  // Normalize rotation to 0-3 range
+  const normalizedRotation = ((rotation % 4) + 4) % 4;
+  
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement, placementEdgeColors } = useMemo(() => {
     let minRow = 0, maxRow = height - 1;
@@ -87,8 +90,8 @@ export const EdgeColoringViewer: React.FC<EdgeColoringViewerProps> = ({
     transforms.push("scale(-1, 1)");
   }
   
-  if (rotation !== 0) {
-    transforms.push(`rotate(${rotation * 90})`);
+  if (normalizedRotation !== 0) {
+    transforms.push(`rotate(${normalizedRotation * 90})`);
   }
   
   transforms.push(`translate(${-centerX}, ${-centerY})`);
