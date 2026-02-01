@@ -14,47 +14,75 @@ export const SquareGrid: React.FC<SquareGridProps> = ({ cells, roads, onCellClic
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   
-  // Generate edges between adjacent filled cells
+  // Generate edges for all 4 sides of each filled cell.
+  // For external edges (edges on the boundary of the tile), we use virtual neighbor
+  // coordinates that may be negative or outside the grid bounds. This is intentional -
+  // the coordinates are only used for edge key generation and click handling.
+  // For example, the top edge of a cell at row 0 uses row -1 as the neighbor coordinate.
   const edges: Array<{
     key: string;
-    x1: number; y1: number;
-    x2: number; y2: number;
     hasRoad: boolean;
     row1: number; col1: number;
     row2: number; col2: number;
+    direction: 'top' | 'bottom' | 'left' | 'right';
   }> = [];
+  
+  // Use a Set to avoid duplicate edges (when two adjacent filled cells share an edge)
+  const seenEdgeKeys = new Set<string>();
   
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       if (!cells[row][col]) continue;
       
-      // Check right neighbor
-      if (col + 1 < width && cells[row][col + 1]) {
-        const edgeKey = makeEdgeKey(row, col, row, col + 1);
+      // Top edge (neighbor at row - 1, may be -1 for external edge)
+      const topEdgeKey = makeEdgeKey(row - 1, col, row, col);
+      if (!seenEdgeKeys.has(topEdgeKey)) {
+        seenEdgeKeys.add(topEdgeKey);
         edges.push({
-          key: edgeKey,
-          x1: (col + 1) * cellSize + 1,
-          y1: row * cellSize + 1 + cellSize / 2,
-          x2: (col + 1) * cellSize + 1,
-          y2: row * cellSize + 1 + cellSize / 2,
-          hasRoad: roads.has(edgeKey),
-          row1: row, col1: col,
-          row2: row, col2: col + 1,
+          key: topEdgeKey,
+          hasRoad: roads.has(topEdgeKey),
+          row1: row - 1, col1: col,
+          row2: row, col2: col,
+          direction: 'top',
         });
       }
       
-      // Check bottom neighbor
-      if (row + 1 < height && cells[row + 1][col]) {
-        const edgeKey = makeEdgeKey(row, col, row + 1, col);
+      // Bottom edge (neighbor at row + 1, may be >= height for external edge)
+      const bottomEdgeKey = makeEdgeKey(row, col, row + 1, col);
+      if (!seenEdgeKeys.has(bottomEdgeKey)) {
+        seenEdgeKeys.add(bottomEdgeKey);
         edges.push({
-          key: edgeKey,
-          x1: col * cellSize + 1 + cellSize / 2,
-          y1: (row + 1) * cellSize + 1,
-          x2: col * cellSize + 1 + cellSize / 2,
-          y2: (row + 1) * cellSize + 1,
-          hasRoad: roads.has(edgeKey),
+          key: bottomEdgeKey,
+          hasRoad: roads.has(bottomEdgeKey),
           row1: row, col1: col,
           row2: row + 1, col2: col,
+          direction: 'bottom',
+        });
+      }
+      
+      // Left edge (neighbor at col - 1, may be -1 for external edge)
+      const leftEdgeKey = makeEdgeKey(row, col - 1, row, col);
+      if (!seenEdgeKeys.has(leftEdgeKey)) {
+        seenEdgeKeys.add(leftEdgeKey);
+        edges.push({
+          key: leftEdgeKey,
+          hasRoad: roads.has(leftEdgeKey),
+          row1: row, col1: col - 1,
+          row2: row, col2: col,
+          direction: 'left',
+        });
+      }
+      
+      // Right edge (neighbor at col + 1, may be >= width for external edge)
+      const rightEdgeKey = makeEdgeKey(row, col, row, col + 1);
+      if (!seenEdgeKeys.has(rightEdgeKey)) {
+        seenEdgeKeys.add(rightEdgeKey);
+        edges.push({
+          key: rightEdgeKey,
+          hasRoad: roads.has(rightEdgeKey),
+          row1: row, col1: col,
+          row2: row, col2: col + 1,
+          direction: 'right',
         });
       }
     }
@@ -84,15 +112,29 @@ export const SquareGrid: React.FC<SquareGridProps> = ({ cells, roads, onCellClic
         ))
       )}
       
-      {/* Draw edge toggle buttons for adjacent filled cells */}
+      {/* Draw edge toggle buttons for all edges of filled cells */}
       {edges.map((edge) => {
-        const isHorizontal = edge.row1 === edge.row2;
-        const cx = isHorizontal 
-          ? edge.col1 * cellSize + cellSize + 1
-          : edge.col1 * cellSize + cellSize / 2 + 1;
-        const cy = isHorizontal
-          ? edge.row1 * cellSize + cellSize / 2 + 1
-          : edge.row1 * cellSize + cellSize + 1;
+        const isHorizontal = edge.direction === 'left' || edge.direction === 'right';
+        // Calculate center position on the edge
+        let cx: number, cy: number;
+        
+        if (edge.direction === 'top') {
+          // Top edge: center of top edge of the lower cell
+          cx = edge.col2 * cellSize + cellSize / 2 + 1;
+          cy = edge.row2 * cellSize + 1;
+        } else if (edge.direction === 'bottom') {
+          // Bottom edge: center of bottom edge of the upper cell
+          cx = edge.col1 * cellSize + cellSize / 2 + 1;
+          cy = (edge.row1 + 1) * cellSize + 1;
+        } else if (edge.direction === 'left') {
+          // Left edge: center of left edge of the right cell
+          cx = edge.col2 * cellSize + 1;
+          cy = edge.row2 * cellSize + cellSize / 2 + 1;
+        } else {
+          // Right edge: center of right edge of the left cell
+          cx = (edge.col1 + 1) * cellSize + 1;
+          cy = edge.row1 * cellSize + cellSize / 2 + 1;
+        }
         
         return (
           <g key={edge.key}>
