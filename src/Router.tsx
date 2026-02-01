@@ -1,19 +1,26 @@
 import { useState, useEffect } from 'react';
 import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
+import EdgeColoringExplorer from './EdgeColoringExplorer.tsx';
+
+type PageType = 'main' | 'polyforms' | 'edgecoloring';
 
 /** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
-  const [page, setPage] = useState(() => {
+  const [page, setPage] = useState<PageType>(() => {
     const hash = window.location.hash.slice(1);
     // Empty hash, no hash, or '#main' all show the main page
-    return hash === 'polyforms' ? 'polyforms' : 'main';
+    if (hash === 'polyforms') return 'polyforms';
+    if (hash === 'edgecoloring') return 'edgecoloring';
+    return 'main';
   });
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
-      setPage(hash === 'polyforms' ? 'polyforms' : 'main');
+      if (hash === 'polyforms') setPage('polyforms');
+      else if (hash === 'edgecoloring') setPage('edgecoloring');
+      else setPage('main');
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
@@ -50,10 +57,23 @@ export function Router() {
         >
           🧩 Polyforms
         </a>
+        <a
+          href="#edgecoloring"
+          style={{
+            color: page === 'edgecoloring' ? '#3498db' : 'white',
+            textDecoration: 'none',
+            fontWeight: page === 'edgecoloring' ? 'bold' : 'normal',
+            fontSize: '16px',
+          }}
+        >
+          🎨 Edge Coloring
+        </a>
       </nav>
 
       {/* Page Content */}
-      {page === 'main' ? <App /> : <PolyformExplorer />}
+      {page === 'main' && <App />}
+      {page === 'polyforms' && <PolyformExplorer />}
+      {page === 'edgecoloring' && <EdgeColoringExplorer />}
     </>
   );
 }

@@ -22,3 +22,7 @@ export { generateTriMaze } from "./triMazeGenerator";
 export type { TriWall, TriMazeResult } from "./triMazeGenerator";
 export { TriMazeViewer } from "./TriMazeViewer";
 export type { TriMazeViewerProps } from "./TriMazeViewer";
+export { EdgeColoringGrid, EDGE_COLORS } from "./EdgeColoringGrid";
+export type { EdgeDirection } from "./EdgeColoringGrid";
+export { EdgeColoringViewer } from "./EdgeColoringViewer";
+export type { EdgeColoringViewerProps } from "./EdgeColoringViewer";
