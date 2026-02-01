@@ -1,6 +1,9 @@
 export { SquareGrid } from "./SquareGrid";
+export type { SquareGridMode } from "./SquareGrid";
 export { HexGrid } from "./HexGrid";
+export type { HexGridMode } from "./HexGrid";
 export { TriangleGrid } from "./TriangleGrid";
+export type { TriangleGridMode } from "./TriangleGrid";
 export { TilingViewer } from "./TilingViewer";
 export type { TilingViewerProps } from "./TilingViewer";
 export { getPlacementColor } from "./placementColors";
@@ -22,3 +25,8 @@ export { generateTriMaze } from "./triMazeGenerator";
 export type { TriWall, TriMazeResult } from "./triMazeGenerator";
 export { TriMazeViewer } from "./TriMazeViewer";
 export type { TriMazeViewerProps } from "./TriMazeViewer";
+
+// Grid definitions and edge state types
+export type { EdgeState, CellEdges } from "./grids/types";
+export { createEmptyEdgeState, toggleEdge, rotateEdgeState, flipEdgeState } from "./grids/types";
+export { squareGridDefinition, hexGridDefinition, triGridDefinition } from "./grids";

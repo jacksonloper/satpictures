@@ -11,6 +11,8 @@ export type {
   TransformResult,
   Vertex,
   GridDefinition,
+  CellEdges,
+  EdgeState,
 } from './types';
 
 // Utility functions
@@ -20,6 +22,11 @@ export {
   generateAllTransforms,
   getBoundingBox,
   isInGrid,
+  createEmptyEdgeState,
+  toggleEdge,
+  transformEdgeState,
+  rotateEdgeState,
+  flipEdgeState,
 } from './types';
 
 // Grid definitions
@@ -40,7 +47,7 @@ export {
 export { UnifiedTilingViewer } from './UnifiedTilingViewer';
 export type { UnifiedTilingViewerProps } from './UnifiedTilingViewer';
 export { UnifiedGridEditor } from './UnifiedGridEditor';
-export type { UnifiedGridEditorProps } from './UnifiedGridEditor';
+export type { UnifiedGridEditorProps, EditorMode } from './UnifiedGridEditor';
 
 // Import for the lookup map
 import { squareGridDefinition } from './squareGridDef';

@@ -6,7 +6,7 @@
  */
 
 import React, { useMemo, useCallback } from "react";
-import type { GridDefinition, Coord } from "./types";
+import type { GridDefinition, Coord, EdgeState } from "./types";
 import type { UnifiedPlacement } from "./unifiedTiling";
 import { getPlacementColor } from "../placementColors";
 
@@ -25,6 +25,8 @@ export interface UnifiedTilingViewerProps {
   svgRef?: React.RefObject<SVGSVGElement | null>;
   /** Index of the highlighted placement (or null for none) */
   highlightedPlacement?: number | null;
+  /** Edge state to render (optional) */
+  edgeState?: EdgeState;
 }
 
 /**
@@ -42,6 +44,7 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
   cellSize = 30,
   svgRef,
   highlightedPlacement,
+  edgeState,
 }) => {
   // Build cell-to-placement map and find bounds (including overhangs)
   const { bounds, cellToPlacement, allCells } = useMemo(() => {
@@ -358,6 +361,35 @@ export const UnifiedTilingViewer: React.FC<UnifiedTilingViewerProps> = ({
             />
           ));
         })()}
+        
+        {/* Layer 5: Edge markings (orange lines for marked edges) */}
+        {edgeState && cellsToRender.map(({ coord }) => {
+          const cellEdges = edgeState[coord.row]?.[coord.col];
+          if (!cellEdges) return null;
+          
+          const vertices = getCellVerticesForEdge(coord);
+          const numEdges = vertices.length;
+          
+          return cellEdges.map((isMarked, edgeIdx) => {
+            if (!isMarked) return null;
+            
+            const v1 = vertices[edgeIdx];
+            const v2 = vertices[(edgeIdx + 1) % numEdges];
+            
+            return (
+              <line
+                key={`edge-mark-${coordKey(coord)}-${edgeIdx}`}
+                x1={v1.x}
+                y1={v1.y}
+                x2={v2.x}
+                y2={v2.y}
+                stroke="#f39c12"
+                strokeWidth={4}
+                strokeLinecap="round"
+              />
+            );
+          });
+        })}
       </svg>
     </div>
   );

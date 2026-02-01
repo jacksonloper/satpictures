@@ -35,7 +35,27 @@ import {
   generateTriMaze,
   TriMazeViewer,
   type TriMazeResult,
+  type EdgeState,
+  createEmptyEdgeState,
+  rotateEdgeState,
+  flipEdgeState,
+  squareGridDefinition,
+  hexGridDefinition,
+  triGridDefinition,
 } from "./polyform-explorer";
+
+/** Editor mode for the grid */
+type EditorMode = 'cell' | 'edge';
+
+/** Get the grid definition for a polyform type */
+function getGridDef(type: PolyformType) {
+  switch (type) {
+    case 'polyomino': return squareGridDefinition;
+    case 'polyhex': return hexGridDefinition;
+    case 'polyiamond': return triGridDefinition;
+    default: return squareGridDefinition;
+  }
+}
 
 /**
  * Polyform Explorer Component
@@ -45,6 +65,7 @@ import {
 /** Represents a single tile with its grid and dimensions */
 interface TileState {
   cells: boolean[][];
+  edgeState: EdgeState;
   gridWidth: number;
   gridHeight: number;
   widthInput: string;
@@ -54,9 +75,11 @@ interface TileState {
 }
 
 /** Create a new empty tile state */
-function createEmptyTileState(width: number = 8, height: number = 8): TileState {
+function createEmptyTileState(width: number = 8, height: number = 8, type: PolyformType = 'polyomino'): TileState {
+  const grid = getGridDef(type);
   return {
     cells: createEmptyBooleanGrid(width, height),
+    edgeState: createEmptyEdgeState(grid, width, height),
     gridWidth: width,
     gridHeight: height,
     widthInput: String(width),
@@ -68,17 +91,19 @@ function createEmptyTileState(width: number = 8, height: number = 8): TileState 
 
 export function PolyformExplorer() {
   const [polyformType, setPolyformType] = useState<PolyformType>("polyomino");
+  const [editorMode, setEditorMode] = useState<EditorMode>('cell');
   
   // Multi-tile state: array of tiles and the currently active tile index
-  const [tiles, setTiles] = useState<TileState[]>(() => [createEmptyTileState(8, 8)]);
+  const [tiles, setTiles] = useState<TileState[]>(() => [createEmptyTileState(8, 8, 'polyomino')]);
   const [activeTileIndex, setActiveTileIndex] = useState(0);
   
   // Derived state for the active tile (for convenience)
   // Use a safe fallback in case activeTileIndex is temporarily out of bounds during state transitions
-  const activeTile = tiles[activeTileIndex] ?? tiles[0] ?? createEmptyTileState(8, 8);
+  const activeTile = tiles[activeTileIndex] ?? tiles[0] ?? createEmptyTileState(8, 8, polyformType);
   const gridWidth = activeTile.gridWidth;
   const gridHeight = activeTile.gridHeight;
   const cells = activeTile.cells;
+  const edgeState = activeTile.edgeState;
   const widthInput = activeTile.widthInput;
   const heightInput = activeTile.heightInput;
   const widthError = activeTile.widthError;
@@ -96,6 +121,14 @@ export function PolyformExplorer() {
       if (i !== activeTileIndex) return tile;
       const newCells = typeof updater === 'function' ? updater(tile.cells) : updater;
       return { ...tile, cells: newCells };
+    }));
+  }, [activeTileIndex]);
+  
+  const setEdgeState = useCallback((updater: EdgeState | ((prev: EdgeState) => EdgeState)) => {
+    setTiles(prev => prev.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      const newEdgeState = typeof updater === 'function' ? updater(tile.edgeState) : updater;
+      return { ...tile, edgeState: newEdgeState };
     }));
   }, [activeTileIndex]);
   
@@ -473,8 +506,21 @@ export function PolyformExplorer() {
     });
   }, [setCells]);
   
+  // Toggle edge on click
+  const handleEdgeClick = useCallback((row: number, col: number, edgeIndex: number) => {
+    setEdgeState(prev => {
+      const newEdgeState = prev.map(r => r.map(c => [...c]));
+      if (newEdgeState[row]?.[col]) {
+        newEdgeState[row][col][edgeIndex] = !newEdgeState[row][col][edgeIndex];
+      }
+      return newEdgeState;
+    });
+  }, [setEdgeState]);
+  
   // Rotate the polyform
   const handleRotate = useCallback(() => {
+    const grid = getGridDef(polyformType);
+    
     setCells(prev => {
       let rotated: boolean[][];
       switch (polyformType) {
@@ -502,10 +548,15 @@ export function PolyformExplorer() {
       setHeightError(false);
       return rotated;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    
+    // Also rotate edge state
+    setEdgeState(prev => rotateEdgeState(grid, prev));
+  }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip horizontally (geometry-correct per polyform type)
   const handleFlipH = useCallback(() => {
+    const grid = getGridDef(polyformType);
+    
     setCells(prev => {
       let next: boolean[][];
       switch (polyformType) {
@@ -533,10 +584,16 @@ export function PolyformExplorer() {
 
       return next;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    
+    // Also flip edge state
+    setEdgeState(prev => flipEdgeState(grid, prev));
+  }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip vertically (geometry-correct per polyform type)
+  // Note: For edge state, vertical flip is implemented as horizontal flip + 180° rotation
   const handleFlipV = useCallback(() => {
+    const grid = getGridDef(polyformType);
+    
     setCells(prev => {
       let next: boolean[][];
       switch (polyformType) {
@@ -564,31 +621,44 @@ export function PolyformExplorer() {
 
       return next;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    
+    // For edge state, vertical flip = horizontal flip + 180° rotation
+    // Apply horizontal flip first, then rotate 180° (numRotations/2 times)
+    setEdgeState(prev => {
+      let state = flipEdgeState(grid, prev);
+      const halfRotations = Math.floor(grid.numRotations / 2);
+      for (let i = 0; i < halfRotations; i++) {
+        state = rotateEdgeState(grid, state);
+      }
+      return state;
+    });
+  }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Clear the grid
   const handleClear = useCallback(() => {
+    const grid = getGridDef(polyformType);
     setCells(createEmptyBooleanGrid(gridWidth, gridHeight));
-  }, [gridWidth, gridHeight, setCells]);
+    setEdgeState(createEmptyEdgeState(grid, gridWidth, gridHeight));
+  }, [gridWidth, gridHeight, polyformType, setCells, setEdgeState]);
   
   // Change polyform type
   const handleTypeChange = useCallback((newType: PolyformType) => {
     setPolyformType(newType);
-    // Reset all tiles when changing type
-    setTiles([createEmptyTileState(8, 8)]);
+    // Reset all tiles when changing type (with correct edge state for new type)
+    setTiles([createEmptyTileState(8, 8, newType)]);
     setActiveTileIndex(0);
   }, []);
   
   // Add a new tile
   const handleAddTile = useCallback(() => {
     setTiles(prev => {
-      const newTiles = [...prev, createEmptyTileState(8, 8)];
+      const newTiles = [...prev, createEmptyTileState(8, 8, polyformType)];
       // Use setTimeout to set the active index after the state update
       // to avoid stale closure issues
       setActiveTileIndex(newTiles.length - 1);
       return newTiles;
     });
-  }, []);
+  }, [polyformType]);
   
   // Remove the active tile (if there's more than one)
   const handleRemoveTile = useCallback(() => {
@@ -730,31 +800,77 @@ export function PolyformExplorer() {
         )}
       </div>
 
+      {/* Editor Mode Toggle */}
+      <div style={{ marginBottom: "16px", display: "flex", gap: "8px", alignItems: "center" }}>
+        <label style={{ fontWeight: "bold" }}>Mode:</label>
+        <button
+          onClick={() => setEditorMode('cell')}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: editorMode === 'cell' ? "#3498db" : "#ecf0f1",
+            color: editorMode === 'cell' ? "white" : "#333",
+            border: "1px solid #bdc3c7",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontWeight: editorMode === 'cell' ? "bold" : "normal",
+          }}
+        >
+          🔲 Cells
+        </button>
+        <button
+          onClick={() => setEditorMode('edge')}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: editorMode === 'edge' ? "#f39c12" : "#ecf0f1",
+            color: editorMode === 'edge' ? "white" : "#333",
+            border: "1px solid #bdc3c7",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontWeight: editorMode === 'edge' ? "bold" : "normal",
+          }}
+        >
+          ➖ Edges
+        </button>
+        {editorMode === 'edge' && (
+          <span style={{ fontSize: "12px", color: "#7f8c8d" }}>
+            Click edges to mark them (shown in orange)
+          </span>
+        )}
+      </div>
       
       {/* Grid */}
       <div style={{ 
         padding: "16px", 
         backgroundColor: "#f8f9fa", 
         borderRadius: "8px",
-        border: "2px solid #3498db",
+        border: `2px solid ${editorMode === 'edge' ? '#f39c12' : '#3498db'}`,
         display: "inline-block",
       }}>
         {polyformType === "polyomino" && (
           <SquareGrid
             cells={cells}
             onCellClick={handleCellClick}
+            mode={editorMode}
+            edgeState={edgeState}
+            onEdgeClick={handleEdgeClick}
           />
         )}
         {polyformType === "polyhex" && (
           <HexGrid
             cells={cells}
             onCellClick={handleCellClick}
+            mode={editorMode}
+            edgeState={edgeState}
+            onEdgeClick={handleEdgeClick}
           />
         )}
         {polyformType === "polyiamond" && (
           <TriangleGrid
             cells={cells}
             onCellClick={handleCellClick}
+            mode={editorMode}
+            edgeState={edgeState}
+            onEdgeClick={handleEdgeClick}
           />
         )}
       </div>

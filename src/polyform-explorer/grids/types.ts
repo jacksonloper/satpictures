@@ -272,3 +272,179 @@ export function isInGrid(coord: Coord, width: number, height: number): boolean {
   return coord.row >= 0 && coord.row < height && 
          coord.col >= 0 && coord.col < width;
 }
+
+// ============================================================================
+// Edge State Types and Utilities
+// ============================================================================
+
+/**
+ * Edge state for a single cell.
+ * edges[i] is true if edge i (facing neighbor i) is marked/colored.
+ */
+export type CellEdges = boolean[];
+
+/**
+ * Edge state for all cells in a grid.
+ * edgeState[row][col] is the CellEdges for that cell.
+ * Each cell has an array of booleans, one per edge (matching neighbor count).
+ */
+export type EdgeState = CellEdges[][];
+
+/**
+ * Create an empty edge state grid.
+ * @param grid The grid definition (to determine edges per cell type)
+ * @param width Grid width
+ * @param height Grid height
+ * @returns EdgeState with all edges set to false
+ */
+export function createEmptyEdgeState(
+  grid: GridDefinition,
+  width: number,
+  height: number
+): EdgeState {
+  const result: EdgeState = [];
+  for (let row = 0; row < height; row++) {
+    const rowEdges: CellEdges[] = [];
+    for (let col = 0; col < width; col++) {
+      const cellType = grid.getCellType({ row, col });
+      const numEdges = grid.neighbors[cellType].length;
+      rowEdges.push(new Array(numEdges).fill(false));
+    }
+    result.push(rowEdges);
+  }
+  return result;
+}
+
+/**
+ * Toggle an edge on a cell.
+ * @param edgeState Current edge state
+ * @param row Cell row
+ * @param col Cell column
+ * @param edgeIndex Edge index to toggle
+ * @returns New edge state with the edge toggled
+ */
+export function toggleEdge(
+  edgeState: EdgeState,
+  row: number,
+  col: number,
+  edgeIndex: number
+): EdgeState {
+  return edgeState.map((rowEdges, r) =>
+    rowEdges.map((cellEdges, c) => {
+      if (r === row && c === col) {
+        return cellEdges.map((val, i) => i === edgeIndex ? !val : val);
+      }
+      return cellEdges;
+    })
+  );
+}
+
+/**
+ * Apply a transform (rotate or flip) to edge state.
+ * The neighborPerm from the transform tells us how edges map.
+ * 
+ * @param grid Grid definition
+ * @param edgeState Current edge state
+ * @param transform The transform function (grid.rotate or grid.flip)
+ * @returns New edge state after the transform
+ */
+export function transformEdgeState(
+  grid: GridDefinition,
+  edgeState: EdgeState,
+  transform: (coord: Coord) => TransformResult
+): EdgeState {
+  if (edgeState.length === 0 || edgeState[0].length === 0) return edgeState;
+  
+  const height = edgeState.length;
+  const width = edgeState[0].length;
+  
+  // Transform all cells and collect their new positions + transformed edges
+  const transformedCells: Array<{
+    newCoord: Coord;
+    newEdges: boolean[];
+  }> = [];
+  
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const coord = { row, col };
+      const result = transform(coord);
+      const oldEdges = edgeState[row][col];
+      
+      // Apply the neighbor permutation to edges
+      // neighborPerm[i] tells us where old edge i goes in the new orientation
+      const newEdges = new Array(oldEdges.length).fill(false);
+      for (let i = 0; i < oldEdges.length; i++) {
+        const newIndex = result.neighborPerm[i];
+        newEdges[newIndex] = oldEdges[i];
+      }
+      
+      transformedCells.push({
+        newCoord: result.coord,
+        newEdges,
+      });
+    }
+  }
+  
+  // Find bounds of transformed coordinates
+  let minRow = Infinity, minCol = Infinity;
+  let maxRow = -Infinity, maxCol = -Infinity;
+  for (const { newCoord } of transformedCells) {
+    minRow = Math.min(minRow, newCoord.row);
+    maxRow = Math.max(maxRow, newCoord.row);
+    minCol = Math.min(minCol, newCoord.col);
+    maxCol = Math.max(maxCol, newCoord.col);
+  }
+  
+  // Compute offset for normalization (preserve parity for triangle grids)
+  const offRow = -minRow;
+  let offCol = -minCol;
+  if (grid.numCellTypes === 2 && (offRow + offCol) % 2 !== 0) {
+    offCol += 1;
+  }
+  
+  // Create new edge state grid
+  const newHeight = maxRow - minRow + 1;
+  const newWidth = maxCol + offCol + 1;
+  
+  const newEdgeState: EdgeState = [];
+  for (let r = 0; r < newHeight; r++) {
+    const rowEdges: CellEdges[] = [];
+    for (let c = 0; c < newWidth; c++) {
+      const cellType = grid.getCellType({ row: r, col: c });
+      const numEdges = grid.neighbors[cellType].length;
+      rowEdges.push(new Array(numEdges).fill(false));
+    }
+    newEdgeState.push(rowEdges);
+  }
+  
+  // Place transformed edges into new grid
+  for (const { newCoord, newEdges } of transformedCells) {
+    const r = newCoord.row + offRow;
+    const c = newCoord.col + offCol;
+    if (r >= 0 && r < newHeight && c >= 0 && c < newWidth) {
+      newEdgeState[r][c] = newEdges;
+    }
+  }
+  
+  return newEdgeState;
+}
+
+/**
+ * Rotate edge state by one rotation step.
+ */
+export function rotateEdgeState(
+  grid: GridDefinition,
+  edgeState: EdgeState
+): EdgeState {
+  return transformEdgeState(grid, edgeState, grid.rotate);
+}
+
+/**
+ * Flip edge state horizontally.
+ */
+export function flipEdgeState(
+  grid: GridDefinition,
+  edgeState: EdgeState
+): EdgeState {
+  return transformEdgeState(grid, edgeState, grid.flip);
+}
