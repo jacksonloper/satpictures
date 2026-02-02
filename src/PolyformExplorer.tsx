@@ -1,8 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "./App.css";
-import type { TilingResult } from "./problem/polyomino-tiling";
-import type { HexTilingResult } from "./problem/polyhex-tiling";
-import type { TriTilingResult } from "./problem/polyiamond-tiling";
+import type { UnifiedTilingResult, UnifiedPlacement } from "./polyform-explorer/grids/unifiedTiling";
 import {
   type PolyformType,
   createEmptyBooleanGrid,
@@ -35,7 +33,6 @@ import {
   type EdgeState,
   type EdgeAdjacencyViolation,
   type UnifiedEdgeInfo,
-  type Coord,
   createEmptyEdgeState,
   rotateEdgeState,
   flipEdgeState,
@@ -46,14 +43,6 @@ import {
   checkEdgeAdjacencyConsistency,
   getAllEdges,
 } from "./polyform-explorer";
-
-/** Placement type that may have originalCells from unified solver */
-interface PlacementWithOriginalCells {
-  id: number;
-  transformIndex: number;
-  cells: Array<{ row: number; col: number } | { q: number; r: number }>;
-  originalCells?: Coord[];
-}
 
 /** Editor mode for the grid */
 type EditorMode = 'cell' | 'edge';
@@ -66,6 +55,44 @@ function getGridDef(type: PolyformType) {
     case 'polyiamond': return triGridDefinition;
     default: return squareGridDefinition;
   }
+}
+
+/**
+ * Convert unified placements (q,r) to legacy square grid placements (row,col).
+ * For square grids: q = col, r = row
+ */
+function toSquarePlacements(placements: UnifiedPlacement[]) {
+  return placements.map(p => ({
+    id: p.id,
+    transformIndex: p.transformIndex,
+    offset: { row: 0, col: 0 }, // Not used by viewers but required by type
+    cells: p.cells.map(c => ({ row: c.r, col: c.q })),
+  }));
+}
+
+/**
+ * Convert unified placements (q,r) to legacy hex placements.
+ * Hex coordinates use the same q,r format.
+ */
+function toHexPlacements(placements: UnifiedPlacement[]) {
+  return placements.map(p => ({
+    id: p.id,
+    transformIndex: p.transformIndex,
+    offset: { q: 0, r: 0 }, // Not used by viewers but required by type
+    cells: p.cells.map(c => ({ q: c.q, r: c.r })),
+  }));
+}
+
+/**
+ * Convert unified placements to legacy triangle placements.
+ * Triangle coordinates use (row, col) where row=r, col=q.
+ */
+function toTriPlacements(placements: UnifiedPlacement[]) {
+  return placements.map(p => ({
+    id: p.id,
+    transformIndex: p.transformIndex,
+    cells: p.cells.map(c => ({ row: c.r, col: c.q })),
+  }));
 }
 
 /**
@@ -190,7 +217,7 @@ export function PolyformExplorer() {
   const [tilingWidthError, setTilingWidthError] = useState(false);
   const [tilingHeightError, setTilingHeightError] = useState(false);
   const [solving, setSolving] = useState(false);
-  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | TriTilingResult | null>(null);
+  const [tilingResult, setTilingResult] = useState<UnifiedTilingResult | null>(null);
   const [tilingError, setTilingError] = useState<string | null>(null);
   const [tilingStats, setTilingStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [solvedPolyformType, setSolvedPolyformType] = useState<PolyformType | null>(null);
@@ -297,8 +324,8 @@ export function PolyformExplorer() {
   const handleGenerateMaze = useCallback(() => {
     if (!tilingResult?.placements || solvedPolyformType !== "polyomino") return;
     
-    // Cast to TilingResult since we checked solvedPolyformType === "polyomino"
-    const placements = (tilingResult as TilingResult).placements!;
+    // Convert unified placements (q,r) to legacy format (row,col)
+    const placements = toSquarePlacements(tilingResult.placements);
     const result = generateMaze(placements);
     setMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
@@ -307,8 +334,8 @@ export function PolyformExplorer() {
   const handleGenerateHexMaze = useCallback(() => {
     if (!tilingResult?.placements || solvedPolyformType !== "polyhex") return;
     
-    // Cast to HexTilingResult since we checked solvedPolyformType === "polyhex"
-    const placements = (tilingResult as HexTilingResult).placements!;
+    // Convert unified placements to hex format
+    const placements = toHexPlacements(tilingResult.placements);
     const result = generateHexMaze(placements);
     setHexMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
@@ -317,8 +344,8 @@ export function PolyformExplorer() {
   const handleGenerateTriMaze = useCallback(() => {
     if (!tilingResult?.placements || solvedPolyformType !== "polyiamond") return;
     
-    // Cast to TriTilingResult since we checked solvedPolyformType === "polyiamond"
-    const placements = (tilingResult as TriTilingResult).placements!;
+    // Convert unified placements to triangle format
+    const placements = toTriPlacements(tilingResult.placements);
     const result = generateTriMaze(placements);
     setTriMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
@@ -411,37 +438,17 @@ export function PolyformExplorer() {
       return;
     }
     
-    // Convert placements to unified format (row,col -> q,r)
-    // The legacy workers use {row, col} but unified system uses {q, r}
-    // For square grids, q=col and r=row
-    // Preserve originalCells if present (from unified solver)
-    const unifiedPlacements = tilingResult.placements.map(p => {
-      const placement = p as PlacementWithOriginalCells;
-      return {
-        ...p,
-        cells: placement.cells.map((c) => {
-          // Handle both formats - if already has q/r use it, otherwise convert
-          if ('q' in c && 'r' in c) {
-            return c;
-          }
-          const legacy = c as { row: number; col: number };
-          return { q: legacy.col, r: legacy.row };
-        }),
-        // Preserve originalCells if present (from unified solver with edge constraints)
-        originalCells: placement.originalCells,
-      };
-    });
-    
-    // Use the first tile's edge state for now (TODO: support multi-tile edges)
+    // The unified solver returns placements with cells in {q, r} format
+    // and includes originalCells for edge lookup
     const violations = checkEdgeAdjacencyConsistency(
       gridDef,
-      unifiedPlacements,
+      tilingResult.placements,
       tiles[0].edgeState
     );
     
     const edges = getAllEdges(
       gridDef,
-      unifiedPlacements,
+      tilingResult.placements,
       tiles[0].edgeState
     );
     
@@ -1257,7 +1264,7 @@ export function PolyformExplorer() {
                   <HexTilingViewer
                     width={tilingWidth}
                     height={tilingHeight}
-                    placements={(tilingResult as HexTilingResult).placements || []}
+                    placements={toHexPlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
                     highlightedEdge={highlightedEdge}
@@ -1268,7 +1275,7 @@ export function PolyformExplorer() {
                   <TriTilingViewer
                     width={tilingWidth}
                     height={tilingHeight}
-                    placements={(tilingResult as TriTilingResult).placements || []}
+                    placements={toTriPlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
                   />
@@ -1276,7 +1283,7 @@ export function PolyformExplorer() {
                   <TilingViewer
                     width={tilingWidth}
                     height={tilingHeight}
-                    placements={(tilingResult as TilingResult).placements || []}
+                    placements={toSquarePlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
                     edgeState={edgeState}
