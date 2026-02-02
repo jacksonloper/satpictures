@@ -42,6 +42,7 @@ import {
   UnifiedGridEditor,
   checkEdgeAdjacencyConsistency,
   getAllEdges,
+  normalizeEdgeState,
 } from "./polyform-explorer";
 
 /** Editor mode for the grid */
@@ -438,18 +439,22 @@ export function PolyformExplorer() {
       return;
     }
     
+    // Normalize edge state to match normalized tile coordinates
+    // The unified solver uses normalized coordinates for originalCells
+    const normalizedEdge = normalizeEdgeState(gridDef, tiles[0].cells, tiles[0].edgeState);
+    
     // The unified solver returns placements with cells in {q, r} format
     // and includes originalCells for edge lookup
     const violations = checkEdgeAdjacencyConsistency(
       gridDef,
       tilingResult.placements,
-      tiles[0].edgeState
+      normalizedEdge
     );
     
     const edges = getAllEdges(
       gridDef,
       tilingResult.placements,
-      tiles[0].edgeState
+      normalizedEdge
     );
     
     setEdgeViolations(violations);

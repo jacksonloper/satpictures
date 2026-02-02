@@ -7,7 +7,8 @@
 import { 
   solveUnifiedTiling,
   checkEdgeAdjacencyConsistency,
-  UnifiedPlacement
+  UnifiedPlacement,
+  normalizeEdgeState
 } from "./unifiedTiling.js";
 import { squareGridDefinition } from "./squareGridDef.js";
 import { hexGridDefinition } from "./hexGridDef.js";
@@ -406,6 +407,106 @@ function testGridToCoords() {
   return true;
 }
 
+/**
+ * Test 7: Cell NOT at (0,0) - simulates browser scenario
+ * 
+ * This tests what happens when the user draws a cell at position (2, 3)
+ * in the grid editor. The cell gets normalized to (0, 0) but the edge state
+ * is still at edgeState[2][3]. This is the bug we're fixing.
+ */
+function testCellNotAtOrigin() {
+  console.log("\n=== Test 7: Cell NOT at origin (browser scenario) ===");
+  
+  // Simulate a 5x5 grid with a single cell at position row=2, col=3
+  const cells: boolean[][] = [
+    [false, false, false, false, false],
+    [false, false, false, false, false],
+    [false, false, false, true, false],  // Cell at row=2, col=3
+    [false, false, false, false, false],
+    [false, false, false, false, false],
+  ];
+  
+  // Edge state: ALL edges filled for the cell at (row=2, col=3)
+  // edgeState[row][col] = edgeState[2][3]
+  const edgeState: EdgeState = [];
+  for (let r = 0; r < 5; r++) {
+    const row: boolean[][] = [];
+    for (let c = 0; c < 5; c++) {
+      if (r === 2 && c === 3) {
+        // All edges filled for this cell
+        row.push([true, true, true, true]);
+      } else {
+        row.push([false, false, false, false]);
+      }
+    }
+    edgeState.push(row);
+  }
+  
+  console.log("  Cell position: row=2, col=3");
+  console.log("  Original edgeState[2][3]:", edgeState[2][3]);
+  
+  // Normalize the edge state
+  const normalizedEdge = normalizeEdgeState(squareGridDefinition, cells, edgeState);
+  console.log("  Normalized edgeState[0][0]:", normalizedEdge[0]?.[0]);
+  
+  // Check that the normalized edge state has the correct values
+  const expected = [true, true, true, true];
+  const actual = normalizedEdge[0]?.[0];
+  
+  if (!actual) {
+    console.log("  ❌ normalizedEdge[0][0] is undefined!");
+    return false;
+  }
+  
+  const allMatch = expected.every((v, i) => v === actual[i]);
+  if (!allMatch) {
+    console.log("  ❌ Edge values don't match after normalization!");
+    console.log("    Expected:", expected);
+    console.log("    Actual:", actual);
+    return false;
+  }
+  
+  console.log("  ✅ Edge state correctly normalized!");
+  
+  // Now test the full flow: solve tiling and check edges
+  const solver = new MiniSatSolver();
+  const result = solveUnifiedTiling(
+    squareGridDefinition,
+    cells,
+    2,  // width
+    1,  // height
+    solver,
+    undefined,
+    edgeState
+  );
+  
+  console.log(`  Solve result: satisfiable=${result.satisfiable}, placements=${result.placements?.length ?? 0}`);
+  
+  if (!result.satisfiable || !result.placements) {
+    console.log("  ❌ Expected satisfiable result");
+    return false;
+  }
+  
+  // Check edges using the normalized edge state
+  const edges = getAllEdges(squareGridDefinition, result.placements, normalizedEdge);
+  console.log(`  getAllEdges found ${edges.length} edges`);
+  
+  for (const edge of edges) {
+    console.log(`    Edge: cell1=(${edge.cell1.q},${edge.cell1.r}) edge${edge.edgeIdx1}=${edge.value1} ` +
+      `<-> cell2=(${edge.cell2.q},${edge.cell2.r}) edge${edge.edgeIdx2}=${edge.value2}`);
+  }
+  
+  // Check that edges are correctly reported as filled
+  const anyUnfilled = edges.some(e => !e.value1 || !e.value2);
+  if (anyUnfilled) {
+    console.log("  ❌ Some edges incorrectly reported as unfilled!");
+    return false;
+  }
+  
+  console.log("  ✅ All edges correctly reported as filled after normalization");
+  return true;
+}
+
 // Run all tests
 console.log("=== Unified Tiling Edge Adjacency Tests ===");
 
@@ -417,6 +518,7 @@ if (!testSATEnforcesEdgeConstraints()) allPassed = false;
 if (!testHexGrid()) allPassed = false;
 if (!testGridToCoords()) allPassed = false;
 if (!testSingleCellAllEdgesFilled()) allPassed = false;
+if (!testCellNotAtOrigin()) allPassed = false;
 
 console.log("\n=== Summary ===");
 console.log(allPassed ? "✅ All tests passed!" : "❌ Some tests failed!");

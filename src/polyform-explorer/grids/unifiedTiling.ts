@@ -105,6 +105,89 @@ export function gridToCoords(grid: GridDefinition, cells: boolean[][]): Coord[] 
 }
 
 /**
+ * Normalize edge state to match normalized tile coordinates.
+ * 
+ * When a tile is drawn at position (row, col) in the grid, its edge state
+ * is at edgeState[row][col]. After normalization, the tile coordinates
+ * are shifted so the first cell is at (0, 0). This function creates a new
+ * edge state indexed by the normalized coordinates.
+ * 
+ * @param grid Grid definition
+ * @param cells The tile cells (boolean grid)  
+ * @param edgeState The edge state indexed by original grid coords
+ * @returns EdgeState indexed by normalized tile coords
+ */
+export function normalizeEdgeState(
+  grid: GridDefinition,
+  cells: boolean[][],
+  edgeState: EdgeState
+): EdgeState {
+  // Get original coordinates of filled cells (not yet normalized)
+  const origCoords: Coord[] = [];
+  for (let row = 0; row < cells.length; row++) {
+    for (let col = 0; col < cells[row].length; col++) {
+      if (cells[row][col]) {
+        origCoords.push({ q: col, r: row });
+      }
+    }
+  }
+  
+  if (origCoords.length === 0) return [];
+  
+  // Find the offset used for normalization
+  let minQ = Infinity, minR = Infinity;
+  for (const c of origCoords) {
+    minQ = Math.min(minQ, c.q);
+    minR = Math.min(minR, c.r);
+  }
+  
+  let offQ = -minQ;
+  let offR = -minR;
+  
+  // For triangle grids, preserve (q+r) % 2 parity
+  if (grid.numCellTypes === 2) {
+    if ((offQ + offR) % 2 !== 0) {
+      offR += 1;
+    }
+  }
+  
+  // Find bounds of normalized coordinates
+  let maxNormQ = 0, maxNormR = 0;
+  for (const c of origCoords) {
+    const normQ = c.q + offQ;
+    const normR = c.r + offR;
+    maxNormQ = Math.max(maxNormQ, normQ);
+    maxNormR = Math.max(maxNormR, normR);
+  }
+  
+  // Create new edge state with normalized indexing
+  // Index by [r][q] to match EdgeState type
+  const normalizedEdgeState: EdgeState = [];
+  for (let normR = 0; normR <= maxNormR; normR++) {
+    const row: boolean[][] = [];
+    for (let normQ = 0; normQ <= maxNormQ; normQ++) {
+      // Map back to original coordinates
+      const origQ = normQ - offQ;
+      const origR = normR - offR;
+      
+      // Get edge state from original position
+      const origEdges = edgeState[origR]?.[origQ];
+      if (origEdges) {
+        row.push([...origEdges]); // Copy the array
+      } else {
+        // No edge state at this position - use empty array
+        const cellType = grid.getCellType({ q: normQ, r: normR });
+        const numEdges = grid.neighbors[cellType]?.length ?? 4;
+        row.push(new Array(numEdges).fill(false));
+      }
+    }
+    normalizedEdgeState.push(row);
+  }
+  
+  return normalizedEdgeState;
+}
+
+/**
  * Generate all valid placements for tiling a grid.
  * 
  * A placement is valid if it covers at least one cell in the inner grid.
@@ -249,6 +332,11 @@ export function solveUnifiedTiling(
   // Convert each tile grid to normalized coordinates
   const allTileCoords: Coord[][] = tiles.map(cells => gridToCoords(grid, cells));
   
+  // Normalize edge states to match normalized tile coordinates
+  const normalizedEdgeStates: EdgeState[] | undefined = edgeStates 
+    ? tiles.map((cells, i) => normalizeEdgeState(grid, cells, edgeStates![i]))
+    : undefined;
+  
   // Filter out empty tiles (and corresponding edge states)
   const nonEmptyIndices = allTileCoords
     .map((coords, i) => ({ coords, index: i }))
@@ -256,7 +344,7 @@ export function solveUnifiedTiling(
     .map(({ index }) => index);
   
   const nonEmptyTileCoords = nonEmptyIndices.map(i => allTileCoords[i]);
-  const nonEmptyEdgeStates = edgeStates ? nonEmptyIndices.map(i => edgeStates![i]) : undefined;
+  const nonEmptyEdgeStates = normalizedEdgeStates ? nonEmptyIndices.map(i => normalizedEdgeStates[i]) : undefined;
   
   if (nonEmptyTileCoords.length === 0) {
     return {

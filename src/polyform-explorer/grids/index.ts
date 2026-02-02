@@ -43,6 +43,7 @@ export {
   findPlacementOverlaps,
   checkEdgeAdjacencyConsistency,
   getAllEdges,
+  normalizeEdgeState,
 } from './unifiedTiling';
 
 // Unified React components
