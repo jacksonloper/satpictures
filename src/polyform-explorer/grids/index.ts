@@ -35,13 +35,14 @@ export { hexGridDefinition } from './hexGridDef';
 export { triGridDefinition, upTriNeighbors, downTriNeighbors } from './triGridDef';
 
 // Unified tiling solver
-export type { UnifiedPlacement, UnifiedTilingResult, EdgeAdjacencyViolation } from './unifiedTiling';
+export type { UnifiedPlacement, UnifiedTilingResult, EdgeAdjacencyViolation, EdgeInfo } from './unifiedTiling';
 export { 
   gridToCoords, 
   generateAllPlacements, 
   solveUnifiedTiling, 
   findPlacementOverlaps,
   checkEdgeAdjacencyConsistency,
+  getAllEdges,
 } from './unifiedTiling';
 
 // Unified React components

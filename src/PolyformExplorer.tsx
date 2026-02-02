@@ -34,6 +34,7 @@ import {
   type TriMazeResult,
   type EdgeState,
   type EdgeAdjacencyViolation,
+  type UnifiedEdgeInfo,
   createEmptyEdgeState,
   rotateEdgeState,
   flipEdgeState,
@@ -42,6 +43,7 @@ import {
   triGridDefinition,
   UnifiedGridEditor,
   checkEdgeAdjacencyConsistency,
+  getAllEdges,
 } from "./polyform-explorer";
 
 /** Editor mode for the grid */
@@ -202,8 +204,10 @@ export function PolyformExplorer() {
   
   // Edge adjacency violation state for debugging
   const [edgeViolations, setEdgeViolations] = useState<EdgeAdjacencyViolation[]>([]);
-  const [selectedViolationIndex, setSelectedViolationIndex] = useState<number | null>(null);
+  const [allEdges, setAllEdges] = useState<UnifiedEdgeInfo[]>([]);
+  const [selectedEdgeIndex, setSelectedEdgeIndex] = useState<number | null>(null);
   const [showDebugSide, setShowDebugSide] = useState<'A' | 'B'>('A');
+  const [edgeFilter, setEdgeFilter] = useState<'all' | 'violations' | 'consistent'>('all');
   
   // Maze generation state
   const [mazeResult, setMazeResult] = useState<MazeResult | null>(null);
@@ -378,7 +382,8 @@ export function PolyformExplorer() {
   useEffect(() => {
     if (!tilingResult || !tilingResult.placements || !solvedPolyformType) {
       setEdgeViolations([]);
-      setSelectedViolationIndex(null);
+      setAllEdges([]);
+      setSelectedEdgeIndex(null);
       return;
     }
     
@@ -392,7 +397,8 @@ export function PolyformExplorer() {
     // Only check if there are any edges marked
     if (!hasAnyEdges) {
       setEdgeViolations([]);
-      setSelectedViolationIndex(null);
+      setAllEdges([]);
+      setSelectedEdgeIndex(null);
       return;
     }
     
@@ -418,8 +424,15 @@ export function PolyformExplorer() {
       tiles[0].edgeState
     );
     
+    const edges = getAllEdges(
+      gridDef,
+      unifiedPlacements,
+      tiles[0].edgeState
+    );
+    
     setEdgeViolations(violations);
-    setSelectedViolationIndex(null);
+    setAllEdges(edges);
+    setSelectedEdgeIndex(null);
   }, [tilingResult, solvedPolyformType, tiles]);
   
   // Validate and apply tiling width on blur
@@ -1103,34 +1116,59 @@ export function PolyformExplorer() {
                   </div>
                 )}
                 
-                {/* Edge Debugger */}
-                {edgeViolations.length > 0 && (
+                {/* Edge Debugger - shows ALL edges */}
+                {allEdges.length > 0 && (
                   <div style={{
                     padding: "12px",
-                    backgroundColor: "#fff3cd",
-                    border: "1px solid #ffc107",
+                    backgroundColor: "#e7f3ff",
+                    border: "1px solid #b6d4fe",
                     borderRadius: "4px",
                     marginBottom: "12px",
                     fontSize: "12px",
                   }}>
                     <strong>🔍 Edge Debugger</strong>
+                    <span style={{ marginLeft: "8px", color: "#666" }}>
+                      ({allEdges.length} edges total, {allEdges.filter(e => !e.isConsistent).length} violations)
+                    </span>
                     <div style={{ marginTop: "8px" }}>
-                      <label style={{ marginRight: "8px" }}>Select violation:</label>
+                      <label style={{ marginRight: "8px" }}>Filter:</label>
                       <select 
-                        value={selectedViolationIndex ?? ''} 
-                        onChange={(e) => setSelectedViolationIndex(e.target.value === '' ? null : Number(e.target.value))}
-                        style={{ marginRight: "8px" }}
+                        value={edgeFilter} 
+                        onChange={(e) => {
+                          setEdgeFilter(e.target.value as 'all' | 'violations' | 'consistent');
+                          setSelectedEdgeIndex(null);
+                        }}
+                        style={{ marginRight: "16px" }}
                       >
-                        <option value="">-- Choose --</option>
-                        {edgeViolations.map((v, i) => (
-                          <option key={i} value={i}>
-                            #{i + 1}: ({v.cell1.q},{v.cell1.r}) edge {v.edgeIdx1} vs ({v.cell2.q},{v.cell2.r}) edge {v.edgeIdx2}
-                          </option>
-                        ))}
+                        <option value="all">All edges ({allEdges.length})</option>
+                        <option value="violations">Violations only ({allEdges.filter(e => !e.isConsistent).length})</option>
+                        <option value="consistent">Consistent only ({allEdges.filter(e => e.isConsistent).length})</option>
+                      </select>
+                      
+                      <label style={{ marginRight: "8px" }}>Select edge:</label>
+                      <select 
+                        value={selectedEdgeIndex ?? ''} 
+                        onChange={(e) => setSelectedEdgeIndex(e.target.value === '' ? null : Number(e.target.value))}
+                        style={{ maxWidth: "350px" }}
+                      >
+                        <option value="">-- Choose an edge --</option>
+                        {allEdges
+                          .map((e, i) => ({ edge: e, originalIndex: i }))
+                          .filter(({ edge }) => 
+                            edgeFilter === 'all' ? true :
+                            edgeFilter === 'violations' ? !edge.isConsistent :
+                            edge.isConsistent
+                          )
+                          .map(({ edge, originalIndex }) => (
+                            <option key={originalIndex} value={originalIndex}>
+                              {edge.isConsistent ? '🟢' : '🔴'} ({edge.cell1.q},{edge.cell1.r})#{edge.edgeIdx1} ↔ ({edge.cell2.q},{edge.cell2.r})#{edge.edgeIdx2}: {edge.value1 ? '●' : '○'} vs {edge.value2 ? '●' : '○'}
+                            </option>
+                          ))
+                        }
                       </select>
                     </div>
                     
-                    {selectedViolationIndex !== null && edgeViolations[selectedViolationIndex] && (
+                    {selectedEdgeIndex !== null && allEdges[selectedEdgeIndex] && (
                       <div style={{ marginTop: "8px", padding: "8px", backgroundColor: "#fff", borderRadius: "4px" }}>
                         <div style={{ marginBottom: "4px" }}>
                           <strong>Toggle side:</strong>{' '}
@@ -1163,19 +1201,30 @@ export function PolyformExplorer() {
                           >
                             Side B
                           </button>
+                          <span style={{ 
+                            marginLeft: "12px", 
+                            padding: "4px 8px",
+                            borderRadius: "4px",
+                            backgroundColor: allEdges[selectedEdgeIndex].isConsistent ? '#d4edda' : '#f8d7da',
+                            color: allEdges[selectedEdgeIndex].isConsistent ? '#155724' : '#721c24',
+                          }}>
+                            {allEdges[selectedEdgeIndex].isConsistent ? '✓ Consistent' : '✗ Mismatch!'}
+                          </span>
                         </div>
                         <div style={{ fontFamily: 'monospace', fontSize: '11px' }}>
                           {showDebugSide === 'A' ? (
                             <>
-                              <div><strong>Cell 1:</strong> ({edgeViolations[selectedViolationIndex].cell1.q}, {edgeViolations[selectedViolationIndex].cell1.r})</div>
-                              <div><strong>Edge Index:</strong> {edgeViolations[selectedViolationIndex].edgeIdx1}</div>
-                              <div><strong>Filledness:</strong> <span style={{ color: edgeViolations[selectedViolationIndex].value1 ? 'green' : 'red' }}>{edgeViolations[selectedViolationIndex].value1 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                              <div><strong>Cell:</strong> ({allEdges[selectedEdgeIndex].cell1.q}, {allEdges[selectedEdgeIndex].cell1.r})</div>
+                              <div><strong>Edge Index:</strong> {allEdges[selectedEdgeIndex].edgeIdx1}</div>
+                              <div><strong>Filledness:</strong> <span style={{ color: allEdges[selectedEdgeIndex].value1 ? 'green' : 'red' }}>{allEdges[selectedEdgeIndex].value1 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                              <div><strong>Placement:</strong> #{allEdges[selectedEdgeIndex].placementIdx1}</div>
                             </>
                           ) : (
                             <>
-                              <div><strong>Cell 2:</strong> ({edgeViolations[selectedViolationIndex].cell2.q}, {edgeViolations[selectedViolationIndex].cell2.r})</div>
-                              <div><strong>Edge Index:</strong> {edgeViolations[selectedViolationIndex].edgeIdx2}</div>
-                              <div><strong>Filledness:</strong> <span style={{ color: edgeViolations[selectedViolationIndex].value2 ? 'green' : 'red' }}>{edgeViolations[selectedViolationIndex].value2 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                              <div><strong>Cell:</strong> ({allEdges[selectedEdgeIndex].cell2.q}, {allEdges[selectedEdgeIndex].cell2.r})</div>
+                              <div><strong>Edge Index:</strong> {allEdges[selectedEdgeIndex].edgeIdx2}</div>
+                              <div><strong>Filledness:</strong> <span style={{ color: allEdges[selectedEdgeIndex].value2 ? 'green' : 'red' }}>{allEdges[selectedEdgeIndex].value2 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                              <div><strong>Placement:</strong> #{allEdges[selectedEdgeIndex].placementIdx2}</div>
                             </>
                           )}
                         </div>

@@ -27,8 +27,8 @@ export { TriMazeViewer } from "./TriMazeViewer";
 export type { TriMazeViewerProps } from "./TriMazeViewer";
 
 // Grid definitions and edge state types
-export type { EdgeState, CellEdges, GridDefinition, EdgeAdjacencyViolation } from "./grids";
-export { createEmptyEdgeState, toggleEdge, rotateEdgeState, flipEdgeState, checkEdgeAdjacencyConsistency } from "./grids";
+export type { EdgeState, CellEdges, GridDefinition, EdgeAdjacencyViolation, EdgeInfo as UnifiedEdgeInfo } from "./grids";
+export { createEmptyEdgeState, toggleEdge, rotateEdgeState, flipEdgeState, checkEdgeAdjacencyConsistency, getAllEdges } from "./grids";
 export { squareGridDefinition, hexGridDefinition, triGridDefinition } from "./grids";
 
 // Unified components
