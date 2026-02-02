@@ -176,6 +176,8 @@ export function normalizeEdgeState(
         row.push([...origEdges]); // Copy the array
       } else {
         // No edge state at this position - use empty array
+        // Use normalized coords for cell type since that's how the cell will be
+        // addressed after normalization
         const cellType = grid.getCellType({ q: normQ, r: normR });
         const numEdges = grid.neighbors[cellType]?.length ?? 4;
         row.push(new Array(numEdges).fill(false));
