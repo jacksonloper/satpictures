@@ -460,8 +460,10 @@ export function rotatePolyhexEdgeState(edgeState: EdgeState): EdgeState {
     x: -z,
     y: -x,
     z: -y,
-    // Rotate edges: 60° CW means edge i becomes edge (i+1) % 6
-    edges: edges.map((_, i, arr) => arr[(i + 5) % 6]), // (i-1+6)%6 to shift backwards
+    // After 60° CW rotation, each edge direction rotates by 60°.
+    // New edge i comes from old edge (i-1). E.g., new NE comes from old NW.
+    // Formula: new_edges[i] = old_edges[(i - 1 + 6) % 6] = old_edges[(i + 5) % 6]
+    edges: edges.map((_, i, arr) => arr[(i + 5) % 6]),
   }));
   
   // Find bounding box
@@ -672,8 +674,9 @@ export function rotatePolyiamondEdgeState(edgeState: EdgeState): EdgeState {
     const newRow = newY;
     const newCol = newX;
     
-    // 60° CW rotation shifts edges: edge i becomes edge (i+2) % 3
-    // (going backwards in terms of indices)
+    // After 60° CW rotation, edges shift positions.
+    // For triangles with 3 edges: new_edges[i] = old_edges[(i - 1 + 3) % 3]
+    // new_edges[0] = old_edges[2], new_edges[1] = old_edges[0], new_edges[2] = old_edges[1]
     const newEdges = [edges[2], edges[0], edges[1]];
     
     return { row: newRow, col: newCol, edges: newEdges };
@@ -811,13 +814,20 @@ export function flipPolyiamondEdgeStateV(edgeState: EdgeState): EdgeState {
     const newRow = -row - 1;
     const newCol = col + row;
     
-    // Vertical flip swaps edge 1 (top/bottom)
+    // Vertical flip changes up triangles to down and vice versa
+    // Edge positions change accordingly:
+    // UP (left=0, bottom=1, right=2) -> DOWN (top=0, right=1, left=2)
+    //   Up edge 0 (left) -> Down edge 2 (left)
+    //   Up edge 1 (bottom) -> Down edge 0 (top)  
+    //   Up edge 2 (right) -> Down edge 1 (right)
+    // DOWN (top=0, right=1, left=2) -> UP (left=0, bottom=1, right=2)
+    //   Down edge 0 (top) -> Up edge 1 (bottom)
+    //   Down edge 1 (right) -> Up edge 2 (right)
+    //   Down edge 2 (left) -> Up edge 0 (left)
     const isUp = (row + col) % 2 === 0;
-    // For up triangle: swap edges across horizontal axis
-    // For down triangle: similar swap
     const newEdges = isUp 
-      ? [edges[2], edges[1], edges[0]]  // swap left/right, keep top
-      : [edges[0], edges[1], edges[2]]; // keep as-is for down
+      ? [edges[1], edges[2], edges[0]]  // up -> down
+      : [edges[2], edges[0], edges[1]]; // down -> up
     
     return { row: newRow, col: newCol, edges: newEdges };
   });
