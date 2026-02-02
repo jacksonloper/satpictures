@@ -35,6 +35,7 @@ import {
   type EdgeState,
   type EdgeAdjacencyViolation,
   type UnifiedEdgeInfo,
+  type Coord,
   createEmptyEdgeState,
   rotateEdgeState,
   flipEdgeState,
@@ -45,6 +46,14 @@ import {
   checkEdgeAdjacencyConsistency,
   getAllEdges,
 } from "./polyform-explorer";
+
+/** Placement type that may have originalCells from unified solver */
+interface PlacementWithOriginalCells {
+  id: number;
+  transformIndex: number;
+  cells: Array<{ row: number; col: number } | { q: number; r: number }>;
+  originalCells?: Coord[];
+}
 
 /** Editor mode for the grid */
 type EditorMode = 'cell' | 'edge';
@@ -407,11 +416,10 @@ export function PolyformExplorer() {
     // For square grids, q=col and r=row
     // Preserve originalCells if present (from unified solver)
     const unifiedPlacements = tilingResult.placements.map(p => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const placement = p as any;
+      const placement = p as PlacementWithOriginalCells;
       return {
         ...p,
-        cells: placement.cells.map((c: { row: number; col: number } | { q: number; r: number }) => {
+        cells: placement.cells.map((c) => {
           // Handle both formats - if already has q/r use it, otherwise convert
           if ('q' in c && 'r' in c) {
             return c;

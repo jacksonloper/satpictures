@@ -276,16 +276,15 @@ function getModule(): Promise<CadicalModule> {
   return modulePromise;
 }
 
-self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
-  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino", edgeStates } = event.data;
+/**
+ * Check if any edge states have at least one marked edge.
+ * EdgeState is boolean[][][] (row -> col -> edges)
+ * edgeStates is EdgeState[] (one per tile)
+ */
+function hasMarkedEdges(edgeStates: EdgeState[] | undefined): boolean {
+  if (!edgeStates || edgeStates.length === 0) return false;
   
-  // Use tiles array if provided, otherwise fall back to single cells for backward compatibility
-  const tilesToUse: boolean[][][] = tiles ?? (cells ? [cells] : []);
-
-  // Check if any edge states have marked edges
-  // EdgeState is boolean[][][] (row -> col -> edges)
-  // edgeStates is EdgeState[] (one per tile)
-  const hasEdgeConstraints = edgeStates && edgeStates.length > 0 && edgeStates.some(es => {
+  return edgeStates.some(es => {
     if (!es || !Array.isArray(es)) return false;
     return es.some(row => {
       if (!row || !Array.isArray(row)) return false;
@@ -295,6 +294,16 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
       });
     });
   });
+}
+
+self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
+  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino", edgeStates } = event.data;
+  
+  // Use tiles array if provided, otherwise fall back to single cells for backward compatibility
+  const tilesToUse: boolean[][][] = tiles ?? (cells ? [cells] : []);
+
+  // Check if any edge states have marked edges
+  const hasEdgeConstraints = hasMarkedEdges(edgeStates);
 
   try {
     // Load the module (cached after first load)
