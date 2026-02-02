@@ -11,15 +11,6 @@ import {
   transformPolyiamond,
   flipHorizontal,
   flipVertical,
-  rotatePolyominoEdgeState,
-  rotatePolyhexEdgeState,
-  rotatePolyiamondEdgeState,
-  flipPolyominoEdgeStateH,
-  flipPolyominoEdgeStateV,
-  flipPolyhexEdgeStateH,
-  flipPolyhexEdgeStateV,
-  flipPolyiamondEdgeStateH,
-  flipPolyiamondEdgeStateV,
 } from "./utils/polyformTransforms";
 import {
   TilingViewer,
@@ -43,6 +34,8 @@ import {
   type EdgeAdjacencyViolation,
   type UnifiedEdgeInfo,
   createEmptyEdgeState,
+  rotateEdgeState,
+  flipEdgeState,
   squareGridDefinition,
   hexGridDefinition,
   triGridDefinition,
@@ -667,19 +660,9 @@ export function PolyformExplorer() {
       return rotated;
     });
     
-    // Also rotate edge state - use matching transformation function
-    setEdgeState(prev => {
-      switch (polyformType) {
-        case "polyomino":
-          return rotatePolyominoEdgeState(prev);
-        case "polyhex":
-          return rotatePolyhexEdgeState(prev);
-        case "polyiamond":
-          return rotatePolyiamondEdgeState(prev);
-        default:
-          return prev;
-      }
-    });
+    // Also rotate edge state - use generic grid-based transformation
+    const grid = getGridDef(polyformType);
+    setEdgeState(prev => rotateEdgeState(grid, prev));
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip horizontally (geometry-correct per polyform type)
@@ -712,23 +695,16 @@ export function PolyformExplorer() {
       return next;
     });
     
-    // Also flip edge state - use matching transformation function
-    setEdgeState(prev => {
-      switch (polyformType) {
-        case "polyomino":
-          return flipPolyominoEdgeStateH(prev);
-        case "polyhex":
-          return flipPolyhexEdgeStateH(prev);
-        case "polyiamond":
-          return flipPolyiamondEdgeStateH(prev);
-        default:
-          return prev;
-      }
-    });
+    // Also flip edge state - use generic grid-based transformation
+    const grid = getGridDef(polyformType);
+    setEdgeState(prev => flipEdgeState(grid, prev));
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip vertically (geometry-correct per polyform type)
+  // Note: Vertical flip = horizontal flip + 180° rotation
   const handleFlipV = useCallback(() => {
+    const grid = getGridDef(polyformType);
+    
     setCells(prev => {
       let next: boolean[][];
       switch (polyformType) {
@@ -757,18 +733,15 @@ export function PolyformExplorer() {
       return next;
     });
     
-    // Also flip edge state vertically - use matching transformation function
+    // Vertical flip edge state = horizontal flip + 180° rotation
+    // 180° = numRotations / 2 rotations
     setEdgeState(prev => {
-      switch (polyformType) {
-        case "polyomino":
-          return flipPolyominoEdgeStateV(prev);
-        case "polyhex":
-          return flipPolyhexEdgeStateV(prev);
-        case "polyiamond":
-          return flipPolyiamondEdgeStateV(prev);
-        default:
-          return prev;
+      let state = flipEdgeState(grid, prev);
+      const halfRotations = Math.floor(grid.numRotations / 2);
+      for (let i = 0; i < halfRotations; i++) {
+        state = rotateEdgeState(grid, state);
       }
+      return state;
     });
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   

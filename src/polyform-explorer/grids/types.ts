@@ -182,7 +182,13 @@ export function normalizeCoords(grid: GridDefinition, coords: Coord[]): Coord[] 
 }
 
 /**
- * Generate all unique transforms of a set of coordinates.
+ * Generate all transforms of a set of coordinates (rotations and flips).
+ * 
+ * Returns ALL transforms without deduplication based on shape. This is necessary
+ * because when edges are involved, different rotations are distinct even if they
+ * produce the same coordinate shape (e.g., a single cell rotated still has
+ * different edge orientations).
+ * 
  * Returns array of { coords, transformIndex, originalIndices } where:
  * - transformIndex corresponds to: 0..numRotations-1 for rotations, 
  *   numRotations..(2*numRotations-1) for flip+rotations.
@@ -193,14 +199,6 @@ export function generateAllTransforms(
   baseCoords: Coord[]
 ): Array<{ coords: Coord[]; transformIndex: number; originalIndices: number[] }> {
   const transforms: Array<{ coords: Coord[]; transformIndex: number; originalIndices: number[] }> = [];
-  const seen = new Set<string>();
-  
-  const coordsToKey = (cs: Coord[]): string => {
-    const sorted = [...cs]
-      .map(c => `${c.q},${c.r}`)
-      .sort();
-    return sorted.join(';');
-  };
   
   // Helper to normalize coords and track how indices map
   const normalizeWithIndices = (coords: Coord[], indices: number[]): {
@@ -232,16 +230,12 @@ export function generateAllTransforms(
     };
   };
   
-  // Generate all rotations
+  // Generate all rotations (no deduplication - each transform is unique due to edge orientations)
   let current = baseCoords;
   let currentIndices = baseCoords.map((_, i) => i);
   for (let rot = 0; rot < grid.numRotations; rot++) {
     const { normalized, normalizedIndices } = normalizeWithIndices(current, currentIndices);
-    const key = coordsToKey(normalized);
-    if (!seen.has(key)) {
-      seen.add(key);
-      transforms.push({ coords: normalized, transformIndex: rot, originalIndices: normalizedIndices });
-    }
+    transforms.push({ coords: normalized, transformIndex: rot, originalIndices: normalizedIndices });
     // Rotate for next iteration
     current = current.map(c => grid.rotate(c).coord);
   }
@@ -251,11 +245,7 @@ export function generateAllTransforms(
   currentIndices = baseCoords.map((_, i) => i);
   for (let rot = 0; rot < grid.numRotations; rot++) {
     const { normalized, normalizedIndices } = normalizeWithIndices(current, currentIndices);
-    const key = coordsToKey(normalized);
-    if (!seen.has(key)) {
-      seen.add(key);
-      transforms.push({ coords: normalized, transformIndex: grid.numRotations + rot, originalIndices: normalizedIndices });
-    }
+    transforms.push({ coords: normalized, transformIndex: grid.numRotations + rot, originalIndices: normalizedIndices });
     // Rotate for next iteration
     current = current.map(c => grid.rotate(c).coord);
   }
