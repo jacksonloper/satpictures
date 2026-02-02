@@ -16,7 +16,6 @@ export interface HexTilingViewerProps {
   hideFills?: boolean;  // Hide filled hexes to see edges only
   edgeColorInfo?: EdgeColorInfo;  // Edge coloring data from SAT solver
   showEdgeColors?: boolean;  // Whether to show edge color half-circles
-  onEdgeColorDebugInfo?: (info: EdgeColorDebugInfo | null) => void;  // Callback for edge color debugger
 }
 
 // Info about a highlighted edge
@@ -26,17 +25,6 @@ export interface EdgeInfo {
   isInternal: boolean;
   coord1: { q: number; r: number };
   coord2: { q: number; r: number } | null;  // null if external
-  direction: string;
-}
-
-// Debug info for edge color status on both sides of an edge
-export interface EdgeColorDebugInfo {
-  edgeKey: string;
-  cell1: { q: number; r: number };
-  cell2: { q: number; r: number } | null;
-  edgeIndex1: number;
-  edgeIndex2: number | null;
-  color: boolean;  // The assigned edge color from SAT
   direction: string;
 }
 
@@ -51,12 +39,8 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   onEdgeInfo,
   hideFills = false,
   edgeColorInfo,
-  showEdgeColors = false,
-  onEdgeColorDebugInfo
+  showEdgeColors = false
 }) => {
-  // Suppress unused warning - will be used for debugger feature
-  void onEdgeColorDebugInfo;
-  
   // Hex geometry for POINTY-TOP orientation
   // Using standard axial → pixel conversion:
   // x = size * sqrt(3) * (q + r/2)

@@ -67,6 +67,12 @@ function createEmptyTileState(width: number = 8, height: number = 8): TileState 
   };
 }
 
+/** Get human-readable label for edge color */
+function getEdgeColorLabel(edgeColor: boolean | undefined): string {
+  if (edgeColor === undefined) return "N/A";
+  return edgeColor ? "🔴 FILLED (internal)" : "🔵 EMPTY (external)";
+}
+
 export function PolyformExplorer() {
   const [polyformType, setPolyformType] = useState<PolyformType>("polyomino");
   
@@ -1150,7 +1156,7 @@ export function PolyformExplorer() {
                               color: "white",
                               fontWeight: "bold"
                             }}>
-                              {edgeColor === undefined ? "N/A" : edgeColor ? "🔴 FILLED (internal)" : "🔵 EMPTY (external)"}
+                              {getEdgeColorLabel(edgeColor)}
                             </span>
                           </div>
                           <div style={{ marginTop: "4px", fontSize: "11px", color: "#6c757d" }}>

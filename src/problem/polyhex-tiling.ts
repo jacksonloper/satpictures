@@ -774,9 +774,12 @@ export function solvePolyhexTiling(
   );
   
   // Extract edge colors from the solution
+  // Note: SAT solvers should assign all edge variables. If a variable is unassigned
+  // (undefined), we treat it as false (EMPTY), as this shouldn't happen in practice.
   const edgeColors = new Map<string, EdgeColor>();
   for (const [edgeKey, edgeVar] of edgeVars) {
     const colorValue = result.assignment.get(edgeVar);
+    // Explicitly handle undefined: treat as false (external/empty)
     edgeColors.set(edgeKey, colorValue === true);
   }
   
