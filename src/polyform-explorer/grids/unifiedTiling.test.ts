@@ -295,6 +295,117 @@ function testHexGrid() {
   return true;
 }
 
+import { getAllEdges, gridToCoords } from "./unifiedTiling.js";
+
+/**
+ * Test 5: Single cell tile with ALL edges filled, solving for 2x1 grid
+ * 
+ * This test is designed to debug the issue where the debugger reports
+ * every edge as "unfilled" even though edges were marked as filled.
+ */
+function testSingleCellAllEdgesFilled() {
+  console.log("\n=== Test 5: Single Cell Tile with ALL Edges Filled ===");
+  
+  // Create a single-cell tile (just one cell)
+  const tile: boolean[][] = [[true]];
+  
+  // Mark ALL edges as filled for this single cell
+  // For square grid: 4 edges (up=0, right=1, down=2, left=3)
+  const edgeState: EdgeState = [
+    [
+      [true, true, true, true],  // Cell (0,0): ALL edges filled
+    ],
+  ];
+  
+  console.log("  Input tile: single cell");
+  console.log("  Edge state for cell (0,0):", edgeState[0][0]);
+  console.log("  All edges should be TRUE");
+  
+  const solver = new MiniSatSolver();
+  
+  // Solve for a 2x1 grid (2 cells horizontally) 
+  const result = solveUnifiedTiling(
+    squareGridDefinition,
+    tile,
+    2,  // width
+    1,  // height
+    solver,
+    undefined,
+    edgeState
+  );
+  
+  console.log(`  Satisfiable: ${result.satisfiable}`);
+  console.log(`  Placements: ${result.placements?.length ?? 0}`);
+  
+  if (!result.satisfiable || !result.placements) {
+    console.log("  ❌ Expected satisfiable result with placements");
+    return false;
+  }
+  
+  // Show detailed info about each placement
+  console.log("\n  === Detailed Placement Info ===");
+  for (const p of result.placements) {
+    console.log(`  Placement ${p.id}:`);
+    console.log(`    transformIndex: ${p.transformIndex}`);
+    console.log(`    cells: ${JSON.stringify(p.cells)}`);
+    console.log(`    originalCells: ${JSON.stringify(p.originalCells)}`);
+    
+    // Show what edge values would be looked up for each cell
+    if (p.originalCells) {
+      for (let i = 0; i < p.cells.length; i++) {
+        const placedCell = p.cells[i];
+        const origCell = p.originalCells[i];
+        const lookedUpEdges = edgeState[origCell.r]?.[origCell.q];
+        console.log(`    Cell ${i}: placed at (${placedCell.q},${placedCell.r}), ` +
+          `orig cell (${origCell.q},${origCell.r}), ` +
+          `edgeState[${origCell.r}][${origCell.q}] = ${JSON.stringify(lookedUpEdges)}`);
+      }
+    } else {
+      console.log(`    ⚠️ NO originalCells! Edge lookup will fail.`);
+    }
+  }
+  
+  // Now call getAllEdges to see what it reports
+  console.log("\n  === getAllEdges Output ===");
+  const allEdges = getAllEdges(squareGridDefinition, result.placements, edgeState);
+  console.log(`  Total edges found: ${allEdges.length}`);
+  
+  for (const edge of allEdges) {
+    console.log(`  Edge: cell1=(${edge.cell1.q},${edge.cell1.r}) edge${edge.edgeIdx1}=${edge.value1} ` +
+      `<-> cell2=(${edge.cell2.q},${edge.cell2.r}) edge${edge.edgeIdx2}=${edge.value2} ` +
+      `| consistent=${edge.isConsistent}`);
+  }
+  
+  // Check for the bug: are any edges falsely reported as unfilled?
+  const anyUnfilled = allEdges.some(e => !e.value1 || !e.value2);
+  if (anyUnfilled) {
+    console.log("\n  ⚠️ BUG DETECTED: Some edges reported as unfilled when they should all be TRUE!");
+    return false;
+  }
+  
+  console.log("\n  ✅ All edges correctly reported as filled");
+  return true;
+}
+
+/**
+ * Test 6: Check what gridToCoords produces
+ */
+function testGridToCoords() {
+  console.log("\n=== Test 6: gridToCoords Output ===");
+  
+  // Test with single cell tile
+  const singleCell: boolean[][] = [[true]];
+  const coords = gridToCoords(squareGridDefinition, singleCell);
+  console.log("  Single cell tile [[true]] -> coords:", JSON.stringify(coords));
+  
+  // Test with domino
+  const domino: boolean[][] = [[true, true]];
+  const dominoCoords = gridToCoords(squareGridDefinition, domino);
+  console.log("  Domino tile [[true, true]] -> coords:", JSON.stringify(dominoCoords));
+  
+  return true;
+}
+
 // Run all tests
 console.log("=== Unified Tiling Edge Adjacency Tests ===");
 
@@ -304,6 +415,8 @@ if (!testConsistentEdges()) allPassed = false;
 if (!testMismatchedEdgesDetection()) allPassed = false;
 if (!testSATEnforcesEdgeConstraints()) allPassed = false;
 if (!testHexGrid()) allPassed = false;
+if (!testGridToCoords()) allPassed = false;
+if (!testSingleCellAllEdgesFilled()) allPassed = false;
 
 console.log("\n=== Summary ===");
 console.log(allPassed ? "✅ All tests passed!" : "❌ Some tests failed!");
