@@ -402,20 +402,27 @@ export function solveUnifiedTiling(
         const originalEdges = tileEdgeState[originalCell.r]?.[originalCell.q];
         if (!originalEdges) continue;
         
-        // For each edge that is marked in the original tile
+        // For EVERY edge, add an implication: placement implies the edge value
+        // If edge is marked: placement => edge (NOT(placement) OR edge)
+        // If edge is not marked: placement => NOT edge (NOT(placement) OR NOT edge)
         for (let origEdgeIdx = 0; origEdgeIdx < originalEdges.length; origEdgeIdx++) {
-          if (originalEdges[origEdgeIdx]) {
-            // This edge is marked. After the transform, it becomes a different edge index
-            // forwardPerm[origEdgeIdx] gives the visual edge index after transformation
-            const visualEdgeIdx = forwardPerm[origEdgeIdx];
-            
-            // Get the edge variable for this placed cell's edge
-            const edgeVar = getEdgeVar(placedCell.q, placedCell.r, visualEdgeIdx);
-            
-            // Add clause: placement => edge
-            // Equivalent to: NOT(placement) OR edge
-            const placementVar = placementVars.get(p.id)!;
+          const isMarked = originalEdges[origEdgeIdx];
+          
+          // After the transform, the edge becomes a different edge index
+          // forwardPerm[origEdgeIdx] gives the visual edge index after transformation
+          const visualEdgeIdx = forwardPerm[origEdgeIdx];
+          
+          // Get the edge variable for this placed cell's edge
+          const edgeVar = getEdgeVar(placedCell.q, placedCell.r, visualEdgeIdx);
+          
+          // Add implication clause
+          const placementVar = placementVars.get(p.id)!;
+          if (isMarked) {
+            // placement => edge: NOT(placement) OR edge
             solver.addClause([-placementVar, edgeVar]);
+          } else {
+            // placement => NOT edge: NOT(placement) OR NOT edge
+            solver.addClause([-placementVar, -edgeVar]);
           }
         }
       }
@@ -490,4 +497,138 @@ export function findPlacementOverlaps(placements: UnifiedPlacement[]): string[] 
   }
   
   return overlaps;
+}
+
+/**
+ * Edge adjacency violation - when two adjacent cells have disagreeing edge values
+ */
+export interface EdgeAdjacencyViolation {
+  /** First cell coordinate */
+  cell1: Coord;
+  /** Edge index in first cell */
+  edgeIdx1: number;
+  /** Edge value in first cell */
+  value1: boolean;
+  /** Second cell coordinate (neighbor) */
+  cell2: Coord;
+  /** Edge index in second cell */
+  edgeIdx2: number;
+  /** Edge value in second cell */
+  value2: boolean;
+  /** Placement index for cell1 (if known) */
+  placementIdx1?: number;
+  /** Placement index for cell2 (if known) */
+  placementIdx2?: number;
+}
+
+/**
+ * Check that edge markings agree at adjacencies in a tiling solution.
+ * 
+ * When two cells are adjacent, the shared edge should have the same value
+ * from both cells' perspectives. This function returns a list of all violations.
+ * 
+ * @param grid Grid definition
+ * @param placements The placements in the solution
+ * @param edgeState The original tile's edge state (before transformation)
+ * @returns Array of violations (empty if all edges agree)
+ */
+export function checkEdgeAdjacencyConsistency(
+  grid: GridDefinition,
+  placements: UnifiedPlacement[],
+  edgeState: EdgeState
+): EdgeAdjacencyViolation[] {
+  const violations: EdgeAdjacencyViolation[] = [];
+  
+  // Build map from cell coordinates to placement and transformed edge values
+  type CellEdgeInfo = {
+    placementIdx: number;
+    edges: boolean[]; // Transformed edge values for this cell
+  };
+  const cellEdges = new Map<string, CellEdgeInfo>();
+  
+  for (let pIdx = 0; pIdx < placements.length; pIdx++) {
+    const p = placements[pIdx];
+    if (!p.originalCells) continue;
+    
+    // Get the forward permutation for this transform
+    const forwardPerm = getForwardEdgePermutation(grid, p.transformIndex);
+    
+    for (let cellIdx = 0; cellIdx < p.cells.length; cellIdx++) {
+      const placedCell = p.cells[cellIdx];
+      const originalCell = p.originalCells[cellIdx];
+      
+      // Get original edge values
+      const originalEdges = edgeState[originalCell.r]?.[originalCell.q];
+      if (!originalEdges) continue;
+      
+      // Transform edge values using forward permutation
+      const numEdges = grid.neighbors[grid.getCellType(placedCell)].length;
+      const transformedEdges: boolean[] = new Array(numEdges).fill(false);
+      
+      for (let origIdx = 0; origIdx < originalEdges.length; origIdx++) {
+        const visualIdx = forwardPerm[origIdx];
+        transformedEdges[visualIdx] = originalEdges[origIdx];
+      }
+      
+      const key = `${placedCell.q},${placedCell.r}`;
+      cellEdges.set(key, { placementIdx: pIdx, edges: transformedEdges });
+    }
+  }
+  
+  // Check adjacencies: for each cell, check each neighbor
+  for (const [key, info] of cellEdges) {
+    const [qStr, rStr] = key.split(',');
+    const q1 = parseInt(qStr, 10);
+    const r1 = parseInt(rStr, 10);
+    const cell1: Coord = { q: q1, r: r1 };
+    
+    const cellType = grid.getCellType(cell1);
+    const neighbors = grid.neighbors[cellType];
+    
+    for (let edgeIdx1 = 0; edgeIdx1 < neighbors.length; edgeIdx1++) {
+      const neighbor = neighbors[edgeIdx1];
+      const q2 = q1 + neighbor.dq;
+      const r2 = r1 + neighbor.dr;
+      const neighborKey = `${q2},${r2}`;
+      const cell2: Coord = { q: q2, r: r2 };
+      
+      const neighborInfo = cellEdges.get(neighborKey);
+      if (!neighborInfo) continue; // No placement at neighbor
+      
+      // Find the edge index from neighbor's perspective that points back to cell1
+      const neighborCellType = grid.getCellType(cell2);
+      const neighborNeighbors = grid.neighbors[neighborCellType];
+      let edgeIdx2 = -1;
+      for (let i = 0; i < neighborNeighbors.length; i++) {
+        if (q2 + neighborNeighbors[i].dq === q1 && r2 + neighborNeighbors[i].dr === r1) {
+          edgeIdx2 = i;
+          break;
+        }
+      }
+      
+      if (edgeIdx2 === -1) continue; // Shouldn't happen for valid grids
+      
+      // Check if edge values agree
+      const value1 = info.edges[edgeIdx1] ?? false;
+      const value2 = neighborInfo.edges[edgeIdx2] ?? false;
+      
+      if (value1 !== value2) {
+        // Only report once per edge pair (use canonical ordering)
+        if (r1 < r2 || (r1 === r2 && q1 < q2)) {
+          violations.push({
+            cell1,
+            edgeIdx1,
+            value1,
+            cell2,
+            edgeIdx2,
+            value2,
+            placementIdx1: info.placementIdx,
+            placementIdx2: neighborInfo.placementIdx,
+          });
+        }
+      }
+    }
+  }
+  
+  return violations;
 }
