@@ -14,7 +14,7 @@
 
 import type { SATSolver } from "../../solvers/types";
 import type { GridDefinition, Coord, EdgeState } from "./types";
-import { normalizeCoords, generateAllTransforms, getBoundingBox, isInGrid, getInverseEdgePermutation } from "./types";
+import { normalizeCoords, generateAllTransforms, getBoundingBox, isInGrid, getForwardEdgePermutation } from "./types";
 
 /** A single placement of a tile at a position with a specific transform */
 export interface UnifiedPlacement {
@@ -389,8 +389,9 @@ export function solveUnifiedTiling(
       
       if (!tileEdgeState || !p.originalCells) continue;
       
-      // Get the inverse edge permutation for this transform
-      const inversePerm = getInverseEdgePermutation(grid, p.transformIndex);
+      // Get the forward edge permutation for this transform
+      // forwardPerm[originalEdgeIdx] = visualEdgeIdx
+      const forwardPerm = getForwardEdgePermutation(grid, p.transformIndex);
       
       // For each cell in the placement
       for (let cellIdx = 0; cellIdx < p.cells.length; cellIdx++) {
@@ -405,18 +406,8 @@ export function solveUnifiedTiling(
         for (let origEdgeIdx = 0; origEdgeIdx < originalEdges.length; origEdgeIdx++) {
           if (originalEdges[origEdgeIdx]) {
             // This edge is marked. After the transform, it becomes a different edge index
-            // inversePerm maps: visual edge index -> original edge index
-            // We need the reverse: original edge index -> visual edge index
-            // So we find which visual edge index maps to this original edge
-            let visualEdgeIdx = -1;
-            for (let v = 0; v < inversePerm.length; v++) {
-              if (inversePerm[v] === origEdgeIdx) {
-                visualEdgeIdx = v;
-                break;
-              }
-            }
-            
-            if (visualEdgeIdx === -1) continue;
+            // forwardPerm[origEdgeIdx] gives the visual edge index after transformation
+            const visualEdgeIdx = forwardPerm[origEdgeIdx];
             
             // Get the edge variable for this placed cell's edge
             const edgeVar = getEdgeVar(placedCell.q, placedCell.r, visualEdgeIdx);
