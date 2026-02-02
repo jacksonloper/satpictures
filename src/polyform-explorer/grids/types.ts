@@ -298,6 +298,40 @@ export function isInGrid(coord: Coord, width: number, height: number): boolean {
          coord.q >= 0 && coord.q < width;
 }
 
+/**
+ * Compute normalized grid dimensions from transformed coordinate bounds.
+ * 
+ * This accounts for parity offset in triangle grids where (q + r) % 2 must be preserved.
+ * 
+ * @param minQ Minimum q coordinate after transformation
+ * @param maxQ Maximum q coordinate after transformation
+ * @param minR Minimum r coordinate after transformation
+ * @param maxR Maximum r coordinate after transformation
+ * @param grid Grid definition (for parity check)
+ * @returns { width, height, offQ, offR } where off* are normalization offsets
+ */
+export function computeNormalizedGridDimensions(
+  minQ: number,
+  maxQ: number,
+  minR: number,
+  maxR: number,
+  grid: GridDefinition
+): { width: number; height: number; offQ: number; offR: number } {
+  const offR = -minR;
+  let offQ = -minQ;
+  
+  // For triangle grids, preserve (q + r) % 2 parity
+  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
+    offQ += 1;
+  }
+  
+  // Width calculation: maxQ + offQ + 1 = maxQ - minQ + 1 + (extra if parity needed)
+  const width = maxQ + offQ + 1;
+  const height = maxR - minR + 1;
+  
+  return { width, height, offQ, offR };
+}
+
 // ============================================================================
 // Edge State Types and Utilities
 // ============================================================================
@@ -430,16 +464,10 @@ export function transformEdgeState(
     maxR = Math.max(maxR, newCoord.r);
   }
   
-  // Compute offset for normalization (preserve parity for triangle grids)
-  const offR = -minR;
-  let offQ = -minQ;
-  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
-    offQ += 1;
-  }
-  
-  // Create new edge state grid sized to fit cells with edges
-  const newHeight = maxR - minR + 1;
-  const newWidth = maxQ - minQ + 1 + (offQ + minQ);  // Account for parity offset
+  // Compute normalized dimensions
+  const { width: newWidth, height: newHeight, offQ, offR } = computeNormalizedGridDimensions(
+    minQ, maxQ, minR, maxR, grid
+  );
   
   const newEdgeState: EdgeState = [];
   for (let rIndex = 0; rIndex < newHeight; rIndex++) {
@@ -651,16 +679,10 @@ export function transformCells(
     maxR = Math.max(maxR, newCoord.r);
   }
   
-  // Compute offset for normalization (preserve parity for triangle grids)
-  const offR = -minR;
-  let offQ = -minQ;
-  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
-    offQ += 1;
-  }
-  
-  // Create new grid sized to fit only the filled cells
-  const newHeight = maxR - minR + 1;
-  const newWidth = maxQ - minQ + 1 + (offQ + minQ);  // Account for parity offset
+  // Compute normalized dimensions
+  const { width: newWidth, height: newHeight, offQ, offR } = computeNormalizedGridDimensions(
+    minQ, maxQ, minR, maxR, grid
+  );
   
   const newCells: boolean[][] = Array.from({ length: newHeight }, () =>
     Array.from({ length: newWidth }, () => false)
@@ -759,16 +781,10 @@ export function transformCellsAndEdges(
     maxR = Math.max(maxR, newCoord.r);
   }
   
-  // Compute offset for normalization (preserve parity for triangle grids)
-  const offR = -minR;
-  let offQ = -minQ;
-  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
-    offQ += 1;
-  }
-  
-  // Create new grids sized to fit the transformed filled cells
-  const newHeight = maxR - minR + 1;
-  const newWidth = maxQ - minQ + 1 + (offQ + minQ);
+  // Compute normalized dimensions
+  const { width: newWidth, height: newHeight, offQ, offR } = computeNormalizedGridDimensions(
+    minQ, maxQ, minR, maxR, grid
+  );
   
   const newCells: boolean[][] = Array.from({ length: newHeight }, () =>
     Array.from({ length: newWidth }, () => false)
