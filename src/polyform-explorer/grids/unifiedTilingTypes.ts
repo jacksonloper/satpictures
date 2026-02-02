@@ -12,11 +12,16 @@ export interface UnifiedPlacement {
   transformIndex: number;
   /** Coordinates this placement covers (absolute, after transform and translation) */
   cells: Coord[];
-  /** 
+  /**
    * Original cells in tile coordinates (before transform/translation).
    * These map 1:1 with 'cells' and are useful for looking up edge state.
    */
   originalCells?: Coord[];
+  /**
+   * Index of the tile type this placement belongs to (for multi-tile problems).
+   * Used to look up the correct edge state when rendering.
+   */
+  tileTypeIndex?: number;
 }
 
 /** Result of tiling attempt */

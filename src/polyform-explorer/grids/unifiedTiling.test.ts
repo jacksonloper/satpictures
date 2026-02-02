@@ -4,11 +4,13 @@
  * Run with: npx tsx src/polyform-explorer/grids/unifiedTiling.test.ts
  */
 
-import { 
+import {
   solveUnifiedTiling,
   checkEdgeAdjacencyConsistency,
   UnifiedPlacement,
-  normalizeEdgeState
+  normalizeEdgeState,
+  gridToCoords,
+  generateAllPlacements
 } from "./unifiedTiling.js";
 import { squareGridDefinition } from "./squareGridDef.js";
 import { hexGridDefinition } from "./hexGridDef.js";
@@ -92,11 +94,11 @@ function testConsistentEdges() {
     return false;
   }
   
-  // Check for adjacency violations
+  // Check for adjacency violations (pass array of edge states)
   const violations = checkEdgeAdjacencyConsistency(
     squareGridDefinition,
     result.placements,
-    edgeState
+    [edgeState]
   );
   
   console.log(`  Violations: ${violations.length}`);
@@ -160,11 +162,11 @@ function testMismatchedEdgesDetection() {
   console.log("    Cell (2,0) gets edgeState[r=0][q=0] =", edgeState[0][0]);
   console.log("    Cell (2,0) left edge (index 3) should be:", edgeState[0][0]?.[3]);
   
-  // Check for adjacency violations between the two placements
+  // Check for adjacency violations between the two placements (pass array of edge states)
   const violations = checkEdgeAdjacencyConsistency(
     squareGridDefinition,
     placements,
-    edgeState
+    [edgeState]
   );
   
   console.log(`  Violations found: ${violations.length}`);
@@ -213,11 +215,11 @@ function testSATEnforcesEdgeConstraints() {
     return false;
   }
   
-  // The solver should have produced a valid solution
+  // The solver should have produced a valid solution (pass array of edge states)
   const violations = checkEdgeAdjacencyConsistency(
     squareGridDefinition,
     result.placements,
-    edgeState
+    [edgeState]
   );
   
   console.log(`  Solution uses ${result.placements.length} tiles`);
@@ -277,7 +279,7 @@ function testHexGrid() {
   const violations = checkEdgeAdjacencyConsistency(
     hexGridDefinition,
     result.placements,
-    edgeState
+    [edgeState]
   );
   
   console.log(`  Solution uses ${result.placements.length} tiles`);
@@ -366,9 +368,9 @@ function testSingleCellAllEdgesFilled() {
     }
   }
   
-  // Now call getAllEdges to see what it reports
+  // Now call getAllEdges to see what it reports (pass array of edge states)
   console.log("\n  === getAllEdges Output ===");
-  const allEdges = getAllEdges(squareGridDefinition, result.placements, edgeState);
+  const allEdges = getAllEdges(squareGridDefinition, result.placements, [edgeState]);
   console.log(`  Total edges found: ${allEdges.length}`);
   
   for (const edge of allEdges) {
@@ -487,8 +489,8 @@ function testCellNotAtOrigin() {
     return false;
   }
   
-  // Check edges using the normalized edge state
-  const edges = getAllEdges(squareGridDefinition, result.placements, normalizedEdge);
+  // Check edges using the normalized edge state (pass array of edge states)
+  const edges = getAllEdges(squareGridDefinition, result.placements, [normalizedEdge]);
   console.log(`  getAllEdges found ${edges.length} edges`);
   
   for (const edge of edges) {
@@ -507,6 +509,166 @@ function testCellNotAtOrigin() {
   return true;
 }
 
+/**
+ * Test 8: Polyhex 3-cell horizontal tile with edges - should be self-consistent
+ *
+ * This is a regression test for a bug where a valid polyhex tile configuration
+ * was incorrectly reported as "no tiling possible" on a 1x1 grid.
+ *
+ * The tile is a 3-cell horizontal polyhex with edges marking the connections
+ * between adjacent cells (edges 1 and 4 for hex neighbors).
+ */
+function testPolyhex3CellWithEdges() {
+  console.log("\n=== Test 8: Polyhex 3-cell tile with edges (regression) ===");
+
+  // Create a grid where the 3 cells are at row=3, col=3,4,5
+  // This simulates the browser scenario where cells aren't at origin
+  const gridHeight = 8;
+  const gridWidth = 8;
+  const cells: boolean[][] = [];
+  for (let r = 0; r < gridHeight; r++) {
+    const row: boolean[] = [];
+    for (let c = 0; c < gridWidth; c++) {
+      // Cells at (row=3, col=3), (row=3, col=4), (row=3, col=5)
+      row.push(r === 3 && c >= 3 && c <= 5);
+    }
+    cells.push(row);
+  }
+
+  // Edge state: mark the INTERNAL shared edges between adjacent cells.
+  // For 3 cells in a row at q=0,1,2 (after normalization):
+  // - Between q=0 and q=1: q=0's edge 1 (E) and q=1's edge 4 (W)
+  // - Between q=1 and q=2: q=1's edge 1 (E) and q=2's edge 4 (W)
+  //
+  // For hex grid neighbors: 0=NE, 1=E, 2=SE, 3=SW, 4=W, 5=NW
+  // Edge 1=E faces the cell to the right (q+1)
+  // Edge 4=W faces the cell to the left (q-1)
+  //
+  // For self-consistency, both sides of each internal edge must match.
+  const edgeState: EdgeState = [];
+  for (let r = 0; r < gridHeight; r++) {
+    const row: boolean[][] = [];
+    for (let c = 0; c < gridWidth; c++) {
+      // 6 edges per hex cell
+      const cellEdges = [false, false, false, false, false, false];
+
+      if (r === 3 && c === 3) {
+        cellEdges[1] = true;  // East edge - faces cell at col=4 (internal)
+      }
+      if (r === 3 && c === 4) {
+        cellEdges[1] = true;  // East edge - faces cell at col=5 (internal)
+        cellEdges[4] = true;  // West edge - faces cell at col=3 (internal)
+      }
+      if (r === 3 && c === 5) {
+        cellEdges[4] = true;  // West edge - faces cell at col=4 (internal)
+      }
+
+      row.push(cellEdges);
+    }
+    edgeState.push(row);
+  }
+
+  console.log("  Tile cells: 3 horizontal hex cells at (3,3), (3,4), (3,5)");
+  console.log("  Edges (internal shared edges, marked on both sides):");
+  console.log("    (3,3) edge 1 (E):", edgeState[3][3][1]);
+  console.log("    (3,4) edge 1 (E):", edgeState[3][4][1]);
+  console.log("    (3,4) edge 4 (W):", edgeState[3][4][4]);
+  console.log("    (3,5) edge 4 (W):", edgeState[3][5][4]);
+
+  // First, check that normalization works correctly
+  const normalizedEdge = normalizeEdgeState(hexGridDefinition, cells, edgeState);
+  console.log("\n  After normalization:");
+  console.log("    Cell (0,0) edges:", normalizedEdge[0]?.[0]);
+  console.log("    Cell (0,1) edges:", normalizedEdge[0]?.[1]);
+  console.log("    Cell (0,2) edges:", normalizedEdge[0]?.[2]);
+
+  // Verify normalized edges are correct
+  // The tile should normalize to cells at (0,0), (0,1), (0,2)
+  // With edges preserved at the same indices
+  const expectedEdges = [
+    { r: 0, c: 0, edges: [false, false, false, false, true, false] },  // edge 4 (W)
+    { r: 0, c: 1, edges: [false, true, false, false, true, false] },   // edges 1 (E) and 4 (W)
+    { r: 0, c: 2, edges: [false, true, false, false, false, false] },  // edge 1 (E)
+  ];
+
+  let normalizationCorrect = true;
+  for (const exp of expectedEdges) {
+    const actual = normalizedEdge[exp.r]?.[exp.c];
+    if (!actual) {
+      console.log(`  ❌ Missing normalized edge at (${exp.r},${exp.c})`);
+      normalizationCorrect = false;
+      continue;
+    }
+    for (let i = 0; i < 6; i++) {
+      if (actual[i] !== exp.edges[i]) {
+        console.log(`  ❌ Edge mismatch at (${exp.r},${exp.c}) edge ${i}: expected ${exp.edges[i]}, got ${actual[i]}`);
+        normalizationCorrect = false;
+      }
+    }
+  }
+
+  if (normalizationCorrect) {
+    console.log("  ✅ Normalization correct");
+  }
+
+  // Now solve the tiling problem
+  // The tile should fit in a 3x1 grid (3 cells wide, 1 cell tall)
+  const solver = new MiniSatSolver();
+
+  // Debug: check what placements are generated
+  const tileCoords = gridToCoords(hexGridDefinition, cells);
+  console.log("\n  Tile coords (normalized):", JSON.stringify(tileCoords));
+
+  const testPlacements = generateAllPlacements(hexGridDefinition, tileCoords, 3, 1);
+  console.log(`  Total placements generated for 3x1 grid: ${testPlacements.length}`);
+  for (const p of testPlacements) {
+    console.log(`    Placement ${p.id}: transform=${p.transformIndex}, cells=${JSON.stringify(p.cells)}`);
+  }
+
+  const result = solveUnifiedTiling(
+    hexGridDefinition,
+    cells,
+    3,  // width - exactly fits 3 cells
+    1,  // height
+    solver,
+    undefined,
+    edgeState
+  );
+
+  console.log(`\n  Solve result for 3x1 grid:`);
+  console.log(`    satisfiable: ${result.satisfiable}`);
+  console.log(`    placements: ${result.placements?.length ?? 0}`);
+  console.log(`    stats: vars=${result.stats.numVariables}, clauses=${result.stats.numClauses}, placements=${result.stats.numPlacements}`);
+
+  if (!result.satisfiable) {
+    console.log("  ❌ Expected satisfiable for 3x1 grid - tile should fit exactly!");
+    return false;
+  }
+
+  // Also test that edge consistency is maintained
+  if (result.placements) {
+    const violations = checkEdgeAdjacencyConsistency(
+      hexGridDefinition,
+      result.placements,
+      [normalizedEdge]
+    );
+
+    console.log(`    edge violations: ${violations.length}`);
+
+    if (violations.length > 0) {
+      console.log("  ❌ Edge violations found:");
+      for (const v of violations) {
+        console.log(`    Cell (${v.cell1.q},${v.cell1.r}) edge ${v.edgeIdx1}=${v.value1} vs ` +
+          `Cell (${v.cell2.q},${v.cell2.r}) edge ${v.edgeIdx2}=${v.value2}`);
+      }
+      return false;
+    }
+  }
+
+  console.log("  ✅ Polyhex 3-cell tile works correctly");
+  return true;
+}
+
 // Run all tests
 console.log("=== Unified Tiling Edge Adjacency Tests ===");
 
@@ -519,6 +681,7 @@ if (!testHexGrid()) allPassed = false;
 if (!testGridToCoords()) allPassed = false;
 if (!testSingleCellAllEdgesFilled()) allPassed = false;
 if (!testCellNotAtOrigin()) allPassed = false;
+if (!testPolyhex3CellWithEdges()) allPassed = false;
 
 console.log("\n=== Summary ===");
 console.log(allPassed ? "✅ All tests passed!" : "❌ Some tests failed!");

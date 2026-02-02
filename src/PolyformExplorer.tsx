@@ -10,7 +10,6 @@ import {
   HexTilingViewer,
   TriTilingViewer,
   downloadSvg,
-  exportCellsToJson,
   parseCoordsJson,
   downloadJson,
   PolyformControls,
@@ -65,21 +64,33 @@ export function PolyformExplorer() {
   const heightInput = activeTile.heightInput;
   const widthError = activeTile.widthError;
   const heightError = activeTile.heightError;
-  
-  // Compute the filled cell coordinates for the current tile
-  // Note: Uses {row, col} format to match TilingViewer's expectation
-  // where row = r (vertical) and col = q (horizontal) in axial terms
-  const tileCells = useMemo(() => {
-    const coords: Array<{ row: number; col: number }> = [];
-    for (let row = 0; row < cells.length; row++) {
-      for (let col = 0; col < cells[row].length; col++) {
-        if (cells[row][col]) {
-          coords.push({ row, col });
+
+  // Compute all tile edge states and cells for multi-tile rendering
+  // These arrays are indexed by tile type (matching tileTypeIndex in placements)
+  const allTileData = useMemo(() => {
+    const tilesWithContent = tiles
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => tile.cells.some(row => row.some(c => c)));
+
+    const allEdgeStates: EdgeState[] = [];
+    const allTileCells: Array<Array<{ row: number; col: number }>> = [];
+
+    for (const { tile } of tilesWithContent) {
+      allEdgeStates.push(tile.edgeState);
+
+      const coords: Array<{ row: number; col: number }> = [];
+      for (let row = 0; row < tile.cells.length; row++) {
+        for (let col = 0; col < tile.cells[row].length; col++) {
+          if (tile.cells[row][col]) {
+            coords.push({ row, col });
+          }
         }
       }
+      allTileCells.push(coords);
     }
-    return coords;
-  }, [cells]);
+
+    return { allEdgeStates, allTileCells };
+  }, [tiles]);
   
   // Setter helpers that update the active tile
   const updateActiveTile = useCallback((updates: Partial<TileState>) => {
@@ -176,17 +187,62 @@ export function PolyformExplorer() {
     downloadSvg(tilingSvgRef.current, `tiling-${tilingWidth}x${tilingHeight}.svg`);
   }, [tilingWidth, tilingHeight]);
   
-  // Export tile coordinates as JSON
+  // Export all tiles with edges as JSON
   const handleExportTileCoords = useCallback(() => {
-    const json = exportCellsToJson(cells);
-    const coords = JSON.parse(json);
+    // Find tiles that have at least one filled cell
+    const tilesWithContent = tiles
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => tile.cells.some(row => row.some(c => c)));
+
+    if (tilesWithContent.length === 0) {
+      alert("No tiles to export");
+      return;
+    }
+
+    // Export all tiles with their cells and edges
+    const exportData = {
+      polyformType,
+      tiles: tilesWithContent.map(({ tile }) => {
+        // Extract cell coordinates
+        const coords: Array<{ row: number; col: number }> = [];
+        for (let row = 0; row < tile.cells.length; row++) {
+          for (let col = 0; col < tile.cells[row].length; col++) {
+            if (tile.cells[row][col]) {
+              coords.push({ row, col });
+            }
+          }
+        }
+
+        // Extract edges (only for filled cells)
+        const edges: Array<{ row: number; col: number; edgeIndex: number }> = [];
+        for (let row = 0; row < tile.edgeState.length; row++) {
+          for (let col = 0; col < tile.edgeState[row].length; col++) {
+            if (tile.cells[row]?.[col]) {  // Only include edges of filled cells
+              const cellEdges = tile.edgeState[row][col];
+              for (let edgeIndex = 0; edgeIndex < cellEdges.length; edgeIndex++) {
+                if (cellEdges[edgeIndex]) {
+                  edges.push({ row, col, edgeIndex });
+                }
+              }
+            }
+          }
+        }
+
+        return { coords, edges };
+      }),
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const totalCells = exportData.tiles.reduce((sum, t) => sum + t.coords.length, 0);
+    const totalEdges = exportData.tiles.reduce((sum, t) => sum + t.edges.length, 0);
+
     navigator.clipboard.writeText(json).then(() => {
-      alert(`Copied ${coords.length} coordinates to clipboard!`);
+      alert(`Copied ${tilesWithContent.length} tile(s) with ${totalCells} cells and ${totalEdges} edges to clipboard!`);
     }).catch(() => {
       // Fallback: show in a prompt
-      prompt("Copy these coordinates:", json);
+      prompt("Copy this JSON:", json);
     });
-  }, [cells]);
+  }, [tiles, polyformType]);
   
   // Import tile coordinates from JSON
   const handleImportTileCoords = useCallback(() => {
@@ -341,14 +397,20 @@ export function PolyformExplorer() {
       setSelectedEdgeIndex(null);
       return;
     }
-    
+
     const gridDef = getGridDef(solvedPolyformType);
-    const hasAnyEdges = tiles.some(tile => 
-      Object.values(tile.edgeState).some(cellEdges => 
-        cellEdges.some(filled => filled)
+
+    // Get tiles with content (same order as used for solving)
+    const tilesWithContent = tiles.filter(tile =>
+      tile.cells.some(row => row.some(c => c))
+    );
+
+    const hasAnyEdges = tilesWithContent.some(tile =>
+      tile.edgeState.some(row =>
+        row.some(cellEdges => cellEdges.some(filled => filled))
       )
     );
-    
+
     // Only check if there are any edges marked
     if (!hasAnyEdges) {
       setEdgeViolations([]);
@@ -356,25 +418,27 @@ export function PolyformExplorer() {
       setSelectedEdgeIndex(null);
       return;
     }
-    
-    // Normalize edge state to match normalized tile coordinates
+
+    // Normalize edge states for all tiles to match normalized tile coordinates
     // The unified solver uses normalized coordinates for originalCells
-    const normalizedEdge = normalizeEdgeState(gridDef, tiles[0].cells, tiles[0].edgeState);
-    
+    const normalizedEdgeStates = tilesWithContent.map(tile =>
+      normalizeEdgeState(gridDef, tile.cells, tile.edgeState)
+    );
+
     // The unified solver returns placements with cells in {q, r} format
     // and includes originalCells for edge lookup
     const violations = checkEdgeAdjacencyConsistency(
       gridDef,
       tilingResult.placements,
-      normalizedEdge
+      normalizedEdgeStates
     );
-    
+
     const edges = getAllEdges(
       gridDef,
       tilingResult.placements,
-      normalizedEdge
+      normalizedEdgeStates
     );
-    
+
     setEdgeViolations(violations);
     setAllEdges(edges);
     setSelectedEdgeIndex(null);
@@ -1217,8 +1281,8 @@ export function PolyformExplorer() {
                     placements={toSquarePlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
-                    edgeState={edgeState}
-                    tileCells={tileCells}
+                    edgeStates={allTileData.allEdgeStates}
+                    allTileCells={allTileData.allTileCells}
                   />
                 )}
                 

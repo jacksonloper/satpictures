@@ -48,11 +48,14 @@ export const HexGrid: React.FC<HexGridProps> = ({
   };
   
   // Create hexagon path - POINTY-TOP orientation
-  // Starting at angle PI/2 (90°) creates pointy-top orientation
+  // Vertices must match hexGridDef.ts: start at TOP and go CLOCKWISE
+  // In screen coords (Y-down): top is (0, -1), clockwise means increasing angle
+  // v0=top, v1=upper-right, v2=lower-right, v3=bottom, v4=lower-left, v5=upper-left
   const createHexPath = (cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i + Math.PI / 2; // Pointy-top: start at 90°
+      // Start at -90° (top) and go clockwise in 60° increments
+      const angle = -Math.PI / 2 + (Math.PI / 3) * i;
       const x = cx + hexSize * Math.cos(angle);
       const y = cy + hexSize * Math.sin(angle);
       points.push(`${x},${y}`);
@@ -62,12 +65,14 @@ export const HexGrid: React.FC<HexGridProps> = ({
   
   // Get edge coordinates for hex (6 edges, 0-5)
   // Edges go from vertex i to vertex (i+1) % 6
+  // Must match createHexPath vertex ordering (start at top, go clockwise)
   const getEdgeCoords = (row: number, col: number, edgeIndex: number) => {
     const { cx, cy } = getHexCenter(row, col);
-    
-    const angle1 = (Math.PI / 3) * edgeIndex + Math.PI / 2;
-    const angle2 = (Math.PI / 3) * ((edgeIndex + 1) % 6) + Math.PI / 2;
-    
+
+    // Same angle formula as createHexPath: start at -90° (top), go CW in 60° steps
+    const angle1 = -Math.PI / 2 + (Math.PI / 3) * edgeIndex;
+    const angle2 = -Math.PI / 2 + (Math.PI / 3) * ((edgeIndex + 1) % 6);
+
     return {
       x1: cx + hexSize * Math.cos(angle1),
       y1: cy + hexSize * Math.sin(angle1),

@@ -27,6 +27,8 @@ export interface Placement {
   transformIndex: number;
   /** Coordinates this placement covers (absolute, after transform and translation) */
   cells: Coord[];
+  /** Index of the tile type this placement belongs to (for multi-tile problems) */
+  tileTypeIndex?: number;
 }
 
 /** Result of tiling attempt */

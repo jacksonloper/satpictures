@@ -84,11 +84,13 @@ export const HexMazeViewer: React.FC<HexMazeViewerProps> = ({
   }, [hexSize, offsetX, offsetY]);
   
   // Get hex vertices for a given center
+  // Must match hexGridDef.ts: start at TOP and go CLOCKWISE
+  // v0=top, v1=upper-right, v2=lower-right, v3=bottom, v4=lower-left, v5=upper-left
   const getHexVertices = useCallback((cx: number, cy: number): Array<{ x: number; y: number }> => {
     const vertices: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < 6; i++) {
-      // Pointy-top: first vertex at top (90°)
-      const angle = (Math.PI / 3) * i + Math.PI / 2;
+      // Start at -90° (top) and go clockwise in 60° increments
+      const angle = -Math.PI / 2 + (Math.PI / 3) * i;
       vertices.push({
         x: cx + hexSize * Math.cos(angle),
         y: cy + hexSize * Math.sin(angle),

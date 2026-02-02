@@ -29,24 +29,24 @@ export interface TilingViewerProps {
   cellSize?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
   highlightedPlacement?: number | null;
-  /** Edge state from the original tile definition (will be transformed per placement) */
-  edgeState?: EdgeState;
+  /** Edge states from the original tile definitions (one per tile type, will be transformed per placement) */
+  edgeStates?: EdgeState[];
   /** Grid definition for computing edge permutations (defaults to squareGrid) */
   grid?: GridDefinition;
-  /** Original filled cells of the tile (needed to correctly map edge state) */
-  tileCells?: Array<{ row: number; col: number }>;
+  /** Original filled cells of each tile type (needed to correctly map edge state) */
+  allTileCells?: Array<Array<{ row: number; col: number }>>;
 }
 
-export const TilingViewer: React.FC<TilingViewerProps> = ({ 
-  width, 
-  height, 
-  placements, 
+export const TilingViewer: React.FC<TilingViewerProps> = ({
+  width,
+  height,
+  placements,
   cellSize = 30,
   svgRef,
   highlightedPlacement,
-  edgeState,
+  edgeStates,
   grid = squareGridDefinition,
-  tileCells,
+  allTileCells,
 }) => {
   // Calculate the bounds of the outer grid (including all tile overhangs)
   const { outerBounds, cellToPlacement } = useMemo(() => {
@@ -262,40 +262,45 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
          * Transform the edge state according to each placement's transformIndex
          * Uses grid-agnostic inverse permutation computation
          */}
-        {edgeState && tileCells && tileCells.length > 0 && (() => {
-          // Use the provided tileCells as the original cells
-          // These should be in the same order as the cells appear after transform
-          const originalCells = tileCells;
-          
+        {edgeStates && allTileCells && allTileCells.length > 0 && (() => {
           // Larger radius for better visibility and easier clicking
           const semicircleRadius = cellSize * 0.18;
           // All cell types have the same neighbor count for square grids
           const numEdges = grid.neighbors[0]?.length ?? 4;
-          
+
           return placements.flatMap((placement, pIndex) => {
+            // Get the correct tile type's edge state and cells
+            const tileTypeIdx = placement.tileTypeIndex ?? 0;
+            const edgeState = edgeStates[tileTypeIdx];
+            const originalCells = allTileCells[tileTypeIdx];
+
+            if (!edgeState || !originalCells || originalCells.length === 0) {
+              return [];
+            }
+
             // Use grid-agnostic inverse permutation computation
             const inversePerm = getInverseEdgePermutation(grid, placement.transformIndex);
-            
+
             // Placements should have same cell count as original, log if mismatch
             if (placement.cells.length !== originalCells.length) {
               console.warn(`Placement ${pIndex} has ${placement.cells.length} cells but original has ${originalCells.length}`);
             }
-            
+
             return placement.cells.flatMap((cell, cellIdx) => {
               // The cellIdx maps to the same index in the original cells list
               // because transformations preserve cell count and order
               if (cellIdx >= originalCells.length) return [];
-              
+
               const origCell = originalCells[cellIdx];
               const origEdges = edgeState[origCell.row]?.[origCell.col];
               if (!origEdges) return [];
-              
+
               // Screen position for this cell in the solution view
               const svgCol = cell.col + offsetCol;
               const svgRow = cell.row + offsetRow;
               const x = svgCol * cellSize;
               const y = svgRow * cellSize;
-              
+
               // Edge coordinates for square grid
               const edgeCoords = [
                 { x1: x, y1: y, x2: x + cellSize, y2: y },                    // top
@@ -303,31 +308,31 @@ export const TilingViewer: React.FC<TilingViewerProps> = ({
                 { x1: x + cellSize, y1: y + cellSize, x2: x, y2: y + cellSize }, // bottom
                 { x1: x, y1: y + cellSize, x2: x, y2: y },                    // left
               ];
-              
+
               return Array.from({ length: numEdges }, (_, visualEdgeIdx) => {
                 // Use inverse permutation to find which original edge corresponds
                 // to this visual edge after the transform
                 const origEdgeIdx = inversePerm[visualEdgeIdx];
                 const isMarked = origEdges[origEdgeIdx] ?? false;
-                
+
                 if (!isMarked) return null;
-                
+
                 const edge = edgeCoords[visualEdgeIdx];
                 if (!edge) return null;
-                
+
                 // Edge midpoint
                 const midX = (edge.x1 + edge.x2) / 2;
                 const midY = (edge.y1 + edge.y2) / 2;
-                
+
                 // Edge direction for perpendicular calculation
                 const edgeDx = edge.x2 - edge.x1;
                 const edgeDy = edge.y2 - edge.y1;
-                
+
                 // Perpendicular angle pointing into cell (90° CW)
                 const perpAngle = Math.atan2(edgeDy, edgeDx) + Math.PI / 2;
-                
+
                 const path = createSemicirclePath(midX, midY, semicircleRadius, perpAngle);
-                
+
                 return (
                   <path
                     key={`edge-mark-${pIndex}-${cellIdx}-${visualEdgeIdx}`}

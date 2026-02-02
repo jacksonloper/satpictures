@@ -291,7 +291,11 @@ export function solveUnifiedTiling(
   for (const p of allPlacements) {
     const varNum = placementVars.get(p.id)!;
     if (result.assignment.get(varNum)) {
-      usedPlacements.push(p);
+      // Include tileTypeIndex in the placement for multi-tile edge lookup
+      usedPlacements.push({
+        ...p,
+        tileTypeIndex: placementTileTypeIndex.get(p.id) ?? 0,
+      });
       usedPlacementIds.add(p.id);
     }
   }
@@ -339,40 +343,45 @@ export function findPlacementOverlaps(placements: UnifiedPlacement[]): string[] 
 
 /**
  * Check that edge markings agree at adjacencies in a tiling solution.
- * 
+ *
  * When two cells are adjacent, the shared edge should have the same value
  * from both cells' perspectives. This function returns a list of all violations.
- * 
+ *
  * @param grid Grid definition
  * @param placements The placements in the solution
- * @param edgeState The original tile's edge state (before transformation)
+ * @param edgeStates Array of edge states (one per tile type), indexed by tileTypeIndex
  * @returns Array of violations (empty if all edges agree)
  */
 export function checkEdgeAdjacencyConsistency(
   grid: GridDefinition,
   placements: UnifiedPlacement[],
-  edgeState: EdgeState
+  edgeStates: EdgeState[]
 ): EdgeAdjacencyViolation[] {
   const violations: EdgeAdjacencyViolation[] = [];
-  
+
   // Build map from cell coordinates to placement and transformed edge values
   type CellEdgeInfo = {
     placementIdx: number;
     edges: boolean[]; // Transformed edge values for this cell
   };
   const cellEdges = new Map<string, CellEdgeInfo>();
-  
+
   for (let pIdx = 0; pIdx < placements.length; pIdx++) {
     const p = placements[pIdx];
     if (!p.originalCells) continue;
-    
+
+    // Get the correct edge state for this tile type
+    const tileTypeIdx = p.tileTypeIndex ?? 0;
+    const edgeState = edgeStates[tileTypeIdx];
+    if (!edgeState) continue;
+
     // Get the forward permutation for this transform
     const forwardPerm = getForwardEdgePermutation(grid, p.transformIndex);
-    
+
     for (let cellIdx = 0; cellIdx < p.cells.length; cellIdx++) {
       const placedCell = p.cells[cellIdx];
       const originalCell = p.originalCells[cellIdx];
-      
+
       // Get original edge values
       const originalEdges = edgeState[originalCell.r]?.[originalCell.q];
       if (!originalEdges) continue;
@@ -451,40 +460,45 @@ export function checkEdgeAdjacencyConsistency(
 
 /**
  * Get all edges (shared boundaries) in a tiling solution.
- * 
+ *
  * This returns ALL edges, not just violations, so you can inspect any edge
  * in the solution to see its filledness from both sides.
- * 
+ *
  * @param grid Grid definition
  * @param placements The placements in the solution
- * @param edgeState The original tile's edge state (before transformation)
+ * @param edgeStates Array of edge states (one per tile type), indexed by tileTypeIndex
  * @returns Array of all shared edges
  */
 export function getAllEdges(
   grid: GridDefinition,
   placements: UnifiedPlacement[],
-  edgeState: EdgeState
+  edgeStates: EdgeState[]
 ): EdgeInfo[] {
   const edges: EdgeInfo[] = [];
-  
+
   // Build map from cell coordinates to placement and transformed edge values
   type CellEdgeInfo = {
     placementIdx: number;
     edges: boolean[]; // Transformed edge values for this cell
   };
   const cellEdges = new Map<string, CellEdgeInfo>();
-  
+
   for (let pIdx = 0; pIdx < placements.length; pIdx++) {
     const p = placements[pIdx];
     if (!p.originalCells) continue;
-    
+
+    // Get the correct edge state for this tile type
+    const tileTypeIdx = p.tileTypeIndex ?? 0;
+    const edgeState = edgeStates[tileTypeIdx];
+    if (!edgeState) continue;
+
     // Get the forward permutation for this transform
     const forwardPerm = getForwardEdgePermutation(grid, p.transformIndex);
-    
+
     for (let cellIdx = 0; cellIdx < p.cells.length; cellIdx++) {
       const placedCell = p.cells[cellIdx];
       const originalCell = p.originalCells[cellIdx];
-      
+
       // Get original edge values
       const originalEdges = edgeState[originalCell.r]?.[originalCell.q];
       if (!originalEdges) continue;

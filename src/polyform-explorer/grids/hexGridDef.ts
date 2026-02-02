@@ -38,15 +38,26 @@ const hexNeighbors: NeighborInfo[] = [
   { dq: 0, dr: -1 },   // NW (index 5)
 ];
 
-// Vertices for pointy-top hex (unit size), starting from top and going clockwise
+// Vertices for pointy-top hex (unit size), starting from TOP and going clockwise
+// This ordering ensures edge i faces neighbor i:
+// - Edge 0 (v0→v1): NE edge (top to upper-right), faces neighbor 0 (NE)
+// - Edge 1 (v1→v2): E edge (upper-right to lower-right), faces neighbor 1 (E)
+// - Edge 2 (v2→v3): SE edge (lower-right to bottom), faces neighbor 2 (SE)
+// - Edge 3 (v3→v4): SW edge (bottom to lower-left), faces neighbor 3 (SW)
+// - Edge 4 (v4→v5): W edge (lower-left to upper-left), faces neighbor 4 (W)
+// - Edge 5 (v5→v0): NW edge (upper-left to top), faces neighbor 5 (NW)
+//
+// In screen coordinates (Y down), angles go clockwise visually.
+// Starting at 90° (top vertex) and going in -60° increments clockwise.
 const hexVerticesUnit: Vertex[] = (() => {
   const vertices: Vertex[] = [];
   for (let i = 0; i < 6; i++) {
-    // Pointy-top: first vertex at top (90° from positive x)
-    const angle = (Math.PI / 3) * i + Math.PI / 2;
+    // Start at 90° (top) and go clockwise (decreasing angle in math coords = CW in screen)
+    // In screen coords with Y-down, we negate Y, so sin becomes -sin for screen Y
+    const angle = Math.PI / 2 - (Math.PI / 3) * i;
     vertices.push({
       x: Math.cos(angle),
-      y: Math.sin(angle),
+      y: -Math.sin(angle),  // Negate for screen coordinates (Y increases downward)
     });
   }
   return vertices;

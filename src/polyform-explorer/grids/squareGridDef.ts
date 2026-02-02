@@ -31,13 +31,19 @@ const squareVertices: Vertex[] = [
 /**
  * Rotate 90° clockwise: (q, r) -> (r, -q)
  * Then normalize so the result can be used relative to origin.
- * 
- * Neighbor permutation for 90° CW rotation:
- * - What was up (0) becomes right (1)
- * - What was right (1) becomes down (2)
- * - What was down (2) becomes left (3)
- * - What was left (3) becomes up (0)
- * So neighborPerm[i] = (i + 1) % 4
+ *
+ * The coordinate transform rotates the grid. To keep edges aligned with
+ * their cells, we need to track how edge directions transform.
+ *
+ * Direction transform for (q, r) -> (r, -q):
+ * - Direction (dq, dr) -> (dr, -dq)
+ * - "up" (0, -1) -> (-1, 0) = "left"
+ * - "right" (1, 0) -> (0, -1) = "up"
+ * - "down" (0, 1) -> (1, 0) = "right"
+ * - "left" (-1, 0) -> (0, 1) = "down"
+ *
+ * So edge indices transform: 0->3, 1->0, 2->1, 3->2
+ * neighborPerm[i] is where old edge i ends up
  */
 function rotateSquare(coord: Coord): TransformResult {
   return {
@@ -45,7 +51,7 @@ function rotateSquare(coord: Coord): TransformResult {
       q: coord.r,
       r: -coord.q,
     },
-    neighborPerm: [1, 2, 3, 0],
+    neighborPerm: [3, 0, 1, 2],
   };
 }
 

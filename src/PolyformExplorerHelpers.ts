@@ -36,6 +36,7 @@ export function toSquarePlacements(placements: UnifiedPlacement[]) {
     transformIndex: p.transformIndex,
     offset: { row: 0, col: 0 }, // Not used by viewers but required by type
     cells: p.cells.map(c => ({ row: c.r, col: c.q })),
+    tileTypeIndex: p.tileTypeIndex ?? 0,
   }));
 }
 

@@ -112,11 +112,13 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   }, [axialBounds, axialToPixel, hexSize]);
   
   // Create hexagon path for pointy-top orientation
+  // Vertices must match hexGridDef.ts: start at TOP and go CLOCKWISE
+  // v0=top, v1=upper-right, v2=lower-right, v3=bottom, v4=lower-left, v5=upper-left
   const createHexPath = useCallback((cx: number, cy: number): string => {
     const points: string[] = [];
     for (let i = 0; i < 6; i++) {
-      // Pointy-top: first vertex at top (90°)
-      const angle = (Math.PI / 3) * i + Math.PI / 2;
+      // Start at -90° (top) and go clockwise in 60° increments
+      const angle = -Math.PI / 2 + (Math.PI / 3) * i;
       const x = cx + hexSize * Math.cos(angle);
       const y = cy + hexSize * Math.sin(angle);
       points.push(`${x},${y}`);
@@ -134,10 +136,12 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   }, [axialToPixel, svgOffset]);
   
   // Get hex vertices for border drawing
+  // Must match createHexPath: start at top, go clockwise
   const getHexVertices = useCallback((cx: number, cy: number): Array<{ x: number; y: number }> => {
     const vertices: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i + Math.PI / 2;
+      // Start at -90° (top) and go clockwise in 60° increments
+      const angle = -Math.PI / 2 + (Math.PI / 3) * i;
       vertices.push({
         x: cx + hexSize * Math.cos(angle),
         y: cy + hexSize * Math.sin(angle),
@@ -147,20 +151,19 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   }, [hexSize]);
   
   // Get 6 axial neighbors with edge indices for border drawing
-  // In SVG coordinates (Y increases downward), with angle starting at 90°:
-  //   v0: 90° → BOTTOM (sin(90°)=1 means +Y), v1: 150° → lower-left, v2: 210° → upper-left
-  //   v3: 270° → TOP (sin(270°)=-1 means -Y), v4: 330° → upper-right, v5: 30° → lower-right
+  // Vertices now start at TOP and go CLOCKWISE (matching hexGridDef.ts):
+  //   v0=top, v1=upper-right, v2=lower-right, v3=bottom, v4=lower-left, v5=upper-left
   // Edge i connects vertex i to vertex (i+1)%6:
-  //   edge 0: v0→v1 (faces SW), edge 1: v1→v2 (faces W), edge 2: v2→v3 (faces NW)
-  //   edge 3: v3→v4 (faces NE), edge 4: v4→v5 (faces E), edge 5: v5→v0 (faces SE)
+  //   edge 0: v0→v1 (faces NE), edge 1: v1→v2 (faces E), edge 2: v2→v3 (faces SE)
+  //   edge 3: v3→v4 (faces SW), edge 4: v4→v5 (faces W), edge 5: v5→v0 (faces NW)
   const getAxialNeighbors = useCallback((q: number, r: number): Array<{ q: number; r: number; edgeIndex: number }> => {
     return [
-      { q: q + 1, r: r - 1, edgeIndex: 3 }, // Upper-right (NE) → edge 3 (v3→v4)
-      { q: q + 1, r: r, edgeIndex: 4 },     // Right (E) → edge 4 (v4→v5)
-      { q: q, r: r + 1, edgeIndex: 5 },     // Lower-right (SE) → edge 5 (v5→v0)
-      { q: q - 1, r: r + 1, edgeIndex: 0 }, // Lower-left (SW) → edge 0 (v0→v1)
-      { q: q - 1, r: r, edgeIndex: 1 },     // Left (W) → edge 1 (v1→v2)
-      { q: q, r: r - 1, edgeIndex: 2 },     // Upper-left (NW) → edge 2 (v2→v3)
+      { q: q + 1, r: r - 1, edgeIndex: 0 }, // NE → edge 0
+      { q: q + 1, r: r, edgeIndex: 1 },     // E → edge 1
+      { q: q, r: r + 1, edgeIndex: 2 },     // SE → edge 2
+      { q: q - 1, r: r + 1, edgeIndex: 3 }, // SW → edge 3
+      { q: q - 1, r: r, edgeIndex: 4 },     // W → edge 4
+      { q: q, r: r - 1, edgeIndex: 5 },     // NW → edge 5
     ];
   }, []);
   
@@ -221,13 +224,14 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     if (cellIndex >= numCells) return null;
     
     const cell = placement.cells[cellIndex];
+    // Neighbors match hexGridDef.ts and the new vertex ordering
     const neighbors = [
-      { q: cell.q + 1, r: cell.r - 1, edgeIndex: 3, direction: 'NE' },
-      { q: cell.q + 1, r: cell.r, edgeIndex: 4, direction: 'E' },
-      { q: cell.q, r: cell.r + 1, edgeIndex: 5, direction: 'SE' },
-      { q: cell.q - 1, r: cell.r + 1, edgeIndex: 0, direction: 'SW' },
-      { q: cell.q - 1, r: cell.r, edgeIndex: 1, direction: 'W' },
-      { q: cell.q, r: cell.r - 1, edgeIndex: 2, direction: 'NW' },
+      { q: cell.q + 1, r: cell.r - 1, edgeIndex: 0, direction: 'NE' },
+      { q: cell.q + 1, r: cell.r, edgeIndex: 1, direction: 'E' },
+      { q: cell.q, r: cell.r + 1, edgeIndex: 2, direction: 'SE' },
+      { q: cell.q - 1, r: cell.r + 1, edgeIndex: 3, direction: 'SW' },
+      { q: cell.q - 1, r: cell.r, edgeIndex: 4, direction: 'W' },
+      { q: cell.q, r: cell.r - 1, edgeIndex: 5, direction: 'NW' },
     ];
     
     // Find which neighbor corresponds to this edge
@@ -239,8 +243,8 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
     const neighborPlacement = cellToPlacement.get(neighborKey);
     const isInternal = neighborPlacement === highlightedPlacement;
     
-    // Direction names for each edge
-    const edgeDirections = ['SW', 'W', 'NW', 'NE', 'E', 'SE'];
+    // Direction names for each edge (matching new vertex ordering)
+    const edgeDirections = ['NE', 'E', 'SE', 'SW', 'W', 'NW'];
     
     return {
       cellIndex,
