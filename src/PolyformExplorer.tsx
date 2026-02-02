@@ -405,17 +405,24 @@ export function PolyformExplorer() {
     // Convert placements to unified format (row,col -> q,r)
     // The legacy workers use {row, col} but unified system uses {q, r}
     // For square grids, q=col and r=row
-    const unifiedPlacements = tilingResult.placements.map(p => ({
-      ...p,
-      cells: p.cells.map((c: { row: number; col: number } | { q: number; r: number }) => {
-        // Handle both formats - if already has q/r use it, otherwise convert
-        if ('q' in c && 'r' in c) {
-          return c;
-        }
-        const legacy = c as { row: number; col: number };
-        return { q: legacy.col, r: legacy.row };
-      }),
-    }));
+    // Preserve originalCells if present (from unified solver)
+    const unifiedPlacements = tilingResult.placements.map(p => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const placement = p as any;
+      return {
+        ...p,
+        cells: placement.cells.map((c: { row: number; col: number } | { q: number; r: number }) => {
+          // Handle both formats - if already has q/r use it, otherwise convert
+          if ('q' in c && 'r' in c) {
+            return c;
+          }
+          const legacy = c as { row: number; col: number };
+          return { q: legacy.col, r: legacy.row };
+        }),
+        // Preserve originalCells if present (from unified solver with edge constraints)
+        originalCells: placement.originalCells,
+      };
+    });
     
     // Use the first tile's edge state for now (TODO: support multi-tile edges)
     const violations = checkEdgeAdjacencyConsistency(
@@ -470,16 +477,20 @@ export function PolyformExplorer() {
   
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
-    // Gather all tiles with at least one filled cell
-    const allTileCells = tiles.map(tile => tile.cells);
-    const tilesWithContent = allTileCells.filter(cells => 
-      cells.some(row => row.some(c => c))
-    );
+    // Find indices of tiles that have at least one filled cell
+    const tileIndicesWithContent = tiles
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => tile.cells.some(row => row.some(c => c)))
+      .map(({ index }) => index);
     
-    if (tilesWithContent.length === 0) {
+    if (tileIndicesWithContent.length === 0) {
       setTilingError("Please draw at least one tile first by clicking cells above.");
       return;
     }
+    
+    // Extract cells and edge states for tiles with content
+    const tilesWithContent = tileIndicesWithContent.map(i => tiles[i].cells);
+    const edgeStatesForTiles = tileIndicesWithContent.map(i => tiles[i].edgeState);
     
     // Clear previous results
     setTilingResult(null);
@@ -523,12 +534,13 @@ export function PolyformExplorer() {
       workerRef.current = null;
     };
     
-    // Send request with all tiles that have content
+    // Send request with all tiles that have content, including edge states
     worker.postMessage({
       tiles: tilesWithContent,
       tilingWidth,
       tilingHeight,
       polyformType,
+      edgeStates: edgeStatesForTiles,
     });
   }, [tiles, tilingWidth, tilingHeight, polyformType]);
   
