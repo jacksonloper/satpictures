@@ -33,6 +33,7 @@ import {
   TriMazeViewer,
   type TriMazeResult,
   type EdgeState,
+  type EdgeAdjacencyViolation,
   createEmptyEdgeState,
   rotateEdgeState,
   flipEdgeState,
@@ -40,6 +41,7 @@ import {
   hexGridDefinition,
   triGridDefinition,
   UnifiedGridEditor,
+  checkEdgeAdjacencyConsistency,
 } from "./polyform-explorer";
 
 /** Editor mode for the grid */
@@ -197,6 +199,11 @@ export function PolyformExplorer() {
   } | null>(null);
   const [coordsJsonInput, setCoordsJsonInput] = useState("");
   const [hideFills, setHideFills] = useState(false);
+  
+  // Edge adjacency violation state for debugging
+  const [edgeViolations, setEdgeViolations] = useState<EdgeAdjacencyViolation[]>([]);
+  const [selectedViolationIndex, setSelectedViolationIndex] = useState<number | null>(null);
+  const [showDebugSide, setShowDebugSide] = useState<'A' | 'B'>('A');
   
   // Maze generation state
   const [mazeResult, setMazeResult] = useState<MazeResult | null>(null);
@@ -366,6 +373,54 @@ export function PolyformExplorer() {
       }
     };
   }, []);
+  
+  // Check edge adjacency consistency when tiling result changes
+  useEffect(() => {
+    if (!tilingResult || !tilingResult.placements || !solvedPolyformType) {
+      setEdgeViolations([]);
+      setSelectedViolationIndex(null);
+      return;
+    }
+    
+    const gridDef = getGridDef(solvedPolyformType);
+    const hasAnyEdges = tiles.some(tile => 
+      Object.values(tile.edgeState).some(cellEdges => 
+        cellEdges.some(filled => filled)
+      )
+    );
+    
+    // Only check if there are any edges marked
+    if (!hasAnyEdges) {
+      setEdgeViolations([]);
+      setSelectedViolationIndex(null);
+      return;
+    }
+    
+    // Convert placements to unified format (row,col -> q,r)
+    // The legacy workers use {row, col} but unified system uses {q, r}
+    // For square grids, q=col and r=row
+    const unifiedPlacements = tilingResult.placements.map(p => ({
+      ...p,
+      cells: p.cells.map((c: { row: number; col: number } | { q: number; r: number }) => {
+        // Handle both formats - if already has q/r use it, otherwise convert
+        if ('q' in c && 'r' in c) {
+          return c;
+        }
+        const legacy = c as { row: number; col: number };
+        return { q: legacy.col, r: legacy.row };
+      }),
+    }));
+    
+    // Use the first tile's edge state for now (TODO: support multi-tile edges)
+    const violations = checkEdgeAdjacencyConsistency(
+      gridDef,
+      unifiedPlacements,
+      tiles[0].edgeState
+    );
+    
+    setEdgeViolations(violations);
+    setSelectedViolationIndex(null);
+  }, [tilingResult, solvedPolyformType, tiles]);
   
   // Validate and apply tiling width on blur
   const handleTilingWidthBlur = useCallback(() => {
@@ -1028,6 +1083,107 @@ export function PolyformExplorer() {
                     ({tilingResult.stats.numPlacements.toLocaleString()} total possible placements, {tilingResult.stats.numVariables.toLocaleString()} vars, {tilingResult.stats.numClauses.toLocaleString()} clauses)
                   </span>
                 </div>
+                
+                {/* Red warning for edge adjacency violations */}
+                {edgeViolations.length > 0 && (
+                  <div style={{
+                    padding: "12px",
+                    backgroundColor: "#f8d7da",
+                    border: "1px solid #f5c6cb",
+                    borderRadius: "4px",
+                    marginBottom: "12px",
+                    color: "#721c24",
+                    fontSize: "14px",
+                  }}>
+                    ⚠️ <strong>Edge Adjacency Violations Detected!</strong>
+                    <br/>
+                    <span style={{ fontSize: "12px" }}>
+                      {edgeViolations.length} edge{edgeViolations.length === 1 ? '' : 's'} have inconsistent filledness values between adjacent tiles.
+                    </span>
+                  </div>
+                )}
+                
+                {/* Edge Debugger */}
+                {edgeViolations.length > 0 && (
+                  <div style={{
+                    padding: "12px",
+                    backgroundColor: "#fff3cd",
+                    border: "1px solid #ffc107",
+                    borderRadius: "4px",
+                    marginBottom: "12px",
+                    fontSize: "12px",
+                  }}>
+                    <strong>🔍 Edge Debugger</strong>
+                    <div style={{ marginTop: "8px" }}>
+                      <label style={{ marginRight: "8px" }}>Select violation:</label>
+                      <select 
+                        value={selectedViolationIndex ?? ''} 
+                        onChange={(e) => setSelectedViolationIndex(e.target.value === '' ? null : Number(e.target.value))}
+                        style={{ marginRight: "8px" }}
+                      >
+                        <option value="">-- Choose --</option>
+                        {edgeViolations.map((v, i) => (
+                          <option key={i} value={i}>
+                            #{i + 1}: ({v.cell1.q},{v.cell1.r}) edge {v.edgeIdx1} vs ({v.cell2.q},{v.cell2.r}) edge {v.edgeIdx2}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {selectedViolationIndex !== null && edgeViolations[selectedViolationIndex] && (
+                      <div style={{ marginTop: "8px", padding: "8px", backgroundColor: "#fff", borderRadius: "4px" }}>
+                        <div style={{ marginBottom: "4px" }}>
+                          <strong>Toggle side:</strong>{' '}
+                          <button 
+                            onClick={() => setShowDebugSide('A')} 
+                            style={{ 
+                              marginRight: "4px", 
+                              fontWeight: showDebugSide === 'A' ? 'bold' : 'normal',
+                              backgroundColor: showDebugSide === 'A' ? '#007bff' : '#e9ecef',
+                              color: showDebugSide === 'A' ? '#fff' : '#212529',
+                              border: 'none',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Side A
+                          </button>
+                          <button 
+                            onClick={() => setShowDebugSide('B')} 
+                            style={{ 
+                              fontWeight: showDebugSide === 'B' ? 'bold' : 'normal',
+                              backgroundColor: showDebugSide === 'B' ? '#007bff' : '#e9ecef',
+                              color: showDebugSide === 'B' ? '#fff' : '#212529',
+                              border: 'none',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Side B
+                          </button>
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: '11px' }}>
+                          {showDebugSide === 'A' ? (
+                            <>
+                              <div><strong>Cell 1:</strong> ({edgeViolations[selectedViolationIndex].cell1.q}, {edgeViolations[selectedViolationIndex].cell1.r})</div>
+                              <div><strong>Edge Index:</strong> {edgeViolations[selectedViolationIndex].edgeIdx1}</div>
+                              <div><strong>Filledness:</strong> <span style={{ color: edgeViolations[selectedViolationIndex].value1 ? 'green' : 'red' }}>{edgeViolations[selectedViolationIndex].value1 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                            </>
+                          ) : (
+                            <>
+                              <div><strong>Cell 2:</strong> ({edgeViolations[selectedViolationIndex].cell2.q}, {edgeViolations[selectedViolationIndex].cell2.r})</div>
+                              <div><strong>Edge Index:</strong> {edgeViolations[selectedViolationIndex].edgeIdx2}</div>
+                              <div><strong>Filledness:</strong> <span style={{ color: edgeViolations[selectedViolationIndex].value2 ? 'green' : 'red' }}>{edgeViolations[selectedViolationIndex].value2 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 {solvedPolyformType === "polyhex" ? (
                   <HexTilingViewer
                     width={tilingWidth}
