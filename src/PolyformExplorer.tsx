@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "./App.css";
-import type { UnifiedTilingResult, UnifiedPlacement } from "./polyform-explorer/grids/unifiedTiling";
+import type { UnifiedTilingResult } from "./polyform-explorer/grids/unifiedTiling";
 import {
   type PolyformType,
   createEmptyBooleanGrid,
@@ -36,97 +36,22 @@ import {
   createEmptyEdgeState,
   rotateEdgeState,
   flipEdgeState,
-  squareGridDefinition,
-  hexGridDefinition,
-  triGridDefinition,
   UnifiedGridEditor,
   checkEdgeAdjacencyConsistency,
   getAllEdges,
   normalizeEdgeState,
 } from "./polyform-explorer";
+import {
+  getGridDef,
+  toSquarePlacements,
+  toHexPlacements,
+  toTriPlacements,
+  type TileState,
+  createEmptyTileState,
+} from "./PolyformExplorerHelpers";
 
 /** Editor mode for the grid */
 type EditorMode = 'cell' | 'edge';
-
-/** Get the grid definition for a polyform type */
-function getGridDef(type: PolyformType) {
-  switch (type) {
-    case 'polyomino': return squareGridDefinition;
-    case 'polyhex': return hexGridDefinition;
-    case 'polyiamond': return triGridDefinition;
-    default: return squareGridDefinition;
-  }
-}
-
-/**
- * Convert unified placements (q,r) to legacy square grid placements (row,col).
- * For square grids: q = col, r = row
- */
-function toSquarePlacements(placements: UnifiedPlacement[]) {
-  return placements.map(p => ({
-    id: p.id,
-    transformIndex: p.transformIndex,
-    offset: { row: 0, col: 0 }, // Not used by viewers but required by type
-    cells: p.cells.map(c => ({ row: c.r, col: c.q })),
-  }));
-}
-
-/**
- * Convert unified placements (q,r) to legacy hex placements.
- * Hex coordinates use the same q,r format.
- */
-function toHexPlacements(placements: UnifiedPlacement[]) {
-  return placements.map(p => ({
-    id: p.id,
-    transformIndex: p.transformIndex,
-    offset: { q: 0, r: 0 }, // Not used by viewers but required by type
-    cells: p.cells.map(c => ({ q: c.q, r: c.r })),
-  }));
-}
-
-/**
- * Convert unified placements to legacy triangle placements.
- * Triangle coordinates use (row, col) where row=r, col=q.
- */
-function toTriPlacements(placements: UnifiedPlacement[]) {
-  return placements.map(p => ({
-    id: p.id,
-    transformIndex: p.transformIndex,
-    cells: p.cells.map(c => ({ row: c.r, col: c.q })),
-  }));
-}
-
-/**
- * Polyform Explorer Component
- * Allows users to build polyomino, polyhex, or polyiamond shapes
- * with rotation and flip controls.
- */
-/** Represents a single tile with its grid and dimensions */
-interface TileState {
-  cells: boolean[][];
-  edgeState: EdgeState;
-  gridWidth: number;
-  gridHeight: number;
-  widthInput: string;
-  heightInput: string;
-  widthError: boolean;
-  heightError: boolean;
-}
-
-/** Create a new empty tile state */
-function createEmptyTileState(width: number = 8, height: number = 8, type: PolyformType = 'polyomino'): TileState {
-  const grid = getGridDef(type);
-  return {
-    cells: createEmptyBooleanGrid(width, height),
-    edgeState: createEmptyEdgeState(grid, width, height),
-    gridWidth: width,
-    gridHeight: height,
-    widthInput: String(width),
-    heightInput: String(height),
-    widthError: false,
-    heightError: false,
-  };
-}
 
 export function PolyformExplorer() {
   const [polyformType, setPolyformType] = useState<PolyformType>("polyomino");
