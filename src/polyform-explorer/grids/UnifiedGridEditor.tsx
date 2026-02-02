@@ -179,16 +179,20 @@ export const UnifiedGridEditor: React.FC<UnifiedGridEditorProps> = ({
         ))
       )}
       
-      {/* Layer 2: Edge half-circles - ALWAYS visible
+      {/* Layer 2: Edge half-circles
        * 
        * With vertices listed clockwise, the cell interior is to the RIGHT
        * of each edge. We render half-circles facing into the cell.
        * 
-       * In edge mode, all half-circles are shown (hollow or filled).
-       * In cell mode, only marked half-circles are shown.
+       * IMPORTANT: Edge half-circles are only shown/editable on filled cells.
+       * In edge mode, all half-circles on filled cells are shown (hollow or filled).
+       * In cell mode, only marked half-circles on filled cells are shown.
        */}
       {edgeState && cells.flatMap((row, rowIdx) =>
-        row.flatMap((_, colIdx) => {
+        row.flatMap((filled, colIdx) => {
+          // Only show edge half-circles on filled cells
+          if (!filled) return [];
+          
           const cellEdges = edgeState[rowIdx]?.[colIdx];
           if (!cellEdges) return [];
           

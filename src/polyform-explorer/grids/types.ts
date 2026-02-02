@@ -183,15 +183,16 @@ export function normalizeCoords(grid: GridDefinition, coords: Coord[]): Coord[] 
 
 /**
  * Generate all unique transforms of a set of coordinates.
- * Returns array of { coords, transformIndex } where transformIndex
- * corresponds to: 0..numRotations-1 for rotations, 
- * numRotations..(2*numRotations-1) for flip+rotations.
+ * Returns array of { coords, transformIndex, originalIndices } where:
+ * - transformIndex corresponds to: 0..numRotations-1 for rotations, 
+ *   numRotations..(2*numRotations-1) for flip+rotations.
+ * - originalIndices[i] gives the index in baseCoords that maps to coords[i]
  */
 export function generateAllTransforms(
   grid: GridDefinition,
   baseCoords: Coord[]
-): Array<{ coords: Coord[]; transformIndex: number }> {
-  const transforms: Array<{ coords: Coord[]; transformIndex: number }> = [];
+): Array<{ coords: Coord[]; transformIndex: number; originalIndices: number[] }> {
+  const transforms: Array<{ coords: Coord[]; transformIndex: number; originalIndices: number[] }> = [];
   const seen = new Set<string>();
   
   const coordsToKey = (cs: Coord[]): string => {
@@ -201,14 +202,45 @@ export function generateAllTransforms(
     return sorted.join(';');
   };
   
+  // Helper to normalize coords and track how indices map
+  const normalizeWithIndices = (coords: Coord[], indices: number[]): {
+    normalized: Coord[];
+    normalizedIndices: number[];
+  } => {
+    if (coords.length === 0) return { normalized: [], normalizedIndices: [] };
+    
+    // Find minimum values
+    let minQ = Infinity, minR = Infinity;
+    for (const c of coords) {
+      minQ = Math.min(minQ, c.q);
+      minR = Math.min(minR, c.r);
+    }
+    
+    let offQ = -minQ;
+    let offR = -minR;
+    
+    // For triangle grids, preserve (q+r) % 2 parity
+    if (grid.numCellTypes === 2) {
+      if ((offQ + offR) % 2 !== 0) {
+        offR += 1;
+      }
+    }
+    
+    return {
+      normalized: coords.map(c => ({ q: c.q + offQ, r: c.r + offR })),
+      normalizedIndices: indices,
+    };
+  };
+  
   // Generate all rotations
   let current = baseCoords;
+  let currentIndices = baseCoords.map((_, i) => i);
   for (let rot = 0; rot < grid.numRotations; rot++) {
-    const normalized = normalizeCoords(grid, current);
+    const { normalized, normalizedIndices } = normalizeWithIndices(current, currentIndices);
     const key = coordsToKey(normalized);
     if (!seen.has(key)) {
       seen.add(key);
-      transforms.push({ coords: normalized, transformIndex: rot });
+      transforms.push({ coords: normalized, transformIndex: rot, originalIndices: normalizedIndices });
     }
     // Rotate for next iteration
     current = current.map(c => grid.rotate(c).coord);
@@ -216,12 +248,13 @@ export function generateAllTransforms(
   
   // Flip and generate all rotations
   current = baseCoords.map(c => grid.flip(c).coord);
+  currentIndices = baseCoords.map((_, i) => i);
   for (let rot = 0; rot < grid.numRotations; rot++) {
-    const normalized = normalizeCoords(grid, current);
+    const { normalized, normalizedIndices } = normalizeWithIndices(current, currentIndices);
     const key = coordsToKey(normalized);
     if (!seen.has(key)) {
       seen.add(key);
-      transforms.push({ coords: normalized, transformIndex: grid.numRotations + rot });
+      transforms.push({ coords: normalized, transformIndex: grid.numRotations + rot, originalIndices: normalizedIndices });
     }
     // Rotate for next iteration
     current = current.map(c => grid.rotate(c).coord);
