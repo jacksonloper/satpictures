@@ -383,7 +383,8 @@ export function transformEdgeState(
   const height = edgeState.length;
   const width = edgeState[0].length;
   
-  // Transform all cells and collect their new positions + transformed edges
+  // Transform only cells that have at least one edge marked
+  // (this avoids grid expansion from empty positions)
   const transformedCells: Array<{
     newCoord: Coord;
     newEdges: boolean[];
@@ -392,8 +393,12 @@ export function transformEdgeState(
   for (let r = 0; r < height; r++) {
     for (let q = 0; q < width; q++) {
       const coord = { q, r };
-      const result = transform(coord);
       const oldEdges = edgeState[r][q];
+      
+      // Skip cells with no edges marked
+      if (!oldEdges.some(e => e)) continue;
+      
+      const result = transform(coord);
       
       // Apply the neighbor permutation to edges
       // neighborPerm[i] tells us where old edge i goes in the new orientation
@@ -410,7 +415,12 @@ export function transformEdgeState(
     }
   }
   
-  // Find bounds of transformed coordinates
+  // If no cells have edges, return empty edge state of same dimensions
+  if (transformedCells.length === 0) {
+    return createEmptyEdgeState(grid, width, height);
+  }
+  
+  // Find bounds of transformed coordinates (only cells with edges)
   let minQ = Infinity, minR = Infinity;
   let maxQ = -Infinity, maxR = -Infinity;
   for (const { newCoord } of transformedCells) {
@@ -421,19 +431,15 @@ export function transformEdgeState(
   }
   
   // Compute offset for normalization (preserve parity for triangle grids)
-  // For triangle grids, the cell type (up vs down) is determined by (q + r) % 2.
-  // If we shift by an offset that changes this parity, up triangles would become down
-  // triangles and vice versa, which would break the edge indexing. By ensuring
-  // (offQ + offR) is even, we preserve the original cell types.
   const offR = -minR;
   let offQ = -minQ;
   if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
     offQ += 1;
   }
   
-  // Create new edge state grid
+  // Create new edge state grid sized to fit cells with edges
   const newHeight = maxR - minR + 1;
-  const newWidth = maxQ + offQ + 1;
+  const newWidth = maxQ - minQ + 1 + (offQ + minQ);  // Account for parity offset
   
   const newEdgeState: EdgeState = [];
   for (let rIndex = 0; rIndex < newHeight; rIndex++) {
@@ -586,4 +592,242 @@ export function getInverseEdgePermutation(
   
   // Return the inverse of the forward permutation
   return invertPermutation(forwardPerm);
+}
+
+// ============================================================================
+// Generic Cell Grid Transformations (for boolean[][] grids)
+// ============================================================================
+
+/**
+ * Transform a boolean cell grid using a grid coordinate transform.
+ * This is the unified way to rotate/flip cells that matches edge state transformation.
+ * 
+ * IMPORTANT: The grid maintains its shape (all positions are transformed together)
+ * to ensure cells and edges stay aligned. This is different from only transforming
+ * filled cells, which would lose the rectangular grid structure.
+ * 
+ * @param grid Grid definition (provides transform and parity info)
+ * @param cells Boolean grid where cells[r][q] = true means cell is filled
+ * @param transform The transform function (grid.rotate or grid.flip)
+ * @returns Transformed and normalized boolean grid
+ */
+export function transformCells(
+  grid: GridDefinition,
+  cells: boolean[][],
+  transform: (coord: Coord) => TransformResult
+): boolean[][] {
+  const height = cells.length;
+  const width = cells[0]?.length ?? 0;
+  if (height === 0 || width === 0) return cells;
+  
+  // Collect only the FILLED cells to transform
+  // (this avoids grid expansion from empty positions)
+  const filledPositions: Array<{ q: number; r: number }> = [];
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) {
+      if (cells[r][q]) {
+        filledPositions.push({ q, r });
+      }
+    }
+  }
+  
+  // If no filled cells, return the original (empty) grid
+  if (filledPositions.length === 0) {
+    return cells;
+  }
+  
+  // Transform only the filled cells
+  const transformed: Array<{ newCoord: Coord }> = filledPositions.map(pos => ({
+    newCoord: transform(pos).coord
+  }));
+  
+  // Find bounds from filled cells only
+  let minQ = Infinity, minR = Infinity;
+  let maxQ = -Infinity, maxR = -Infinity;
+  for (const { newCoord } of transformed) {
+    minQ = Math.min(minQ, newCoord.q);
+    maxQ = Math.max(maxQ, newCoord.q);
+    minR = Math.min(minR, newCoord.r);
+    maxR = Math.max(maxR, newCoord.r);
+  }
+  
+  // Compute offset for normalization (preserve parity for triangle grids)
+  const offR = -minR;
+  let offQ = -minQ;
+  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
+    offQ += 1;
+  }
+  
+  // Create new grid sized to fit only the filled cells
+  const newHeight = maxR - minR + 1;
+  const newWidth = maxQ - minQ + 1 + (offQ + minQ);  // Account for parity offset
+  
+  const newCells: boolean[][] = Array.from({ length: newHeight }, () =>
+    Array.from({ length: newWidth }, () => false)
+  );
+  
+  // Place transformed filled cells
+  for (const { newCoord } of transformed) {
+    const r = newCoord.r + offR;
+    const q = newCoord.q + offQ;
+    if (r >= 0 && r < newHeight && q >= 0 && q < newWidth) {
+      newCells[r][q] = true;
+    }
+  }
+  
+  return newCells;
+}
+
+/**
+ * Rotate cells by one rotation step using the grid definition.
+ */
+export function rotateCells(
+  grid: GridDefinition,
+  cells: boolean[][]
+): boolean[][] {
+  return transformCells(grid, cells, grid.rotate);
+}
+
+/**
+ * Flip cells horizontally using the grid definition.
+ */
+export function flipCells(
+  grid: GridDefinition,
+  cells: boolean[][]
+): boolean[][] {
+  return transformCells(grid, cells, grid.flip);
+}
+
+/**
+ * Transform both cells and edge state together, ensuring they remain aligned.
+ * 
+ * This function computes bounds from filled cells, then transforms both the cells
+ * and the edge state using those bounds. This ensures that:
+ * 1. Cell positions and edge positions match after transformation
+ * 2. The grid doesn't grow or shrink unexpectedly
+ * 
+ * @param grid Grid definition
+ * @param cells Boolean grid where cells[r][q] = true means cell is filled
+ * @param edgeState Edge state grid with same dimensions as cells
+ * @param transform The transform function (grid.rotate or grid.flip)
+ * @returns Transformed {cells, edgeState} with matching dimensions
+ */
+export function transformCellsAndEdges(
+  grid: GridDefinition,
+  cells: boolean[][],
+  edgeState: EdgeState,
+  transform: (coord: Coord) => TransformResult
+): { cells: boolean[][]; edgeState: EdgeState } {
+  const height = cells.length;
+  const width = cells[0]?.length ?? 0;
+  if (height === 0 || width === 0) {
+    return { cells, edgeState };
+  }
+  
+  // Collect filled cell positions and their edges
+  const filledPositions: Array<{ q: number; r: number }> = [];
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) {
+      if (cells[r][q]) {
+        filledPositions.push({ q, r });
+      }
+    }
+  }
+  
+  // If no filled cells, return empty grids
+  if (filledPositions.length === 0) {
+    return { cells, edgeState };
+  }
+  
+  // Transform all filled positions
+  const transformedPositions = filledPositions.map(pos => {
+    const result = transform(pos);
+    return {
+      oldPos: pos,
+      newCoord: result.coord,
+      neighborPerm: result.neighborPerm,
+    };
+  });
+  
+  // Find bounds from transformed filled cells
+  let minQ = Infinity, minR = Infinity;
+  let maxQ = -Infinity, maxR = -Infinity;
+  for (const { newCoord } of transformedPositions) {
+    minQ = Math.min(minQ, newCoord.q);
+    maxQ = Math.max(maxQ, newCoord.q);
+    minR = Math.min(minR, newCoord.r);
+    maxR = Math.max(maxR, newCoord.r);
+  }
+  
+  // Compute offset for normalization (preserve parity for triangle grids)
+  const offR = -minR;
+  let offQ = -minQ;
+  if (grid.numCellTypes === 2 && (offQ + offR) % 2 !== 0) {
+    offQ += 1;
+  }
+  
+  // Create new grids sized to fit the transformed filled cells
+  const newHeight = maxR - minR + 1;
+  const newWidth = maxQ - minQ + 1 + (offQ + minQ);
+  
+  const newCells: boolean[][] = Array.from({ length: newHeight }, () =>
+    Array.from({ length: newWidth }, () => false)
+  );
+  
+  const newEdgeState: EdgeState = [];
+  for (let rIndex = 0; rIndex < newHeight; rIndex++) {
+    const rowEdges: CellEdges[] = [];
+    for (let qIndex = 0; qIndex < newWidth; qIndex++) {
+      const cellType = grid.getCellType({ q: qIndex, r: rIndex });
+      const numEdges = grid.neighbors[cellType].length;
+      rowEdges.push(new Array(numEdges).fill(false));
+    }
+    newEdgeState.push(rowEdges);
+  }
+  
+  // Place transformed cells and edges
+  for (const { oldPos, newCoord, neighborPerm } of transformedPositions) {
+    const newR = newCoord.r + offR;
+    const newQ = newCoord.q + offQ;
+    
+    if (newR >= 0 && newR < newHeight && newQ >= 0 && newQ < newWidth) {
+      // Place the filled cell
+      newCells[newR][newQ] = true;
+      
+      // Transform and place the edges for this cell
+      const oldEdges = edgeState[oldPos.r]?.[oldPos.q];
+      if (oldEdges) {
+        const newEdges = new Array(oldEdges.length).fill(false);
+        for (let i = 0; i < oldEdges.length; i++) {
+          const newIndex = neighborPerm[i];
+          newEdges[newIndex] = oldEdges[i];
+        }
+        newEdgeState[newR][newQ] = newEdges;
+      }
+    }
+  }
+  
+  return { cells: newCells, edgeState: newEdgeState };
+}
+
+/**
+ * Rotate both cells and edge state together.
+ */
+export function rotateCellsAndEdges(
+  grid: GridDefinition,
+  cells: boolean[][],
+  edgeState: EdgeState
+): { cells: boolean[][]; edgeState: EdgeState } {
+  return transformCellsAndEdges(grid, cells, edgeState, grid.rotate);
+}
+
+/**
+ * Flip both cells and edge state together horizontally.
+ */
+export function flipCellsAndEdges(
+  grid: GridDefinition,
+  cells: boolean[][],
+  edgeState: EdgeState
+): { cells: boolean[][]; edgeState: EdgeState } {
+  return transformCellsAndEdges(grid, cells, edgeState, grid.flip);
 }

@@ -4,13 +4,6 @@ import type { UnifiedTilingResult } from "./polyform-explorer/grids/unifiedTilin
 import {
   type PolyformType,
   createEmptyBooleanGrid,
-  rotatePolyomino,
-  rotatePolyhex,
-  rotatePolyiamond,
-  transformPolyhex,
-  transformPolyiamond,
-  flipHorizontal,
-  flipVertical,
 } from "./utils/polyformTransforms";
 import {
   TilingViewer,
@@ -34,8 +27,8 @@ import {
   type EdgeAdjacencyViolation,
   type UnifiedEdgeInfo,
   createEmptyEdgeState,
-  rotateEdgeState,
-  flipEdgeState,
+  rotateCellsAndEdges,
+  flipCellsAndEdges,
   UnifiedGridEditor,
   checkEdgeAdjacencyConsistency,
   getAllEdges,
@@ -555,122 +548,133 @@ export function PolyformExplorer() {
     });
   }, [setEdgeState]);
   
-  // Rotate the polyform
+  // Rotate the polyform (transforms cells and edges together to keep them aligned)
   const handleRotate = useCallback(() => {
-    setCells(prev => {
-      let rotated: boolean[][];
-      switch (polyformType) {
-        case "polyomino":
-          rotated = rotatePolyomino(prev);
-          break;
-        case "polyhex":
-          rotated = rotatePolyhex(prev);
-          break;
-        case "polyiamond":
-          rotated = rotatePolyiamond(prev);
-          break;
-        default:
-          rotated = prev;
-      }
-      // Update dimensions to match rotated shape (clamped to max 50)
-      const newHeight = Math.min(rotated.length, 50);
-      const newWidth = Math.min(rotated[0]?.length ?? 0, 50);
-      setGridHeight(newHeight);
-      setGridWidth(newWidth);
-      setHeightInput(String(newHeight));
-      setWidthInput(String(newWidth));
-      // Clear any error states since dimensions are now valid
-      setWidthError(false);
-      setHeightError(false);
-      return rotated;
-    });
-    
-    // Also rotate edge state - use generic grid-based transformation
     const grid = getGridDef(polyformType);
-    setEdgeState(prev => rotateEdgeState(grid, prev));
-  }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    
+    // We need the current edge state to transform together with cells
+    setTiles(prevTiles => prevTiles.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      
+      const { cells: rotatedCells, edgeState: rotatedEdges } = rotateCellsAndEdges(
+        grid, tile.cells, tile.edgeState
+      );
+      
+      const newHeight = Math.min(rotatedCells.length, 50);
+      const newWidth = Math.min(rotatedCells[0]?.length ?? 0, 50);
+      
+      return {
+        ...tile,
+        cells: rotatedCells,
+        edgeState: rotatedEdges,
+        gridWidth: newWidth,
+        gridHeight: newHeight,
+        widthInput: String(newWidth),
+        heightInput: String(newHeight),
+      };
+    }));
+    
+    // Also update the top-level grid dimensions for display
+    setTiles(prevTiles => {
+      const tile = prevTiles[activeTileIndex];
+      if (tile) {
+        setGridHeight(tile.gridHeight);
+        setGridWidth(tile.gridWidth);
+        setHeightInput(tile.heightInput);
+        setWidthInput(tile.widthInput);
+        setWidthError(false);
+        setHeightError(false);
+      }
+      return prevTiles;
+    });
+  }, [polyformType, activeTileIndex, setTiles, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
-  // Flip horizontally (geometry-correct per polyform type)
+  // Flip horizontally (transforms cells and edges together to keep them aligned)
   const handleFlipH = useCallback(() => {
-    setCells(prev => {
-      let next: boolean[][];
-      switch (polyformType) {
-        case "polyomino":
-          next = flipHorizontal(prev);
-          break;
-        case "polyhex":
-          next = transformPolyhex(prev, "flipH");
-          break;
-        case "polyiamond":
-          next = transformPolyiamond(prev, "flipH");
-          break;
-        default:
-          next = prev;
-      }
-
-      const newHeight = Math.min(next.length, 50);
-      const newWidth = Math.min(next[0]?.length ?? 0, 50);
-      setGridHeight(newHeight);
-      setGridWidth(newWidth);
-      setHeightInput(String(newHeight));
-      setWidthInput(String(newWidth));
-      setWidthError(false);
-      setHeightError(false);
-
-      return next;
-    });
-    
-    // Also flip edge state - use generic grid-based transformation
     const grid = getGridDef(polyformType);
-    setEdgeState(prev => flipEdgeState(grid, prev));
-  }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+    
+    setTiles(prevTiles => prevTiles.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      
+      const { cells: flippedCells, edgeState: flippedEdges } = flipCellsAndEdges(
+        grid, tile.cells, tile.edgeState
+      );
+      
+      const newHeight = Math.min(flippedCells.length, 50);
+      const newWidth = Math.min(flippedCells[0]?.length ?? 0, 50);
+      
+      return {
+        ...tile,
+        cells: flippedCells,
+        edgeState: flippedEdges,
+        gridWidth: newWidth,
+        gridHeight: newHeight,
+        widthInput: String(newWidth),
+        heightInput: String(newHeight),
+      };
+    }));
+    
+    setTiles(prevTiles => {
+      const tile = prevTiles[activeTileIndex];
+      if (tile) {
+        setGridHeight(tile.gridHeight);
+        setGridWidth(tile.gridWidth);
+        setHeightInput(tile.heightInput);
+        setWidthInput(tile.widthInput);
+        setWidthError(false);
+        setHeightError(false);
+      }
+      return prevTiles;
+    });
+  }, [polyformType, activeTileIndex, setTiles, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
-  // Flip vertically (geometry-correct per polyform type)
-  // The grid definition only provides a horizontal flip function. Vertical flip
-  // is geometrically equivalent to: horizontal flip followed by 180° rotation.
-  // For grids with numRotations divisible by 2, this gives the correct result.
+  // Flip vertically (transforms cells and edges together)
+  // Vertical flip = horizontal flip followed by 180° rotation.
   const handleFlipV = useCallback(() => {
     const grid = getGridDef(polyformType);
     
-    setCells(prev => {
-      let next: boolean[][];
-      switch (polyformType) {
-        case "polyomino":
-          next = flipVertical(prev);
-          break;
-        case "polyhex":
-          next = transformPolyhex(prev, "flipV");
-          break;
-        case "polyiamond":
-          next = transformPolyiamond(prev, "flipV");
-          break;
-        default:
-          next = prev;
-      }
-
-      const newHeight = Math.min(next.length, 50);
-      const newWidth = Math.min(next[0]?.length ?? 0, 50);
-      setGridHeight(newHeight);
-      setGridWidth(newWidth);
-      setHeightInput(String(newHeight));
-      setWidthInput(String(newWidth));
-      setWidthError(false);
-      setHeightError(false);
-
-      return next;
-    });
-    
-    // Vertical flip edge state = horizontal flip + 180° rotation.
-    // 180° rotation = numRotations / 2 single-step rotations.
-    setEdgeState(prev => {
-      let state = flipEdgeState(grid, prev);
+    setTiles(prevTiles => prevTiles.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      
+      // First flip horizontally
+      let { cells: currentCells, edgeState: currentEdges } = flipCellsAndEdges(
+        grid, tile.cells, tile.edgeState
+      );
+      // Then rotate 180° (half of total rotations)
       const halfRotations = Math.floor(grid.numRotations / 2);
-      for (let i = 0; i < halfRotations; i++) {
-        state = rotateEdgeState(grid, state);
+      for (let j = 0; j < halfRotations; j++) {
+        const result = rotateCellsAndEdges(grid, currentCells, currentEdges);
+        currentCells = result.cells;
+        currentEdges = result.edgeState;
       }
-      return state;
+      
+      const newHeight = Math.min(currentCells.length, 50);
+      const newWidth = Math.min(currentCells[0]?.length ?? 0, 50);
+      
+      return {
+        ...tile,
+        cells: currentCells,
+        edgeState: currentEdges,
+        gridWidth: newWidth,
+        gridHeight: newHeight,
+        widthInput: String(newWidth),
+        heightInput: String(newHeight),
+      };
+    }));
+    
+    setTiles(prevTiles => {
+      const tile = prevTiles[activeTileIndex];
+      if (tile) {
+        setGridHeight(tile.gridHeight);
+        setGridWidth(tile.gridWidth);
+        setHeightInput(tile.heightInput);
+        setWidthInput(tile.widthInput);
+        setWidthError(false);
+        setHeightError(false);
+      }
+      return prevTiles;
     });
-  }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+  }, [polyformType, activeTileIndex, setTiles, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Clear the grid
   const handleClear = useCallback(() => {

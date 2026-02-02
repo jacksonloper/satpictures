@@ -27,6 +27,12 @@ export {
   transformEdgeState,
   rotateEdgeState,
   flipEdgeState,
+  transformCells,
+  rotateCells,
+  flipCells,
+  transformCellsAndEdges,
+  rotateCellsAndEdges,
+  flipCellsAndEdges,
 } from './types';
 
 // Grid definitions
