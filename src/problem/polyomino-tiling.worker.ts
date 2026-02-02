@@ -1,20 +1,25 @@
 /**
  * Web Worker for running the Polyomino/Polyhex/Polyiamond Tiling SAT solver in a background thread
  * 
- * This worker loads the CaDiCaL WASM module and uses it for SAT solving
+ * This worker loads the CaDiCaL WASM module and uses the unified solver for SAT solving
  * of polyomino, polyhex, and polyiamond tiling problems.
+ * 
+ * The unified solver enforces edge constraints via SAT. Each edge has exactly one 
+ * SAT variable, and placements imply the edge values they specify. Every edge of 
+ * every cell in each tile has a filledness value that must be consistent.
  */
 
 /// <reference lib="webworker" />
 
-import { solvePolyominoTiling } from "./polyomino-tiling";
-import type { TilingResult, Placement } from "./polyomino-tiling";
-import { solvePolyhexTiling } from "./polyhex-tiling";
-import type { HexTilingResult, HexPlacement } from "./polyhex-tiling";
-import { solvePolyiamondTiling } from "./polyiamond-tiling";
-import type { TriTilingResult, TriPlacement } from "./polyiamond-tiling";
 import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
+// Import directly from specific files to avoid browser-only dependencies from React components
+import { solveUnifiedTiling } from "../polyform-explorer/grids/unifiedTiling";
+import type { UnifiedTilingResult, UnifiedPlacement } from "../polyform-explorer/grids/unifiedTiling";
+import { squareGridDefinition } from "../polyform-explorer/grids/squareGridDef";
+import { hexGridDefinition } from "../polyform-explorer/grids/hexGridDef";
+import { triGridDefinition } from "../polyform-explorer/grids/triGridDef";
+import type { EdgeState } from "../polyform-explorer/grids/types";
 
 /** Polyform type for the solver */
 export type PolyformType = "polyomino" | "polyhex" | "polyiamond";
@@ -30,11 +35,13 @@ export interface PolyominoTilingSolverRequest {
   tilingHeight: number;
   /** Polyform type (default: "polyomino" for backward compatibility) */
   polyformType?: PolyformType;
+  /** Edge states for each tile. Every edge of every cell has a filledness value enforced via SAT. */
+  edgeStates?: EdgeState[];
 }
 
 export interface PolyominoTilingSolverResponse {
   success: boolean;
-  result: TilingResult | HexTilingResult | TriTilingResult | null;
+  result: UnifiedTilingResult | null;
   error?: string;
   /** Type of message: 'progress' for stats before solving, 'result' for final result */
   messageType?: "progress" | "result";
@@ -45,7 +52,7 @@ export interface PolyominoTilingSolverResponse {
 }
 
 // Re-export types for consumers
-export type { TilingResult, Placement, HexTilingResult, HexPlacement, TriTilingResult, TriPlacement };
+export type { UnifiedTilingResult, UnifiedPlacement, EdgeState };
 
 // Type definitions for the Emscripten module
 interface CadicalModule {
@@ -263,7 +270,7 @@ function getModule(): Promise<CadicalModule> {
 }
 
 self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
-  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino" } = event.data;
+  const { cells, tiles, tilingWidth, tilingHeight, polyformType = "polyomino", edgeStates } = event.data;
   
   // Use tiles array if provided, otherwise fall back to single cells for backward compatibility
   const tilesToUse: boolean[][][] = tiles ?? (cells ? [cells] : []);
@@ -290,16 +297,23 @@ self.onmessage = async (event: MessageEvent<PolyominoTilingSolverRequest>) => {
       self.postMessage(progressResponse);
     };
     
-    // Solve the tiling problem based on polyform type
-    let result: TilingResult | HexTilingResult | TriTilingResult;
+    // Get the appropriate grid definition
+    const gridDef = polyformType === "polyhex" 
+      ? hexGridDefinition 
+      : polyformType === "polyiamond" 
+        ? triGridDefinition 
+        : squareGridDefinition;
     
-    if (polyformType === "polyhex") {
-      result = solvePolyhexTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
-    } else if (polyformType === "polyiamond") {
-      result = solvePolyiamondTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
-    } else {
-      result = solvePolyominoTiling(tilesToUse, tilingWidth, tilingHeight, solver, onStatsReady);
-    }
+    // Always use unified solver - every edge has a filledness value enforced via SAT
+    const result = solveUnifiedTiling(
+      gridDef,
+      tilesToUse,
+      tilingWidth,
+      tilingHeight,
+      solver,
+      onStatsReady,
+      edgeStates
+    );
     
     // Clean up
     cadical.release();

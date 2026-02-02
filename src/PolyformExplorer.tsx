@@ -1,28 +1,15 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "./App.css";
-import type { TilingResult } from "./problem/polyomino-tiling";
-import type { HexTilingResult } from "./problem/polyhex-tiling";
-import type { TriTilingResult } from "./problem/polyiamond-tiling";
+import type { UnifiedTilingResult } from "./polyform-explorer/grids/unifiedTiling";
 import {
   type PolyformType,
   createEmptyBooleanGrid,
-  rotatePolyomino,
-  rotatePolyhex,
-  rotatePolyiamond,
-  transformPolyhex,
-  transformPolyiamond,
-  flipHorizontal,
-  flipVertical,
 } from "./utils/polyformTransforms";
 import {
-  SquareGrid,
-  HexGrid,
-  TriangleGrid,
   TilingViewer,
   HexTilingViewer,
   TriTilingViewer,
   downloadSvg,
-  exportCellsToJson,
   parseCoordsJson,
   downloadJson,
   PolyformControls,
@@ -35,54 +22,75 @@ import {
   generateTriMaze,
   TriMazeViewer,
   type TriMazeResult,
+  type EdgeState,
+  type EdgeAdjacencyViolation,
+  type UnifiedEdgeInfo,
+  createEmptyEdgeState,
+  rotateCellsAndEdges,
+  flipCellsAndEdges,
+  UnifiedGridEditor,
+  checkEdgeAdjacencyConsistency,
+  getAllEdges,
+  normalizeEdgeState,
 } from "./polyform-explorer";
+import {
+  getGridDef,
+  toSquarePlacements,
+  toHexPlacements,
+  toTriPlacements,
+  type TileState,
+  createEmptyTileState,
+} from "./PolyformExplorerHelpers";
 
-/**
- * Polyform Explorer Component
- * Allows users to build polyomino, polyhex, or polyiamond shapes
- * with rotation and flip controls.
- */
-/** Represents a single tile with its grid and dimensions */
-interface TileState {
-  cells: boolean[][];
-  gridWidth: number;
-  gridHeight: number;
-  widthInput: string;
-  heightInput: string;
-  widthError: boolean;
-  heightError: boolean;
-}
-
-/** Create a new empty tile state */
-function createEmptyTileState(width: number = 8, height: number = 8): TileState {
-  return {
-    cells: createEmptyBooleanGrid(width, height),
-    gridWidth: width,
-    gridHeight: height,
-    widthInput: String(width),
-    heightInput: String(height),
-    widthError: false,
-    heightError: false,
-  };
-}
+/** Editor mode for the grid */
+type EditorMode = 'cell' | 'edge';
 
 export function PolyformExplorer() {
   const [polyformType, setPolyformType] = useState<PolyformType>("polyomino");
+  const [editorMode, setEditorMode] = useState<EditorMode>('cell');
   
   // Multi-tile state: array of tiles and the currently active tile index
-  const [tiles, setTiles] = useState<TileState[]>(() => [createEmptyTileState(8, 8)]);
+  const [tiles, setTiles] = useState<TileState[]>(() => [createEmptyTileState(8, 8, 'polyomino')]);
   const [activeTileIndex, setActiveTileIndex] = useState(0);
   
   // Derived state for the active tile (for convenience)
   // Use a safe fallback in case activeTileIndex is temporarily out of bounds during state transitions
-  const activeTile = tiles[activeTileIndex] ?? tiles[0] ?? createEmptyTileState(8, 8);
+  const activeTile = tiles[activeTileIndex] ?? tiles[0] ?? createEmptyTileState(8, 8, polyformType);
   const gridWidth = activeTile.gridWidth;
   const gridHeight = activeTile.gridHeight;
   const cells = activeTile.cells;
+  const edgeState = activeTile.edgeState;
   const widthInput = activeTile.widthInput;
   const heightInput = activeTile.heightInput;
   const widthError = activeTile.widthError;
   const heightError = activeTile.heightError;
+
+  // Compute all tile edge states and cells for multi-tile rendering
+  // These arrays are indexed by tile type (matching tileTypeIndex in placements)
+  const allTileData = useMemo(() => {
+    const tilesWithContent = tiles
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => tile.cells.some(row => row.some(c => c)));
+
+    const allEdgeStates: EdgeState[] = [];
+    const allTileCells: Array<Array<{ row: number; col: number }>> = [];
+
+    for (const { tile } of tilesWithContent) {
+      allEdgeStates.push(tile.edgeState);
+
+      const coords: Array<{ row: number; col: number }> = [];
+      for (let row = 0; row < tile.cells.length; row++) {
+        for (let col = 0; col < tile.cells[row].length; col++) {
+          if (tile.cells[row][col]) {
+            coords.push({ row, col });
+          }
+        }
+      }
+      allTileCells.push(coords);
+    }
+
+    return { allEdgeStates, allTileCells };
+  }, [tiles]);
   
   // Setter helpers that update the active tile
   const updateActiveTile = useCallback((updates: Partial<TileState>) => {
@@ -96,6 +104,14 @@ export function PolyformExplorer() {
       if (i !== activeTileIndex) return tile;
       const newCells = typeof updater === 'function' ? updater(tile.cells) : updater;
       return { ...tile, cells: newCells };
+    }));
+  }, [activeTileIndex]);
+  
+  const setEdgeState = useCallback((updater: EdgeState | ((prev: EdgeState) => EdgeState)) => {
+    setTiles(prev => prev.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      const newEdgeState = typeof updater === 'function' ? updater(tile.edgeState) : updater;
+      return { ...tile, edgeState: newEdgeState };
     }));
   }, [activeTileIndex]);
   
@@ -131,7 +147,7 @@ export function PolyformExplorer() {
   const [tilingWidthError, setTilingWidthError] = useState(false);
   const [tilingHeightError, setTilingHeightError] = useState(false);
   const [solving, setSolving] = useState(false);
-  const [tilingResult, setTilingResult] = useState<TilingResult | HexTilingResult | TriTilingResult | null>(null);
+  const [tilingResult, setTilingResult] = useState<UnifiedTilingResult | null>(null);
   const [tilingError, setTilingError] = useState<string | null>(null);
   const [tilingStats, setTilingStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [solvedPolyformType, setSolvedPolyformType] = useState<PolyformType | null>(null);
@@ -152,6 +168,13 @@ export function PolyformExplorer() {
   const [coordsJsonInput, setCoordsJsonInput] = useState("");
   const [hideFills, setHideFills] = useState(false);
   
+  // Edge adjacency violation state for debugging
+  const [edgeViolations, setEdgeViolations] = useState<EdgeAdjacencyViolation[]>([]);
+  const [allEdges, setAllEdges] = useState<UnifiedEdgeInfo[]>([]);
+  const [selectedEdgeIndex, setSelectedEdgeIndex] = useState<number | null>(null);
+  const [showDebugSide, setShowDebugSide] = useState<'A' | 'B'>('A');
+  const [edgeFilter, setEdgeFilter] = useState<'all' | 'violations' | 'consistent'>('all');
+  
   // Maze generation state
   const [mazeResult, setMazeResult] = useState<MazeResult | null>(null);
   const [hexMazeResult, setHexMazeResult] = useState<HexMazeResult | null>(null);
@@ -164,17 +187,62 @@ export function PolyformExplorer() {
     downloadSvg(tilingSvgRef.current, `tiling-${tilingWidth}x${tilingHeight}.svg`);
   }, [tilingWidth, tilingHeight]);
   
-  // Export tile coordinates as JSON
+  // Export all tiles with edges as JSON
   const handleExportTileCoords = useCallback(() => {
-    const json = exportCellsToJson(cells);
-    const coords = JSON.parse(json);
+    // Find tiles that have at least one filled cell
+    const tilesWithContent = tiles
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => tile.cells.some(row => row.some(c => c)));
+
+    if (tilesWithContent.length === 0) {
+      alert("No tiles to export");
+      return;
+    }
+
+    // Export all tiles with their cells and edges
+    const exportData = {
+      polyformType,
+      tiles: tilesWithContent.map(({ tile }) => {
+        // Extract cell coordinates
+        const coords: Array<{ row: number; col: number }> = [];
+        for (let row = 0; row < tile.cells.length; row++) {
+          for (let col = 0; col < tile.cells[row].length; col++) {
+            if (tile.cells[row][col]) {
+              coords.push({ row, col });
+            }
+          }
+        }
+
+        // Extract edges (only for filled cells)
+        const edges: Array<{ row: number; col: number; edgeIndex: number }> = [];
+        for (let row = 0; row < tile.edgeState.length; row++) {
+          for (let col = 0; col < tile.edgeState[row].length; col++) {
+            if (tile.cells[row]?.[col]) {  // Only include edges of filled cells
+              const cellEdges = tile.edgeState[row][col];
+              for (let edgeIndex = 0; edgeIndex < cellEdges.length; edgeIndex++) {
+                if (cellEdges[edgeIndex]) {
+                  edges.push({ row, col, edgeIndex });
+                }
+              }
+            }
+          }
+        }
+
+        return { coords, edges };
+      }),
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const totalCells = exportData.tiles.reduce((sum, t) => sum + t.coords.length, 0);
+    const totalEdges = exportData.tiles.reduce((sum, t) => sum + t.edges.length, 0);
+
     navigator.clipboard.writeText(json).then(() => {
-      alert(`Copied ${coords.length} coordinates to clipboard!`);
+      alert(`Copied ${tilesWithContent.length} tile(s) with ${totalCells} cells and ${totalEdges} edges to clipboard!`);
     }).catch(() => {
       // Fallback: show in a prompt
-      prompt("Copy these coordinates:", json);
+      prompt("Copy this JSON:", json);
     });
-  }, [cells]);
+  }, [tiles, polyformType]);
   
   // Import tile coordinates from JSON
   const handleImportTileCoords = useCallback(() => {
@@ -231,8 +299,8 @@ export function PolyformExplorer() {
   const handleGenerateMaze = useCallback(() => {
     if (!tilingResult?.placements || solvedPolyformType !== "polyomino") return;
     
-    // Cast to TilingResult since we checked solvedPolyformType === "polyomino"
-    const placements = (tilingResult as TilingResult).placements!;
+    // Convert unified placements (q,r) to legacy format (row,col)
+    const placements = toSquarePlacements(tilingResult.placements);
     const result = generateMaze(placements);
     setMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
@@ -241,8 +309,8 @@ export function PolyformExplorer() {
   const handleGenerateHexMaze = useCallback(() => {
     if (!tilingResult?.placements || solvedPolyformType !== "polyhex") return;
     
-    // Cast to HexTilingResult since we checked solvedPolyformType === "polyhex"
-    const placements = (tilingResult as HexTilingResult).placements!;
+    // Convert unified placements to hex format
+    const placements = toHexPlacements(tilingResult.placements);
     const result = generateHexMaze(placements);
     setHexMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
@@ -251,8 +319,8 @@ export function PolyformExplorer() {
   const handleGenerateTriMaze = useCallback(() => {
     if (!tilingResult?.placements || solvedPolyformType !== "polyiamond") return;
     
-    // Cast to TriTilingResult since we checked solvedPolyformType === "polyiamond"
-    const placements = (tilingResult as TriTilingResult).placements!;
+    // Convert unified placements to triangle format
+    const placements = toTriPlacements(tilingResult.placements);
     const result = generateTriMaze(placements);
     setTriMazeResult(result);
   }, [tilingResult, solvedPolyformType]);
@@ -321,6 +389,61 @@ export function PolyformExplorer() {
     };
   }, []);
   
+  // Check edge adjacency consistency when tiling result changes
+  useEffect(() => {
+    if (!tilingResult || !tilingResult.placements || !solvedPolyformType) {
+      setEdgeViolations([]);
+      setAllEdges([]);
+      setSelectedEdgeIndex(null);
+      return;
+    }
+
+    const gridDef = getGridDef(solvedPolyformType);
+
+    // Get tiles with content (same order as used for solving)
+    const tilesWithContent = tiles.filter(tile =>
+      tile.cells.some(row => row.some(c => c))
+    );
+
+    const hasAnyEdges = tilesWithContent.some(tile =>
+      tile.edgeState.some(row =>
+        row.some(cellEdges => cellEdges.some(filled => filled))
+      )
+    );
+
+    // Only check if there are any edges marked
+    if (!hasAnyEdges) {
+      setEdgeViolations([]);
+      setAllEdges([]);
+      setSelectedEdgeIndex(null);
+      return;
+    }
+
+    // Normalize edge states for all tiles to match normalized tile coordinates
+    // The unified solver uses normalized coordinates for originalCells
+    const normalizedEdgeStates = tilesWithContent.map(tile =>
+      normalizeEdgeState(gridDef, tile.cells, tile.edgeState)
+    );
+
+    // The unified solver returns placements with cells in {q, r} format
+    // and includes originalCells for edge lookup
+    const violations = checkEdgeAdjacencyConsistency(
+      gridDef,
+      tilingResult.placements,
+      normalizedEdgeStates
+    );
+
+    const edges = getAllEdges(
+      gridDef,
+      tilingResult.placements,
+      normalizedEdgeStates
+    );
+
+    setEdgeViolations(violations);
+    setAllEdges(edges);
+    setSelectedEdgeIndex(null);
+  }, [tilingResult, solvedPolyformType, tiles]);
+  
   // Validate and apply tiling width on blur
   const handleTilingWidthBlur = useCallback(() => {
     const parsed = parseInt(tilingWidthInput, 10);
@@ -356,16 +479,20 @@ export function PolyformExplorer() {
   
   // Solve tiling problem
   const handleSolveTiling = useCallback(() => {
-    // Gather all tiles with at least one filled cell
-    const allTileCells = tiles.map(tile => tile.cells);
-    const tilesWithContent = allTileCells.filter(cells => 
-      cells.some(row => row.some(c => c))
-    );
+    // Find indices of tiles that have at least one filled cell
+    const tileIndicesWithContent = tiles
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => tile.cells.some(row => row.some(c => c)))
+      .map(({ index }) => index);
     
-    if (tilesWithContent.length === 0) {
+    if (tileIndicesWithContent.length === 0) {
       setTilingError("Please draw at least one tile first by clicking cells above.");
       return;
     }
+    
+    // Extract cells and edge states for tiles with content
+    const tilesWithContent = tileIndicesWithContent.map(i => tiles[i].cells);
+    const edgeStatesForTiles = tileIndicesWithContent.map(i => tiles[i].edgeState);
     
     // Clear previous results
     setTilingResult(null);
@@ -409,12 +536,13 @@ export function PolyformExplorer() {
       workerRef.current = null;
     };
     
-    // Send request with all tiles that have content
+    // Send request with all tiles that have content, including edge states
     worker.postMessage({
       tiles: tilesWithContent,
       tilingWidth,
       tilingHeight,
       polyformType,
+      edgeStates: edgeStatesForTiles,
     });
   }, [tiles, tilingWidth, tilingHeight, polyformType]);
   
@@ -473,122 +601,170 @@ export function PolyformExplorer() {
     });
   }, [setCells]);
   
-  // Rotate the polyform
+  // Toggle edge on click
+  const handleEdgeClick = useCallback((row: number, col: number, edgeIndex: number) => {
+    setEdgeState(prev => {
+      const newEdgeState = prev.map(r => r.map(c => [...c]));
+      if (newEdgeState[row]?.[col]) {
+        newEdgeState[row][col][edgeIndex] = !newEdgeState[row][col][edgeIndex];
+      }
+      return newEdgeState;
+    });
+  }, [setEdgeState]);
+  
+  // Rotate the polyform (transforms cells and edges together to keep them aligned)
   const handleRotate = useCallback(() => {
-    setCells(prev => {
-      let rotated: boolean[][];
-      switch (polyformType) {
-        case "polyomino":
-          rotated = rotatePolyomino(prev);
-          break;
-        case "polyhex":
-          rotated = rotatePolyhex(prev);
-          break;
-        case "polyiamond":
-          rotated = rotatePolyiamond(prev);
-          break;
-        default:
-          rotated = prev;
+    const grid = getGridDef(polyformType);
+    
+    // We need the current edge state to transform together with cells
+    setTiles(prevTiles => prevTiles.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      
+      const { cells: rotatedCells, edgeState: rotatedEdges } = rotateCellsAndEdges(
+        grid, tile.cells, tile.edgeState
+      );
+      
+      const newHeight = Math.min(rotatedCells.length, 50);
+      const newWidth = Math.min(rotatedCells[0]?.length ?? 0, 50);
+      
+      return {
+        ...tile,
+        cells: rotatedCells,
+        edgeState: rotatedEdges,
+        gridWidth: newWidth,
+        gridHeight: newHeight,
+        widthInput: String(newWidth),
+        heightInput: String(newHeight),
+      };
+    }));
+    
+    // Also update the top-level grid dimensions for display
+    setTiles(prevTiles => {
+      const tile = prevTiles[activeTileIndex];
+      if (tile) {
+        setGridHeight(tile.gridHeight);
+        setGridWidth(tile.gridWidth);
+        setHeightInput(tile.heightInput);
+        setWidthInput(tile.widthInput);
+        setWidthError(false);
+        setHeightError(false);
       }
-      // Update dimensions to match rotated shape (clamped to max 50)
-      const newHeight = Math.min(rotated.length, 50);
-      const newWidth = Math.min(rotated[0]?.length ?? 0, 50);
-      setGridHeight(newHeight);
-      setGridWidth(newWidth);
-      setHeightInput(String(newHeight));
-      setWidthInput(String(newWidth));
-      // Clear any error states since dimensions are now valid
-      setWidthError(false);
-      setHeightError(false);
-      return rotated;
+      return prevTiles;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+  }, [polyformType, activeTileIndex, setTiles, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
-  // Flip horizontally (geometry-correct per polyform type)
+  // Flip horizontally (transforms cells and edges together to keep them aligned)
   const handleFlipH = useCallback(() => {
-    setCells(prev => {
-      let next: boolean[][];
-      switch (polyformType) {
-        case "polyomino":
-          next = flipHorizontal(prev);
-          break;
-        case "polyhex":
-          next = transformPolyhex(prev, "flipH");
-          break;
-        case "polyiamond":
-          next = transformPolyiamond(prev, "flipH");
-          break;
-        default:
-          next = prev;
+    const grid = getGridDef(polyformType);
+    
+    setTiles(prevTiles => prevTiles.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      
+      const { cells: flippedCells, edgeState: flippedEdges } = flipCellsAndEdges(
+        grid, tile.cells, tile.edgeState
+      );
+      
+      const newHeight = Math.min(flippedCells.length, 50);
+      const newWidth = Math.min(flippedCells[0]?.length ?? 0, 50);
+      
+      return {
+        ...tile,
+        cells: flippedCells,
+        edgeState: flippedEdges,
+        gridWidth: newWidth,
+        gridHeight: newHeight,
+        widthInput: String(newWidth),
+        heightInput: String(newHeight),
+      };
+    }));
+    
+    setTiles(prevTiles => {
+      const tile = prevTiles[activeTileIndex];
+      if (tile) {
+        setGridHeight(tile.gridHeight);
+        setGridWidth(tile.gridWidth);
+        setHeightInput(tile.heightInput);
+        setWidthInput(tile.widthInput);
+        setWidthError(false);
+        setHeightError(false);
       }
-
-      const newHeight = Math.min(next.length, 50);
-      const newWidth = Math.min(next[0]?.length ?? 0, 50);
-      setGridHeight(newHeight);
-      setGridWidth(newWidth);
-      setHeightInput(String(newHeight));
-      setWidthInput(String(newWidth));
-      setWidthError(false);
-      setHeightError(false);
-
-      return next;
+      return prevTiles;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+  }, [polyformType, activeTileIndex, setTiles, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
-  // Flip vertically (geometry-correct per polyform type)
+  // Flip vertically (transforms cells and edges together)
+  // Vertical flip = horizontal flip followed by 180° rotation.
   const handleFlipV = useCallback(() => {
-    setCells(prev => {
-      let next: boolean[][];
-      switch (polyformType) {
-        case "polyomino":
-          next = flipVertical(prev);
-          break;
-        case "polyhex":
-          next = transformPolyhex(prev, "flipV");
-          break;
-        case "polyiamond":
-          next = transformPolyiamond(prev, "flipV");
-          break;
-        default:
-          next = prev;
+    const grid = getGridDef(polyformType);
+    
+    setTiles(prevTiles => prevTiles.map((tile, i) => {
+      if (i !== activeTileIndex) return tile;
+      
+      // First flip horizontally
+      let { cells: currentCells, edgeState: currentEdges } = flipCellsAndEdges(
+        grid, tile.cells, tile.edgeState
+      );
+      // Then rotate 180° (half of total rotations)
+      const halfRotations = Math.floor(grid.numRotations / 2);
+      for (let j = 0; j < halfRotations; j++) {
+        const result = rotateCellsAndEdges(grid, currentCells, currentEdges);
+        currentCells = result.cells;
+        currentEdges = result.edgeState;
       }
-
-      const newHeight = Math.min(next.length, 50);
-      const newWidth = Math.min(next[0]?.length ?? 0, 50);
-      setGridHeight(newHeight);
-      setGridWidth(newWidth);
-      setHeightInput(String(newHeight));
-      setWidthInput(String(newWidth));
-      setWidthError(false);
-      setHeightError(false);
-
-      return next;
+      
+      const newHeight = Math.min(currentCells.length, 50);
+      const newWidth = Math.min(currentCells[0]?.length ?? 0, 50);
+      
+      return {
+        ...tile,
+        cells: currentCells,
+        edgeState: currentEdges,
+        gridWidth: newWidth,
+        gridHeight: newHeight,
+        widthInput: String(newWidth),
+        heightInput: String(newHeight),
+      };
+    }));
+    
+    setTiles(prevTiles => {
+      const tile = prevTiles[activeTileIndex];
+      if (tile) {
+        setGridHeight(tile.gridHeight);
+        setGridWidth(tile.gridWidth);
+        setHeightInput(tile.heightInput);
+        setWidthInput(tile.widthInput);
+        setWidthError(false);
+        setHeightError(false);
+      }
+      return prevTiles;
     });
-  }, [polyformType, setCells, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
+  }, [polyformType, activeTileIndex, setTiles, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Clear the grid
   const handleClear = useCallback(() => {
+    const grid = getGridDef(polyformType);
     setCells(createEmptyBooleanGrid(gridWidth, gridHeight));
-  }, [gridWidth, gridHeight, setCells]);
+    setEdgeState(createEmptyEdgeState(grid, gridWidth, gridHeight));
+  }, [gridWidth, gridHeight, polyformType, setCells, setEdgeState]);
   
   // Change polyform type
   const handleTypeChange = useCallback((newType: PolyformType) => {
     setPolyformType(newType);
-    // Reset all tiles when changing type
-    setTiles([createEmptyTileState(8, 8)]);
+    // Reset all tiles when changing type (with correct edge state for new type)
+    setTiles([createEmptyTileState(8, 8, newType)]);
     setActiveTileIndex(0);
   }, []);
   
   // Add a new tile
   const handleAddTile = useCallback(() => {
     setTiles(prev => {
-      const newTiles = [...prev, createEmptyTileState(8, 8)];
+      const newTiles = [...prev, createEmptyTileState(8, 8, polyformType)];
       // Use setTimeout to set the active index after the state update
       // to avoid stale closure issues
       setActiveTileIndex(newTiles.length - 1);
       return newTiles;
     });
-  }, []);
+  }, [polyformType]);
   
   // Remove the active tile (if there's more than one)
   const handleRemoveTile = useCallback(() => {
@@ -730,33 +906,60 @@ export function PolyformExplorer() {
         )}
       </div>
 
+      {/* Editor Mode Toggle */}
+      <div style={{ marginBottom: "16px", display: "flex", gap: "8px", alignItems: "center" }}>
+        <label style={{ fontWeight: "bold" }}>Mode:</label>
+        <button
+          onClick={() => setEditorMode('cell')}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: editorMode === 'cell' ? "#3498db" : "#ecf0f1",
+            color: editorMode === 'cell' ? "white" : "#333",
+            border: "1px solid #bdc3c7",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontWeight: editorMode === 'cell' ? "bold" : "normal",
+          }}
+        >
+          🔲 Cells
+        </button>
+        <button
+          onClick={() => setEditorMode('edge')}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: editorMode === 'edge' ? "#f39c12" : "#ecf0f1",
+            color: editorMode === 'edge' ? "white" : "#333",
+            border: "1px solid #bdc3c7",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontWeight: editorMode === 'edge' ? "bold" : "normal",
+          }}
+        >
+          ➖ Edges
+        </button>
+        {editorMode === 'edge' && (
+          <span style={{ fontSize: "12px", color: "#7f8c8d" }}>
+            Click edges to mark them (shown in orange)
+          </span>
+        )}
+      </div>
       
-      {/* Grid */}
+      {/* Grid - Using unified component for all grid types */}
       <div style={{ 
         padding: "16px", 
         backgroundColor: "#f8f9fa", 
         borderRadius: "8px",
-        border: "2px solid #3498db",
+        border: `2px solid ${editorMode === 'edge' ? '#f39c12' : '#3498db'}`,
         display: "inline-block",
       }}>
-        {polyformType === "polyomino" && (
-          <SquareGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-          />
-        )}
-        {polyformType === "polyhex" && (
-          <HexGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-          />
-        )}
-        {polyformType === "polyiamond" && (
-          <TriangleGrid
-            cells={cells}
-            onCellClick={handleCellClick}
-          />
-        )}
+        <UnifiedGridEditor
+          grid={getGridDef(polyformType)}
+          cells={cells}
+          onCellClick={handleCellClick}
+          mode={editorMode}
+          edgeState={edgeState}
+          onEdgeClick={handleEdgeClick}
+        />
       </div>
       
       {/* Tiling Solver Section */}
@@ -915,11 +1118,148 @@ export function PolyformExplorer() {
                     ({tilingResult.stats.numPlacements.toLocaleString()} total possible placements, {tilingResult.stats.numVariables.toLocaleString()} vars, {tilingResult.stats.numClauses.toLocaleString()} clauses)
                   </span>
                 </div>
+                
+                {/* Red warning for edge adjacency violations */}
+                {edgeViolations.length > 0 && (
+                  <div style={{
+                    padding: "12px",
+                    backgroundColor: "#f8d7da",
+                    border: "1px solid #f5c6cb",
+                    borderRadius: "4px",
+                    marginBottom: "12px",
+                    color: "#721c24",
+                    fontSize: "14px",
+                  }}>
+                    ⚠️ <strong>Edge Adjacency Violations Detected!</strong>
+                    <br/>
+                    <span style={{ fontSize: "12px" }}>
+                      {edgeViolations.length} edge{edgeViolations.length === 1 ? '' : 's'} have inconsistent filledness values between adjacent tiles.
+                    </span>
+                  </div>
+                )}
+                
+                {/* Edge Debugger - shows ALL edges */}
+                {allEdges.length > 0 && (
+                  <div style={{
+                    padding: "12px",
+                    backgroundColor: "#e7f3ff",
+                    border: "1px solid #b6d4fe",
+                    borderRadius: "4px",
+                    marginBottom: "12px",
+                    fontSize: "12px",
+                  }}>
+                    <strong>🔍 Edge Debugger</strong>
+                    <span style={{ marginLeft: "8px", color: "#666" }}>
+                      ({allEdges.length} edges total, {allEdges.filter(e => !e.isConsistent).length} violations)
+                    </span>
+                    <div style={{ marginTop: "8px" }}>
+                      <label style={{ marginRight: "8px" }}>Filter:</label>
+                      <select 
+                        value={edgeFilter} 
+                        onChange={(e) => {
+                          setEdgeFilter(e.target.value as 'all' | 'violations' | 'consistent');
+                          setSelectedEdgeIndex(null);
+                        }}
+                        style={{ marginRight: "16px" }}
+                      >
+                        <option value="all">All edges ({allEdges.length})</option>
+                        <option value="violations">Violations only ({allEdges.filter(e => !e.isConsistent).length})</option>
+                        <option value="consistent">Consistent only ({allEdges.filter(e => e.isConsistent).length})</option>
+                      </select>
+                      
+                      <label style={{ marginRight: "8px" }}>Select edge:</label>
+                      <select 
+                        value={selectedEdgeIndex ?? ''} 
+                        onChange={(e) => setSelectedEdgeIndex(e.target.value === '' ? null : Number(e.target.value))}
+                        style={{ maxWidth: "350px" }}
+                      >
+                        <option value="">-- Choose an edge --</option>
+                        {allEdges
+                          .map((e, i) => ({ edge: e, originalIndex: i }))
+                          .filter(({ edge }) => 
+                            edgeFilter === 'all' ? true :
+                            edgeFilter === 'violations' ? !edge.isConsistent :
+                            edge.isConsistent
+                          )
+                          .map(({ edge, originalIndex }) => (
+                            <option key={originalIndex} value={originalIndex}>
+                              {edge.isConsistent ? '🟢' : '🔴'} ({edge.cell1.q},{edge.cell1.r})#{edge.edgeIdx1} ↔ ({edge.cell2.q},{edge.cell2.r})#{edge.edgeIdx2}: {edge.value1 ? '●' : '○'} vs {edge.value2 ? '●' : '○'}
+                            </option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                    
+                    {selectedEdgeIndex !== null && allEdges[selectedEdgeIndex] && (
+                      <div style={{ marginTop: "8px", padding: "8px", backgroundColor: "#fff", borderRadius: "4px" }}>
+                        <div style={{ marginBottom: "4px" }}>
+                          <strong>Toggle side:</strong>{' '}
+                          <button 
+                            onClick={() => setShowDebugSide('A')} 
+                            style={{ 
+                              marginRight: "4px", 
+                              fontWeight: showDebugSide === 'A' ? 'bold' : 'normal',
+                              backgroundColor: showDebugSide === 'A' ? '#007bff' : '#e9ecef',
+                              color: showDebugSide === 'A' ? '#fff' : '#212529',
+                              border: 'none',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Side A
+                          </button>
+                          <button 
+                            onClick={() => setShowDebugSide('B')} 
+                            style={{ 
+                              fontWeight: showDebugSide === 'B' ? 'bold' : 'normal',
+                              backgroundColor: showDebugSide === 'B' ? '#007bff' : '#e9ecef',
+                              color: showDebugSide === 'B' ? '#fff' : '#212529',
+                              border: 'none',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Side B
+                          </button>
+                          <span style={{ 
+                            marginLeft: "12px", 
+                            padding: "4px 8px",
+                            borderRadius: "4px",
+                            backgroundColor: allEdges[selectedEdgeIndex].isConsistent ? '#d4edda' : '#f8d7da',
+                            color: allEdges[selectedEdgeIndex].isConsistent ? '#155724' : '#721c24',
+                          }}>
+                            {allEdges[selectedEdgeIndex].isConsistent ? '✓ Consistent' : '✗ Mismatch!'}
+                          </span>
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: '11px' }}>
+                          {showDebugSide === 'A' ? (
+                            <>
+                              <div><strong>Cell:</strong> ({allEdges[selectedEdgeIndex].cell1.q}, {allEdges[selectedEdgeIndex].cell1.r})</div>
+                              <div><strong>Edge Index:</strong> {allEdges[selectedEdgeIndex].edgeIdx1}</div>
+                              <div><strong>Filledness:</strong> <span style={{ color: allEdges[selectedEdgeIndex].value1 ? 'green' : 'red' }}>{allEdges[selectedEdgeIndex].value1 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                              <div><strong>Placement:</strong> #{allEdges[selectedEdgeIndex].placementIdx1}</div>
+                            </>
+                          ) : (
+                            <>
+                              <div><strong>Cell:</strong> ({allEdges[selectedEdgeIndex].cell2.q}, {allEdges[selectedEdgeIndex].cell2.r})</div>
+                              <div><strong>Edge Index:</strong> {allEdges[selectedEdgeIndex].edgeIdx2}</div>
+                              <div><strong>Filledness:</strong> <span style={{ color: allEdges[selectedEdgeIndex].value2 ? 'green' : 'red' }}>{allEdges[selectedEdgeIndex].value2 ? '●  FILLED' : '○  UNFILLED'}</span></div>
+                              <div><strong>Placement:</strong> #{allEdges[selectedEdgeIndex].placementIdx2}</div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 {solvedPolyformType === "polyhex" ? (
                   <HexTilingViewer
                     width={tilingWidth}
                     height={tilingHeight}
-                    placements={(tilingResult as HexTilingResult).placements || []}
+                    placements={toHexPlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
                     highlightedEdge={highlightedEdge}
@@ -930,7 +1270,7 @@ export function PolyformExplorer() {
                   <TriTilingViewer
                     width={tilingWidth}
                     height={tilingHeight}
-                    placements={(tilingResult as TriTilingResult).placements || []}
+                    placements={toTriPlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
                   />
@@ -938,9 +1278,11 @@ export function PolyformExplorer() {
                   <TilingViewer
                     width={tilingWidth}
                     height={tilingHeight}
-                    placements={(tilingResult as TilingResult).placements || []}
+                    placements={toSquarePlacements(tilingResult.placements || [])}
                     svgRef={tilingSvgRef}
                     highlightedPlacement={highlightedPlacement}
+                    edgeStates={allTileData.allEdgeStates}
+                    allTileCells={allTileData.allTileCells}
                   />
                 )}
                 
