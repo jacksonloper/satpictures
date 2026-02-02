@@ -184,15 +184,17 @@ export function normalizeCoords(grid: GridDefinition, coords: Coord[]): Coord[] 
 /**
  * Generate all transforms of a set of coordinates (rotations and flips).
  * 
- * Returns ALL transforms without deduplication based on shape. This is necessary
- * because when edges are involved, different rotations are distinct even if they
- * produce the same coordinate shape (e.g., a single cell rotated still has
- * different edge orientations).
+ * Returns ALL `numRotations * 2` transforms without deduplication based on shape.
+ * This is necessary because when edges are involved, different rotations are 
+ * distinct even if they produce the same coordinate shape (e.g., a single cell
+ * rotated still has different edge orientations).
  * 
  * Returns array of { coords, transformIndex, originalIndices } where:
  * - transformIndex corresponds to: 0..numRotations-1 for rotations, 
  *   numRotations..(2*numRotations-1) for flip+rotations.
  * - originalIndices[i] gives the index in baseCoords that maps to coords[i]
+ * 
+ * @returns Array of exactly `grid.numRotations * 2` transform entries
  */
 export function generateAllTransforms(
   grid: GridDefinition,

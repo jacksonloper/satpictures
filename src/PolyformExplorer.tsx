@@ -701,7 +701,9 @@ export function PolyformExplorer() {
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip vertically (geometry-correct per polyform type)
-  // Note: Vertical flip = horizontal flip + 180° rotation
+  // The grid definition only provides a horizontal flip function. Vertical flip
+  // is geometrically equivalent to: horizontal flip followed by 180° rotation.
+  // For grids with numRotations divisible by 2, this gives the correct result.
   const handleFlipV = useCallback(() => {
     const grid = getGridDef(polyformType);
     
@@ -733,8 +735,8 @@ export function PolyformExplorer() {
       return next;
     });
     
-    // Vertical flip edge state = horizontal flip + 180° rotation
-    // 180° = numRotations / 2 rotations
+    // Vertical flip edge state = horizontal flip + 180° rotation.
+    // 180° rotation = numRotations / 2 single-step rotations.
     setEdgeState(prev => {
       let state = flipEdgeState(grid, prev);
       const halfRotations = Math.floor(grid.numRotations / 2);
