@@ -47,6 +47,19 @@ export interface HexPlacement {
   cells: AxialCoord[];
 }
 
+/** Edge color value: true = "filled", false = "empty" */
+export type EdgeColor = boolean;
+
+/** 
+ * Edge coloring info for the solution.
+ * Each edge is identified by a canonical key: "q1,r1,edgeIdx1" where cell (q1,r1) < cell (q2,r2)
+ * The color is a boolean: true means "filled" (one style), false means "empty" (other style)
+ */
+export interface EdgeColorInfo {
+  /** Map from canonical edge key to its color */
+  edgeColors: Map<string, EdgeColor>;
+}
+
 /** Result of hex tiling attempt */
 export interface HexTilingResult {
   satisfiable: boolean;
@@ -60,6 +73,8 @@ export interface HexTilingResult {
   };
   /** Count of placements used for each tile type (when multiple tiles) */
   tileTypeCounts?: number[];
+  /** Edge coloring information for the solution */
+  edgeColorInfo?: EdgeColorInfo;
 }
 
 // ============================================================================
@@ -299,6 +314,96 @@ export function hexGridToAxialCoords(cells: boolean[][]): AxialCoord[] {
   }
   
   return normalizeAxialCoords(coords);
+}
+
+// ============================================================================
+// Edge Coloring Utilities
+// ============================================================================
+
+/**
+ * Axial neighbor directions for a hex cell.
+ * Index 0-5 corresponds to edges 0-5 of the cell.
+ * 
+ * Edge i connects the cell to its neighbor in direction i.
+ * The edge is shared between the cell and its neighbor, so we need
+ * a canonical representation to avoid duplicates.
+ * 
+ * Directions (in axial coords):
+ *   0: (+1, -1) - Upper-right (NE)
+ *   1: (+1,  0) - Right (E)
+ *   2: ( 0, +1) - Lower-right (SE)
+ *   3: (-1, +1) - Lower-left (SW)
+ *   4: (-1,  0) - Left (W)
+ *   5: ( 0, -1) - Upper-left (NW)
+ */
+const HEX_NEIGHBOR_DIRECTIONS: AxialCoord[] = [
+  { q: +1, r: -1 }, // 0: NE
+  { q: +1, r:  0 }, // 1: E
+  { q:  0, r: +1 }, // 2: SE
+  { q: -1, r: +1 }, // 3: SW
+  { q: -1, r:  0 }, // 4: W
+  { q:  0, r: -1 }, // 5: NW
+];
+
+/**
+ * Get the neighbor cell in a given direction.
+ */
+function getHexNeighbor(cell: AxialCoord, edgeIndex: number): AxialCoord {
+  const dir = HEX_NEIGHBOR_DIRECTIONS[edgeIndex];
+  return { q: cell.q + dir.q, r: cell.r + dir.r };
+}
+
+/**
+ * Get the opposite edge index (the edge from neighbor's perspective).
+ * Edge i is opposite to edge (i + 3) % 6.
+ */
+function getOppositeEdgeIndex(edgeIndex: number): number {
+  return (edgeIndex + 3) % 6;
+}
+
+/**
+ * Create a canonical edge key.
+ * An edge is shared between two cells. We create a canonical representation
+ * by always using the "smaller" cell (lexicographically by q,r) as the primary cell.
+ * 
+ * Returns: { canonicalKey: string, isInverted: boolean }
+ * - canonicalKey: "q,r,edgeIdx" where (q,r) is the primary cell
+ * - isInverted: true if we had to swap cells to get canonical form
+ */
+function getCanonicalEdgeKey(cell: AxialCoord, edgeIndex: number): { canonicalKey: string; isInverted: boolean } {
+  const neighbor = getHexNeighbor(cell, edgeIndex);
+  const neighborEdge = getOppositeEdgeIndex(edgeIndex);
+  
+  // Compare cells lexicographically
+  const cellFirst = cell.q < neighbor.q || (cell.q === neighbor.q && cell.r <= neighbor.r);
+  
+  if (cellFirst) {
+    return { canonicalKey: `${cell.q},${cell.r},${edgeIndex}`, isInverted: false };
+  } else {
+    return { canonicalKey: `${neighbor.q},${neighbor.r},${neighborEdge}`, isInverted: true };
+  }
+}
+
+/**
+ * Determine the "color" of an edge for a tile design.
+ * 
+ * The tile design encodes colors using half-circles on each edge.
+ * For a cell in a tile, each edge has a specific color based on whether
+ * the adjacent cell is also in the same tile (internal edge) or not (external edge).
+ * 
+ * Design rule: 
+ * - Internal edges (between cells of the same tile) are "filled" (true)
+ * - External edges (at tile boundary) are "empty" (false)
+ * 
+ * This creates a visual pattern where tiles have filled half-circles on internal
+ * edges and empty half-circles on external edges.
+ */
+function getTileEdgeColor(tileCells: AxialCoord[], cell: AxialCoord, edgeIndex: number): EdgeColor {
+  const neighbor = getHexNeighbor(cell, edgeIndex);
+  const neighborInTile = tileCells.some(c => c.q === neighbor.q && c.r === neighbor.r);
+  
+  // Internal edges are "filled" (true), external edges are "empty" (false)
+  return neighborInTile;
 }
 
 // ============================================================================
@@ -573,6 +678,67 @@ export function solvePolyhexTiling(
     }
   }
   
+  // ========================================================================
+  // EDGE COLORING VARIABLES AND CONSTRAINTS
+  // ========================================================================
+  
+  // Collect all edges that will be affected by the placements
+  // Each edge is identified by its canonical key
+  const allEdgeKeys = new Set<string>();
+  
+  // For each placement, compute what edges it affects and what colors it requires
+  // placementEdgeColors[placementId] = Map<canonicalEdgeKey, requiredColor>
+  const placementEdgeColors: Map<number, Map<string, EdgeColor>> = new Map();
+  
+  for (const p of allPlacements) {
+    const edgeColorMap = new Map<string, EdgeColor>();
+    
+    for (const cell of p.cells) {
+      // For each edge of this cell
+      for (let edgeIdx = 0; edgeIdx < 6; edgeIdx++) {
+        const { canonicalKey } = getCanonicalEdgeKey(cell, edgeIdx);
+        const color = getTileEdgeColor(p.cells, cell, edgeIdx);
+        
+        allEdgeKeys.add(canonicalKey);
+        edgeColorMap.set(canonicalKey, color);
+      }
+    }
+    
+    placementEdgeColors.set(p.id, edgeColorMap);
+  }
+  
+  // Create SAT variables for each edge (one variable per unique edge)
+  // Edge variable is true = "filled", false = "empty"
+  const edgeVars: Map<string, number> = new Map();
+  for (const edgeKey of allEdgeKeys) {
+    const varNum = solver.newVariable();
+    edgeVars.set(edgeKey, varNum);
+  }
+  
+  // CONSTRAINT 3: Placement implies edge colors
+  // If placement P is active, then for each edge E affected by P:
+  //   P => (E == requiredColor)
+  // Which is: NOT P OR (E == requiredColor)
+  // If requiredColor is true: NOT P OR E  (i.e., [-P, E])
+  // If requiredColor is false: NOT P OR NOT E  (i.e., [-P, -E])
+  
+  for (const p of allPlacements) {
+    const placementVar = placementVars.get(p.id)!;
+    const edgeColorMap = placementEdgeColors.get(p.id)!;
+    
+    for (const [edgeKey, requiredColor] of edgeColorMap) {
+      const edgeVar = edgeVars.get(edgeKey)!;
+      
+      if (requiredColor) {
+        // Placement implies edge is filled: NOT placement OR edge
+        solver.addClause([-placementVar, edgeVar]);
+      } else {
+        // Placement implies edge is empty: NOT placement OR NOT edge
+        solver.addClause([-placementVar, -edgeVar]);
+      }
+    }
+  }
+  
   const numVars = solver.getVariableCount();
   const numClauses = solver.getClauseCount();
   
@@ -607,11 +773,19 @@ export function solvePolyhexTiling(
     tileTypePlacements.filter(pid => usedPlacementIds.has(pid)).length
   );
   
+  // Extract edge colors from the solution
+  const edgeColors = new Map<string, EdgeColor>();
+  for (const [edgeKey, edgeVar] of edgeVars) {
+    const colorValue = result.assignment.get(edgeVar);
+    edgeColors.set(edgeKey, colorValue === true);
+  }
+  
   return {
     satisfiable: true,
     placements: usedPlacements,
     stats: { numVariables: numVars, numClauses: numClauses, numPlacements: allPlacements.length },
     tileTypeCounts,
+    edgeColorInfo: { edgeColors },
   };
 }
 
@@ -653,5 +827,5 @@ export function findHexPlacementOverlaps(placements: HexPlacement[]): string[] {
 // Export utilities for rendering
 // ============================================================================
 
-export { axialToOffset, offsetToAxial };
+export { axialToOffset, offsetToAxial, getCanonicalEdgeKey, getHexNeighbor, getOppositeEdgeIndex };
 export type { AxialCoord };

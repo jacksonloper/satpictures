@@ -5,7 +5,7 @@ export { TilingViewer } from "./TilingViewer";
 export type { TilingViewerProps } from "./TilingViewer";
 export { getPlacementColor } from "./placementColors";
 export { HexTilingViewer } from "./HexTilingViewer";
-export type { HexTilingViewerProps, EdgeInfo } from "./HexTilingViewer";
+export type { HexTilingViewerProps, EdgeInfo, EdgeColorDebugInfo } from "./HexTilingViewer";
 export { TriTilingViewer } from "./TriTilingViewer";
 export type { TriTilingViewerProps } from "./TriTilingViewer";
 export { downloadSvg, exportCellsToJson, parseCoordsJson, downloadJson } from "./downloadUtils";

@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "./App.css";
 import type { TilingResult } from "./problem/polyomino-tiling";
 import type { HexTilingResult } from "./problem/polyhex-tiling";
+import { getCanonicalEdgeKey } from "./problem/polyhex-tiling";
 import type { TriTilingResult } from "./problem/polyiamond-tiling";
 import {
   type PolyformType,
@@ -151,6 +152,7 @@ export function PolyformExplorer() {
   } | null>(null);
   const [coordsJsonInput, setCoordsJsonInput] = useState("");
   const [hideFills, setHideFills] = useState(false);
+  const [showEdgeColors, setShowEdgeColors] = useState(false);
   
   // Maze generation state
   const [mazeResult, setMazeResult] = useState<MazeResult | null>(null);
@@ -925,6 +927,8 @@ export function PolyformExplorer() {
                     highlightedEdge={highlightedEdge}
                     onEdgeInfo={setEdgeInfo}
                     hideFills={hideFills}
+                    edgeColorInfo={(tilingResult as HexTilingResult).edgeColorInfo}
+                    showEdgeColors={showEdgeColors}
                   />
                 ) : solvedPolyformType === "polyiamond" ? (
                   <TriTilingViewer
@@ -1013,6 +1017,21 @@ export function PolyformExplorer() {
                   </div>
                 )}
                 
+                {/* Show Edge Colors checkbox (only for polyhex with edge color data) */}
+                {solvedPolyformType === "polyhex" && (tilingResult as HexTilingResult).edgeColorInfo && (
+                  <div style={{ marginTop: "8px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "14px" }}>
+                      <input
+                        type="checkbox"
+                        checked={showEdgeColors}
+                        onChange={(e) => setShowEdgeColors(e.target.checked)}
+                        style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                      />
+                      🎨 Show edge colors (half-circles)
+                    </label>
+                  </div>
+                )}
+                
                 {/* Edge debugging controls (only for polyhex when placement is highlighted) */}
                 {solvedPolyformType === "polyhex" && highlightedPlacement !== null && tilingResult.placements && (
                   <div style={{ 
@@ -1097,6 +1116,49 @@ export function PolyformExplorer() {
                         )}
                       </div>
                     )}
+                    
+                    {/* Edge Color Debugger - shows SAT-assigned color for current edge */}
+                    {edgeInfo && (tilingResult as HexTilingResult).edgeColorInfo && (() => {
+                      const { canonicalKey } = getCanonicalEdgeKey(
+                        { q: edgeInfo.coord1.q, r: edgeInfo.coord1.r },
+                        edgeInfo.edgeIndex
+                      );
+                      const edgeColor = (tilingResult as HexTilingResult).edgeColorInfo?.edgeColors.get(canonicalKey);
+                      
+                      return (
+                        <div style={{ 
+                          marginTop: "8px", 
+                          padding: "8px", 
+                          backgroundColor: edgeColor ? "#ffeeba" : "#bee5eb",
+                          borderRadius: "4px",
+                          fontSize: "12px",
+                          fontFamily: "monospace",
+                          border: `2px solid ${edgeColor ? "#e74c3c" : "#3498db"}`
+                        }}>
+                          <div style={{ fontWeight: "bold", marginBottom: "4px" }}>
+                            🎨 Edge Color (SAT Variable)
+                          </div>
+                          <div>
+                            <strong>Canonical Key:</strong> {canonicalKey}
+                          </div>
+                          <div>
+                            <strong>Assigned Color:</strong>{" "}
+                            <span style={{ 
+                              padding: "2px 8px", 
+                              borderRadius: "4px",
+                              backgroundColor: edgeColor ? "#e74c3c" : "#3498db",
+                              color: "white",
+                              fontWeight: "bold"
+                            }}>
+                              {edgeColor === undefined ? "N/A" : edgeColor ? "🔴 FILLED (internal)" : "🔵 EMPTY (external)"}
+                            </span>
+                          </div>
+                          <div style={{ marginTop: "4px", fontSize: "11px", color: "#6c757d" }}>
+                            This edge is shared between cells. Both sides see the same SAT-enforced color.
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
                 

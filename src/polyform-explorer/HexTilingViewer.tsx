@@ -1,5 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef } from "react";
-import type { HexPlacement } from "../problem/polyhex-tiling";
+import type { HexPlacement, EdgeColorInfo } from "../problem/polyhex-tiling";
+import { getCanonicalEdgeKey } from "../problem/polyhex-tiling";
 import { getPlacementColor } from "./placementColors";
 
 /** HexTilingViewer - displays the solved hex tiling */
@@ -13,6 +14,9 @@ export interface HexTilingViewerProps {
   highlightedEdge?: number | null;
   onEdgeInfo?: (info: EdgeInfo | null) => void;
   hideFills?: boolean;  // Hide filled hexes to see edges only
+  edgeColorInfo?: EdgeColorInfo;  // Edge coloring data from SAT solver
+  showEdgeColors?: boolean;  // Whether to show edge color half-circles
+  onEdgeColorDebugInfo?: (info: EdgeColorDebugInfo | null) => void;  // Callback for edge color debugger
 }
 
 // Info about a highlighted edge
@@ -25,6 +29,17 @@ export interface EdgeInfo {
   direction: string;
 }
 
+// Debug info for edge color status on both sides of an edge
+export interface EdgeColorDebugInfo {
+  edgeKey: string;
+  cell1: { q: number; r: number };
+  cell2: { q: number; r: number } | null;
+  edgeIndex1: number;
+  edgeIndex2: number | null;
+  color: boolean;  // The assigned edge color from SAT
+  direction: string;
+}
+
 export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({ 
   width, 
   height, 
@@ -34,8 +49,14 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
   highlightedPlacement,
   highlightedEdge,
   onEdgeInfo,
-  hideFills = false
+  hideFills = false,
+  edgeColorInfo,
+  showEdgeColors = false,
+  onEdgeColorDebugInfo
 }) => {
+  // Suppress unused warning - will be used for debugger feature
+  void onEdgeColorDebugInfo;
+  
   // Hex geometry for POINTY-TOP orientation
   // Using standard axial → pixel conversion:
   // x = size * sqrt(3) * (q + r/2)
@@ -463,6 +484,81 @@ export const HexTilingViewer: React.FC<HexTilingViewerProps> = ({
               strokeWidth={2}
             />
           ));
+        })()}
+        
+        {/* Layer 4.5: Draw edge colors as half-circles poking into each cell */}
+        {showEdgeColors && edgeColorInfo && (() => {
+          const halfCircles: Array<{
+            cx: number;
+            cy: number;
+            radius: number;
+            startAngle: number;
+            endAngle: number;
+            filled: boolean;
+            key: string;
+          }> = [];
+          
+          // For each cell, draw half-circles for each edge
+          for (const { q, r } of allAxialCells) {
+            const { cx, cy } = getHexCenter(q, r);
+            const vertices = getHexVertices(cx, cy);
+            
+            // Draw a half-circle on each edge, from the cell's perspective
+            for (let edgeIdx = 0; edgeIdx < 6; edgeIdx++) {
+              const v1 = vertices[edgeIdx];
+              const v2 = vertices[(edgeIdx + 1) % 6];
+              
+              // Get the canonical edge key and color
+              const { canonicalKey } = getCanonicalEdgeKey({ q, r }, edgeIdx);
+              const edgeColor = edgeColorInfo.edgeColors.get(canonicalKey);
+              
+              if (edgeColor === undefined) continue;  // Edge not in solution (shouldn't happen)
+              
+              // Calculate the midpoint of the edge
+              const midX = (v1.x + v2.x) / 2;
+              const midY = (v1.y + v2.y) / 2;
+              
+              // Calculate direction from cell center to edge midpoint (for half-circle orientation)
+              const dirX = midX - cx;
+              const dirY = midY - cy;
+              const angle = Math.atan2(dirY, dirX);
+              
+              // Half-circle radius (smaller than hex size for visual clarity)
+              const radius = hexSize * 0.25;
+              
+              halfCircles.push({
+                cx: midX,
+                cy: midY,
+                radius,
+                startAngle: angle - Math.PI / 2,
+                endAngle: angle + Math.PI / 2,
+                filled: edgeColor,
+                key: `${q},${r},${edgeIdx}`,
+              });
+            }
+          }
+          
+          return halfCircles.map(({ cx, cy, radius, startAngle, endAngle, filled, key }) => {
+            // Create SVG arc path for half-circle
+            // The half-circle "pokes into" the cell from the edge
+            const x1 = cx + radius * Math.cos(startAngle);
+            const y1 = cy + radius * Math.sin(startAngle);
+            const x2 = cx + radius * Math.cos(endAngle);
+            const y2 = cy + radius * Math.sin(endAngle);
+            
+            // Arc path: move to start, arc to end
+            const path = `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2}`;
+            
+            return (
+              <path
+                key={`edgeColor-${key}`}
+                d={path}
+                fill="none"
+                stroke={filled ? "#e74c3c" : "#3498db"}  // Red for filled, blue for empty
+                strokeWidth={2}
+              />
+            );
+          });
         })()}
         
         {/* Layer 5: Highlighted edge (bright cyan, thick) */}
