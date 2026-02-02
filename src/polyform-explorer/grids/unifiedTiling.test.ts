@@ -128,6 +128,12 @@ function testMismatchedEdgesDetection() {
   console.log("    Cell (0,0): ", edgeState[0][0]);
   console.log("    Cell (0,1): ", edgeState[0][1]);
   
+  // Both placements use the same originalCells because they represent the same
+  // 2-cell domino tile being placed at different positions. The originalCells
+  // array describes which cells of the original tile correspond to which cells
+  // in the placed position.
+  const tileOriginalCells = [{ q: 0, r: 0 }, { q: 1, r: 0 }];
+  
   // Manually create a placement where two tiles are adjacent
   // but their shared edge has different values
   const placements: UnifiedPlacement[] = [
@@ -135,21 +141,22 @@ function testMismatchedEdgesDetection() {
       id: 0,
       transformIndex: 0, // No rotation
       cells: [{ q: 0, r: 0 }, { q: 1, r: 0 }],
-      originalCells: [{ q: 0, r: 0 }, { q: 1, r: 0 }],
+      originalCells: tileOriginalCells,
     },
     {
       id: 1,
       transformIndex: 0, // No rotation
       cells: [{ q: 2, r: 0 }, { q: 3, r: 0 }],
-      originalCells: [{ q: 0, r: 0 }, { q: 1, r: 0 }],
+      originalCells: tileOriginalCells,
     },
   ];
   
   // Debug: what should the edge values be?
+  // Note: edgeState[r][q] so edgeState[0][1] = row 0, col 1 = cell at (q=1, r=0)
   console.log("  Expected edge values:");
-  console.log("    Cell (1,0) gets originalCell (1,0) with edges", edgeState[0][1]);
+  console.log("    Cell (1,0) gets edgeState[r=0][q=1] =", edgeState[0][1]);
   console.log("    Cell (1,0) right edge (index 1) should be:", edgeState[0][1]?.[1]);
-  console.log("    Cell (2,0) gets originalCell (0,0) with edges", edgeState[0][0]);
+  console.log("    Cell (2,0) gets edgeState[r=0][q=0] =", edgeState[0][0]);
   console.log("    Cell (2,0) left edge (index 3) should be:", edgeState[0][0]?.[3]);
   
   // Check for adjacency violations between the two placements
