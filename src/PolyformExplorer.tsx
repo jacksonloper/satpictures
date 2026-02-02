@@ -11,6 +11,15 @@ import {
   transformPolyiamond,
   flipHorizontal,
   flipVertical,
+  rotatePolyominoEdgeState,
+  rotatePolyhexEdgeState,
+  rotatePolyiamondEdgeState,
+  flipPolyominoEdgeStateH,
+  flipPolyominoEdgeStateV,
+  flipPolyhexEdgeStateH,
+  flipPolyhexEdgeStateV,
+  flipPolyiamondEdgeStateH,
+  flipPolyiamondEdgeStateV,
 } from "./utils/polyformTransforms";
 import {
   TilingViewer,
@@ -34,8 +43,6 @@ import {
   type EdgeAdjacencyViolation,
   type UnifiedEdgeInfo,
   createEmptyEdgeState,
-  rotateEdgeState,
-  flipEdgeState,
   squareGridDefinition,
   hexGridDefinition,
   triGridDefinition,
@@ -632,8 +639,6 @@ export function PolyformExplorer() {
   
   // Rotate the polyform
   const handleRotate = useCallback(() => {
-    const grid = getGridDef(polyformType);
-    
     setCells(prev => {
       let rotated: boolean[][];
       switch (polyformType) {
@@ -662,14 +667,23 @@ export function PolyformExplorer() {
       return rotated;
     });
     
-    // Also rotate edge state
-    setEdgeState(prev => rotateEdgeState(grid, prev));
+    // Also rotate edge state - use matching transformation function
+    setEdgeState(prev => {
+      switch (polyformType) {
+        case "polyomino":
+          return rotatePolyominoEdgeState(prev);
+        case "polyhex":
+          return rotatePolyhexEdgeState(prev);
+        case "polyiamond":
+          return rotatePolyiamondEdgeState(prev);
+        default:
+          return prev;
+      }
+    });
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip horizontally (geometry-correct per polyform type)
   const handleFlipH = useCallback(() => {
-    const grid = getGridDef(polyformType);
-    
     setCells(prev => {
       let next: boolean[][];
       switch (polyformType) {
@@ -698,15 +712,23 @@ export function PolyformExplorer() {
       return next;
     });
     
-    // Also flip edge state
-    setEdgeState(prev => flipEdgeState(grid, prev));
+    // Also flip edge state - use matching transformation function
+    setEdgeState(prev => {
+      switch (polyformType) {
+        case "polyomino":
+          return flipPolyominoEdgeStateH(prev);
+        case "polyhex":
+          return flipPolyhexEdgeStateH(prev);
+        case "polyiamond":
+          return flipPolyiamondEdgeStateH(prev);
+        default:
+          return prev;
+      }
+    });
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
   // Flip vertically (geometry-correct per polyform type)
-  // Note: For edge state, vertical flip is implemented as horizontal flip + 180° rotation
   const handleFlipV = useCallback(() => {
-    const grid = getGridDef(polyformType);
-    
     setCells(prev => {
       let next: boolean[][];
       switch (polyformType) {
@@ -735,18 +757,18 @@ export function PolyformExplorer() {
       return next;
     });
     
-    // For edge state, vertical flip = horizontal flip + 180° rotation.
-    // The grid definition only provides a horizontal flip operator, but a vertical
-    // flip is geometrically equivalent to: flip horizontally, then rotate 180°.
-    // For a square grid (4 rotations), 180° = 2 rotations.
-    // For hex/triangle grids (6 rotations), 180° = 3 rotations.
+    // Also flip edge state vertically - use matching transformation function
     setEdgeState(prev => {
-      let state = flipEdgeState(grid, prev);
-      const halfRotations = Math.floor(grid.numRotations / 2);
-      for (let i = 0; i < halfRotations; i++) {
-        state = rotateEdgeState(grid, state);
+      switch (polyformType) {
+        case "polyomino":
+          return flipPolyominoEdgeStateV(prev);
+        case "polyhex":
+          return flipPolyhexEdgeStateV(prev);
+        case "polyiamond":
+          return flipPolyiamondEdgeStateV(prev);
+        default:
+          return prev;
       }
-      return state;
     });
   }, [polyformType, setCells, setEdgeState, setGridHeight, setGridWidth, setHeightInput, setWidthInput, setWidthError, setHeightError]);
   
