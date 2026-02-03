@@ -338,10 +338,11 @@ function computeDistances(
 // Color palette based on distance from root (gradient from root color)
 function getDistanceColor(distance: number, maxDistance: number): string {
   // Use HSL for smooth gradient
-  // Root is bright, farther cells are darker/different hue
-  const hue = (distance * 30) % 360; // Rotate hue based on distance
+  // Map distance to a full hue rotation (0-360) across the maxDistance
+  // This ensures unique colors for each distance level up to maxDistance
+  const hue = (distance / Math.max(maxDistance, 1)) * 360;
   const saturation = 70;
-  const lightness = 60 - (distance / Math.max(maxDistance, 1)) * 20; // Slightly darker as distance increases
+  const lightness = 55; // Consistent lightness for readability
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
@@ -890,8 +891,13 @@ export function WallpaperMazeExplorer() {
           borderRadius: "5px",
           marginBottom: "20px",
           fontFamily: "monospace"
-        }}>
-          <strong>Selected: ({selectedCell.row}, {selectedCell.col})</strong> — Neighbors highlighted with <span style={{ color: "#ff4081" }}>pink dashed border</span>
+        }}
+        role="status"
+        aria-live="polite"
+        >
+          <strong>Selected: ({selectedCell.row}, {selectedCell.col})</strong> — 
+          Adjacent cells are highlighted with a distinctive border pattern
+          <span style={{ color: "#ff4081" }} aria-hidden="true"> (pink dashed)</span>
         </div>
       )}
       
