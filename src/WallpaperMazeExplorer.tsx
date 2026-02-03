@@ -117,6 +117,9 @@ function getDistanceColor(distance: number, maxDistance: number): string {
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
+// View mode type
+type ViewMode = "maze" | "graph";
+
 export function WallpaperMazeExplorer() {
   const [length, setLength] = useState(4);
   const [multiplier, setMultiplier] = useState(2);
@@ -128,6 +131,7 @@ export function WallpaperMazeExplorer() {
   const [selectedCell, setSelectedCell] = useState<GridCell | null>(null);
   const [satStats, setSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("maze");
   
   // Worker ref for cancel support
   const workerRef = useRef<Worker | null>(null);
@@ -539,6 +543,154 @@ export function WallpaperMazeExplorer() {
     return mazes;
   };
   
+  // Render the graph view showing dots for cells and arrows for parent relationships
+  const renderGraphView = () => {
+    if (!solution) return null;
+    
+    const dotRadius = 4;
+    const arrowSize = 6;
+    const graphPadding = 30;
+    const graphCellSize = 30; // Smaller spacing for graph view
+    
+    const graphWidth = graphPadding * 2 + length * graphCellSize;
+    const graphHeight = graphPadding * 2 + length * graphCellSize;
+    
+    const dots: React.ReactNode[] = [];
+    const arrows: React.ReactNode[] = [];
+    
+    // Helper to get position for a cell
+    const getPos = (row: number, col: number) => ({
+      x: graphPadding + col * graphCellSize + graphCellSize / 2,
+      y: graphPadding + row * graphCellSize + graphCellSize / 2,
+    });
+    
+    // Draw dots for each cell
+    for (let row = 0; row < length; row++) {
+      for (let col = 0; col < length; col++) {
+        const { x, y } = getPos(row, col);
+        const isRoot = row === rootRow && col === rootCol;
+        const distance = solution.distanceFromRoot.get(cellKey(row, col)) ?? 0;
+        const fillColor = isRoot ? "#ffeb3b" : getDistanceColor(distance, maxDistance);
+        
+        dots.push(
+          <circle
+            key={`dot-${row}-${col}`}
+            cx={x}
+            cy={y}
+            r={isRoot ? dotRadius + 2 : dotRadius}
+            fill={fillColor}
+            stroke={isRoot ? "#000" : "#333"}
+            strokeWidth={isRoot ? 2 : 1}
+          />
+        );
+      }
+    }
+    
+    // Draw arrows from each cell to its parent
+    for (let row = 0; row < length; row++) {
+      for (let col = 0; col < length; col++) {
+        const key = cellKey(row, col);
+        const parent = solution.parentOf.get(key);
+        
+        if (parent === null || parent === undefined) continue; // Root has no parent
+        
+        const childPos = getPos(row, col);
+        
+        // Determine the cardinal direction to the parent
+        // Instead of drawing to wrapped position, draw in the logical direction
+        const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
+        
+        let direction: "N" | "S" | "E" | "W" | null = null;
+        if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
+          direction = "N";
+        } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
+          direction = "S";
+        } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
+          direction = "E";
+        } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
+          direction = "W";
+        }
+        
+        if (!direction) continue;
+        
+        // Calculate arrow endpoint in the cardinal direction
+        // Draw towards parent, stopping short of the parent dot
+        const arrowLength = graphCellSize * 0.7;
+        let dx = 0, dy = 0;
+        
+        switch (direction) {
+          case "N": dy = -arrowLength; break;
+          case "S": dy = arrowLength; break;
+          case "E": dx = arrowLength; break;
+          case "W": dx = -arrowLength; break;
+        }
+        
+        const endX = childPos.x + dx;
+        const endY = childPos.y + dy;
+        
+        // Calculate arrowhead points
+        const angle = Math.atan2(dy, dx);
+        const arrowAngle = Math.PI / 6; // 30 degrees
+        
+        const arrowPoint1X = endX - arrowSize * Math.cos(angle - arrowAngle);
+        const arrowPoint1Y = endY - arrowSize * Math.sin(angle - arrowAngle);
+        const arrowPoint2X = endX - arrowSize * Math.cos(angle + arrowAngle);
+        const arrowPoint2Y = endY - arrowSize * Math.sin(angle + arrowAngle);
+        
+        // Get color based on distance
+        const distance = solution.distanceFromRoot.get(key) ?? 0;
+        const strokeColor = getDistanceColor(distance, maxDistance);
+        
+        arrows.push(
+          <g key={`arrow-${row}-${col}`}>
+            {/* Arrow line */}
+            <line
+              x1={childPos.x}
+              y1={childPos.y}
+              x2={endX}
+              y2={endY}
+              stroke={strokeColor}
+              strokeWidth={2}
+            />
+            {/* Arrowhead */}
+            <polygon
+              points={`${endX},${endY} ${arrowPoint1X},${arrowPoint1Y} ${arrowPoint2X},${arrowPoint2Y}`}
+              fill={strokeColor}
+            />
+          </g>
+        );
+      }
+    }
+    
+    return (
+      <svg width={graphWidth} height={graphHeight} style={{ backgroundColor: "#fff" }}>
+        {/* Grid lines for reference */}
+        <g stroke="#eee" strokeWidth={1}>
+          {Array.from({ length: length + 1 }, (_, i) => (
+            <line
+              key={`vline-${i}`}
+              x1={graphPadding + i * graphCellSize}
+              y1={graphPadding}
+              x2={graphPadding + i * graphCellSize}
+              y2={graphPadding + length * graphCellSize}
+            />
+          ))}
+          {Array.from({ length: length + 1 }, (_, i) => (
+            <line
+              key={`hline-${i}`}
+              x1={graphPadding}
+              y1={graphPadding + i * graphCellSize}
+              x2={graphPadding + length * graphCellSize}
+              y2={graphPadding + i * graphCellSize}
+            />
+          ))}
+        </g>
+        {arrows}
+        {dots}
+      </svg>
+    );
+  };
+  
   const svgWidth = padding * 2 + multiplier * length * cellSize;
   const svgHeight = padding * 2 + multiplier * length * cellSize;
   
@@ -654,6 +806,45 @@ export function WallpaperMazeExplorer() {
             </button>
           )}
         </div>
+        
+        {/* View mode toggle */}
+        {solution && (
+          <div>
+            <label style={{ display: "block", marginBottom: "5px" }}>
+              View Mode:
+            </label>
+            <div style={{ display: "flex", gap: "5px" }}>
+              <button
+                onClick={() => setViewMode("maze")}
+                style={{
+                  padding: "5px 10px",
+                  fontSize: "14px",
+                  backgroundColor: viewMode === "maze" ? "#3498db" : "#e0e0e0",
+                  color: viewMode === "maze" ? "white" : "#333",
+                  border: "none",
+                  borderRadius: "5px 0 0 5px",
+                  cursor: "pointer",
+                }}
+              >
+                Maze
+              </button>
+              <button
+                onClick={() => setViewMode("graph")}
+                style={{
+                  padding: "5px 10px",
+                  fontSize: "14px",
+                  backgroundColor: viewMode === "graph" ? "#3498db" : "#e0e0e0",
+                  color: viewMode === "graph" ? "white" : "#333",
+                  border: "none",
+                  borderRadius: "0 5px 5px 0",
+                  cursor: "pointer",
+                }}
+              >
+                Graph
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       
       {/* Show solving status with SAT stats */}
@@ -685,7 +876,7 @@ export function WallpaperMazeExplorer() {
         </div>
       )}
       
-      {selectedCell && neighborInfo && (
+      {selectedCell && neighborInfo && viewMode === "maze" && (
         <div style={{ 
           backgroundColor: "#f0f0f0", 
           padding: "10px", 
@@ -708,14 +899,20 @@ export function WallpaperMazeExplorer() {
         backgroundColor: "#fff",
         display: "inline-block"
       }}>
-        <svg width={svgWidth} height={svgHeight}>
-          {renderAllMazes()}
-        </svg>
+        {viewMode === "maze" ? (
+          <svg width={svgWidth} height={svgHeight}>
+            {renderAllMazes()}
+          </svg>
+        ) : (
+          renderGraphView()
+        )}
       </div>
       
       {solution && (
         <div style={{ marginTop: "20px", color: "#2ecc71" }}>
-          ✓ Maze solved! Cells colored by distance from root. Click cells to see neighbors.
+          ✓ Maze solved! {viewMode === "maze" 
+            ? "Cells colored by distance from root. Click cells to see neighbors." 
+            : "Graph shows arrows pointing from each cell to its parent in the spanning tree."}
         </div>
       )}
     </div>
