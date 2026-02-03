@@ -592,7 +592,7 @@ export function WallpaperMazeExplorer() {
         const key = cellKey(row, col);
         const parent = solution.parentOf.get(key);
         
-        if (parent === null || parent === undefined) continue; // Root has no parent
+        if (parent == null) continue; // Root has no parent
         
         const childPos = getPos(row, col);
         
