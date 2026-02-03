@@ -106,14 +106,111 @@ function getWrappedNeighbors(
 }
 
 
-// Get a color for a specific copy index (used to color each root/copy differently)
-function getCopyColor(copyIndex: number): string {
+
+// Get a color for a specific root index (used to color cells by which root they connect to)
+function getRootColor(rootIndex: number): string {
   // Use golden ratio to spread colors evenly
   const goldenRatio = 0.618033988749895;
-  const hue = ((copyIndex * goldenRatio) % 1) * 360;
+  const hue = ((rootIndex * goldenRatio) % 1) * 360;
   const saturation = 65;
   const lightness = 50;
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
+
+/**
+ * Trace parent links from a cell in a specific copy, tracking which copy we end up in.
+ * Returns the copy coordinates (copyRow, copyCol) of the root we connect to.
+ * 
+ * When following a parent link that wraps (due to wallpaper group), we track
+ * how that affects our position in copy-space.
+ */
+function traceToRoot(
+  row: number,
+  col: number,
+  copyRow: number,
+  copyCol: number,
+  length: number,
+  multiplier: number,
+  wallpaperGroup: WallpaperGroup,
+  parentOf: Map<string, GridCell | null>
+): { copyRow: number; copyCol: number } {
+  let currentRow = row;
+  let currentCol = col;
+  let currentCopyRow = copyRow;
+  let currentCopyCol = copyCol;
+  
+  // Follow parent links until we reach the root
+  let iterations = 0;
+  const maxIterations = length * length * multiplier * multiplier; // Safety limit
+  
+  while (iterations < maxIterations) {
+    const key = cellKey(currentRow, currentCol);
+    const parent = parentOf.get(key);
+    
+    if (parent == null) {
+      // We've reached the root
+      break;
+    }
+    
+    // Determine which direction we're moving to the parent
+    const neighbors = getWrappedNeighbors(currentRow, currentCol, length, wallpaperGroup);
+    
+    // Check which neighbor matches the parent and if it's a wrapped edge
+    let wrapped = false;
+    let wrapDeltaCopyRow = 0;
+    let wrapDeltaCopyCol = 0;
+    
+    if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
+      // Moving north
+      if (currentRow === 0) {
+        // Wrapped north edge
+        wrapped = true;
+        wrapDeltaCopyRow = -1;
+        if (wallpaperGroup === "P2") {
+          // P2 wrapping also affects col position in copy space
+          // The column flips, which can change effective copy
+        }
+      }
+    } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
+      // Moving south
+      if (currentRow === length - 1) {
+        wrapped = true;
+        wrapDeltaCopyRow = 1;
+      }
+    } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
+      // Moving east
+      if (currentCol === length - 1) {
+        wrapped = true;
+        wrapDeltaCopyCol = 1;
+      }
+    } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
+      // Moving west
+      if (currentCol === 0) {
+        wrapped = true;
+        wrapDeltaCopyCol = -1;
+      }
+    }
+    
+    if (wrapped) {
+      // Update copy coordinates with wrapping
+      currentCopyRow = ((currentCopyRow + wrapDeltaCopyRow) % multiplier + multiplier) % multiplier;
+      currentCopyCol = ((currentCopyCol + wrapDeltaCopyCol) % multiplier + multiplier) % multiplier;
+    }
+    
+    // Move to parent
+    currentRow = parent.row;
+    currentCol = parent.col;
+    iterations++;
+  }
+  
+  return { copyRow: currentCopyRow, copyCol: currentCopyCol };
+}
+
+/**
+ * Get a unique root index from copy coordinates
+ */
+function rootIndexFromCopy(copyRow: number, copyCol: number, multiplier: number): number {
+  return copyRow * multiplier + copyCol;
 }
 
 // View mode type
@@ -254,6 +351,10 @@ export function WallpaperMazeExplorer() {
     const walls: React.ReactNode[] = [];
     const highlights: React.ReactNode[] = [];
     
+    // Get copy coordinates from index
+    const copyRow = Math.floor(copyIndex / multiplier);
+    const copyCol = copyIndex % multiplier;
+    
     // Determine which cells are neighbors of the selected cell (for highlighting)
     const neighborCells = new Set<string>();
     if (selectedCell && neighborInfo) {
@@ -262,9 +363,6 @@ export function WallpaperMazeExplorer() {
       neighborCells.add(cellKey(neighborInfo.E.row, neighborInfo.E.col));
       neighborCells.add(cellKey(neighborInfo.W.row, neighborInfo.W.col));
     }
-    
-    // Get the color for this copy
-    const copyColor = getCopyColor(copyIndex);
     
     // Render cells
     for (let row = 0; row < length; row++) {
@@ -275,10 +373,17 @@ export function WallpaperMazeExplorer() {
         const isSelected = selectedCell && selectedCell.row === row && selectedCell.col === col;
         const isNeighbor = neighborCells.has(cellKey(row, col));
         
-        // Determine cell color - use copy color for all cells in this copy
+        // Determine cell color by tracing to root
         let fillColor: string;
         if (solution) {
-          fillColor = copyColor; // All cells in a copy get the same color (their root's color)
+          // Trace parent links to find which root this cell connects to
+          const rootCopy = traceToRoot(
+            row, col, copyRow, copyCol,
+            length, multiplier, wallpaperGroup,
+            solution.parentOf
+          );
+          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+          fillColor = getRootColor(rootIdx);
         } else {
           fillColor = "#e0e0e0"; // Gray for unsolved cells
         }
@@ -582,8 +687,9 @@ export function WallpaperMazeExplorer() {
         );
       }
       
-      // Get the color for this copy
-      const copyColor = getCopyColor(copyIndex);
+      // Get copy coordinates from index
+      const copyRow = Math.floor(copyIndex / multiplier);
+      const copyCol = copyIndex % multiplier;
       
       // Draw dots for each cell
       for (let row = 0; row < length; row++) {
@@ -591,13 +697,22 @@ export function WallpaperMazeExplorer() {
           const { x, y } = getPos(row, col, offsetX, offsetY);
           const isRoot = row === rootRow && col === rootCol;
           
+          // Trace to root to determine color
+          const rootCopy = traceToRoot(
+            row, col, copyRow, copyCol,
+            length, multiplier, wallpaperGroup,
+            solution.parentOf
+          );
+          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+          const cellColor = getRootColor(rootIdx);
+          
           dots.push(
             <circle
               key={`dot-${copyIndex}-${row}-${col}`}
               cx={x}
               cy={y}
               r={isRoot ? dotRadius + 2 : dotRadius}
-              fill={copyColor}
+              fill={cellColor}
               stroke={isRoot ? "#000" : "#333"}
               strokeWidth={isRoot ? 2 : 1}
             />
@@ -645,6 +760,15 @@ export function WallpaperMazeExplorer() {
           const endX = childPos.x + dx;
           const endY = childPos.y + dy;
           
+          // Trace to root to determine color
+          const rootCopy = traceToRoot(
+            row, col, copyRow, copyCol,
+            length, multiplier, wallpaperGroup,
+            solution.parentOf
+          );
+          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+          const edgeColor = getRootColor(rootIdx);
+          
           arrows.push(
             <line
               key={`edge-${copyIndex}-${row}-${col}`}
@@ -652,7 +776,7 @@ export function WallpaperMazeExplorer() {
               y1={childPos.y}
               x2={endX}
               y2={endY}
-              stroke={copyColor}
+              stroke={edgeColor}
               strokeWidth={2}
             />
           );
