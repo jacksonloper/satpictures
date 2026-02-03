@@ -174,9 +174,7 @@ export function WallpaperMazeExplorer() {
       // Result message
       if (response.success && response.result) {
         // Convert arrays back to Maps
-        const parentOf = new Map<string, GridCell | null>(
-          response.result.parentOf.map(([key, value]) => [key, value])
-        );
+        const parentOf = new Map<string, GridCell | null>(response.result.parentOf);
         const distanceFromRoot = new Map<string, number>(response.result.distanceFromRoot);
         
         setSolution({
