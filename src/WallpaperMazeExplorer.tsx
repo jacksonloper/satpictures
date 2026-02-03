@@ -106,14 +106,13 @@ function getWrappedNeighbors(
 }
 
 
-// Color palette based on distance from root (gradient from root color)
-function getDistanceColor(distance: number, maxDistance: number): string {
-  // Use HSL for smooth gradient
-  // Map distance to a full hue rotation (0-360) across the maxDistance
-  // This ensures unique colors for each distance level up to maxDistance
-  const hue = (distance / Math.max(maxDistance, 1)) * 360;
-  const saturation = 70;
-  const lightness = 55; // Consistent lightness for readability
+// Get a color for a specific copy index (used to color each root/copy differently)
+function getCopyColor(copyIndex: number): string {
+  // Use golden ratio to spread colors evenly
+  const goldenRatio = 0.618033988749895;
+  const hue = ((copyIndex * goldenRatio) % 1) * 360;
+  const saturation = 65;
+  const lightness = 50;
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
@@ -245,16 +244,6 @@ export function WallpaperMazeExplorer() {
     return getWrappedNeighbors(selectedCell.row, selectedCell.col, length, wallpaperGroup);
   }, [selectedCell, length, wallpaperGroup]);
   
-  // Compute max distance for color scaling
-  const maxDistance = useMemo(() => {
-    if (!solution) return 1;
-    let max = 0;
-    for (const dist of solution.distanceFromRoot.values()) {
-      if (dist > max) max = dist;
-    }
-    return Math.max(max, 1);
-  }, [solution]);
-  
   // Render a single maze grid
   const renderMazeGrid = (
     copyIndex: number,
@@ -274,6 +263,9 @@ export function WallpaperMazeExplorer() {
       neighborCells.add(cellKey(neighborInfo.W.row, neighborInfo.W.col));
     }
     
+    // Get the color for this copy
+    const copyColor = getCopyColor(copyIndex);
+    
     // Render cells
     for (let row = 0; row < length; row++) {
       for (let col = 0; col < length; col++) {
@@ -283,13 +275,10 @@ export function WallpaperMazeExplorer() {
         const isSelected = selectedCell && selectedCell.row === row && selectedCell.col === col;
         const isNeighbor = neighborCells.has(cellKey(row, col));
         
-        // Determine cell color based on distance from root
+        // Determine cell color - use copy color for all cells in this copy
         let fillColor: string;
-        if (isRoot) {
-          fillColor = "#ffeb3b"; // Yellow for root
-        } else if (solution && solution.distanceFromRoot.has(cellKey(row, col))) {
-          const dist = solution.distanceFromRoot.get(cellKey(row, col))!;
-          fillColor = getDistanceColor(dist, maxDistance);
+        if (solution) {
+          fillColor = copyColor; // All cells in a copy get the same color (their root's color)
         } else {
           fillColor = "#e0e0e0"; // Gray for unsolved cells
         }
@@ -548,7 +537,6 @@ export function WallpaperMazeExplorer() {
     if (!solution) return null;
     
     const dotRadius = 4;
-    const arrowSize = 6;
     const graphPadding = 20;
     const graphCellSize = 30; // Smaller spacing for graph view
     
@@ -594,13 +582,14 @@ export function WallpaperMazeExplorer() {
         );
       }
       
+      // Get the color for this copy
+      const copyColor = getCopyColor(copyIndex);
+      
       // Draw dots for each cell
       for (let row = 0; row < length; row++) {
         for (let col = 0; col < length; col++) {
           const { x, y } = getPos(row, col, offsetX, offsetY);
           const isRoot = row === rootRow && col === rootCol;
-          const distance = solution.distanceFromRoot.get(cellKey(row, col)) ?? 0;
-          const fillColor = isRoot ? "#ffeb3b" : getDistanceColor(distance, maxDistance);
           
           dots.push(
             <circle
@@ -608,7 +597,7 @@ export function WallpaperMazeExplorer() {
               cx={x}
               cy={y}
               r={isRoot ? dotRadius + 2 : dotRadius}
-              fill={fillColor}
+              fill={copyColor}
               stroke={isRoot ? "#000" : "#333"}
               strokeWidth={isRoot ? 2 : 1}
             />
@@ -616,7 +605,7 @@ export function WallpaperMazeExplorer() {
         }
       }
       
-      // Draw arrows from each cell to its parent
+      // Draw lines from each cell to its parent
       for (let row = 0; row < length; row++) {
         for (let col = 0; col < length; col++) {
           const key = cellKey(row, col);
@@ -643,51 +632,29 @@ export function WallpaperMazeExplorer() {
           
           if (!direction) continue;
           
-          // Calculate arrow endpoint in the cardinal direction
-          // Draw towards parent, stopping short of the parent dot
-          const arrowLength = graphCellSize * 0.7;
+          // Calculate line endpoint - go all the way to the next grid position
           let dx = 0, dy = 0;
           
           switch (direction) {
-            case "N": dy = -arrowLength; break;
-            case "S": dy = arrowLength; break;
-            case "E": dx = arrowLength; break;
-            case "W": dx = -arrowLength; break;
+            case "N": dy = -graphCellSize; break;
+            case "S": dy = graphCellSize; break;
+            case "E": dx = graphCellSize; break;
+            case "W": dx = -graphCellSize; break;
           }
           
           const endX = childPos.x + dx;
           const endY = childPos.y + dy;
           
-          // Calculate arrowhead points
-          const angle = Math.atan2(dy, dx);
-          const arrowAngle = Math.PI / 6; // 30 degrees
-          
-          const arrowPoint1X = endX - arrowSize * Math.cos(angle - arrowAngle);
-          const arrowPoint1Y = endY - arrowSize * Math.sin(angle - arrowAngle);
-          const arrowPoint2X = endX - arrowSize * Math.cos(angle + arrowAngle);
-          const arrowPoint2Y = endY - arrowSize * Math.sin(angle + arrowAngle);
-          
-          // Get color based on distance
-          const distance = solution.distanceFromRoot.get(key) ?? 0;
-          const strokeColor = getDistanceColor(distance, maxDistance);
-          
           arrows.push(
-            <g key={`arrow-${copyIndex}-${row}-${col}`}>
-              {/* Arrow line */}
-              <line
-                x1={childPos.x}
-                y1={childPos.y}
-                x2={endX}
-                y2={endY}
-                stroke={strokeColor}
-                strokeWidth={2}
-              />
-              {/* Arrowhead */}
-              <polygon
-                points={`${endX},${endY} ${arrowPoint1X},${arrowPoint1Y} ${arrowPoint2X},${arrowPoint2Y}`}
-                fill={strokeColor}
-              />
-            </g>
+            <line
+              key={`edge-${copyIndex}-${row}-${col}`}
+              x1={childPos.x}
+              y1={childPos.y}
+              x2={endX}
+              y2={endY}
+              stroke={copyColor}
+              strokeWidth={2}
+            />
           );
         }
       }
