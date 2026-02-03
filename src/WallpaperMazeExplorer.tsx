@@ -500,21 +500,21 @@ export function WallpaperMazeExplorer() {
                 x={x + 4}
                 y={y + cellSize / 2 + 3}
                 textAnchor="start"
-                fontSize="10"
+                fontSize="8"
                 fill="#000"
                 fontWeight="bold"
               >
-                W
+                W({neighborInfo.W.row},{neighborInfo.W.col})
               </text>
               <text
                 x={x + cellSize - 4}
                 y={y + cellSize / 2 + 3}
                 textAnchor="end"
-                fontSize="10"
+                fontSize="8"
                 fill="#000"
                 fontWeight="bold"
               >
-                E
+                E({neighborInfo.E.row},{neighborInfo.E.col})
               </text>
             </g>
           );
