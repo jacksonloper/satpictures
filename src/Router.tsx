@@ -1,19 +1,26 @@
 import { useState, useEffect } from 'react';
 import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
+import WallpaperMazeExplorer from './WallpaperMazeExplorer.tsx';
+
+type Page = 'main' | 'polyforms' | 'wallpapermazes';
 
 /** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
-  const [page, setPage] = useState(() => {
+  const [page, setPage] = useState<Page>(() => {
     const hash = window.location.hash.slice(1);
-    // Empty hash, no hash, or '#main' all show the main page
-    return hash === 'polyforms' ? 'polyforms' : 'main';
+    // Map hash to page
+    if (hash === 'polyforms') return 'polyforms';
+    if (hash === 'wallpapermazes') return 'wallpapermazes';
+    return 'main';
   });
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
-      setPage(hash === 'polyforms' ? 'polyforms' : 'main');
+      if (hash === 'polyforms') setPage('polyforms');
+      else if (hash === 'wallpapermazes') setPage('wallpapermazes');
+      else setPage('main');
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
@@ -50,10 +57,23 @@ export function Router() {
         >
           🧩 Polyforms
         </a>
+        <a
+          href="#wallpapermazes"
+          style={{
+            color: page === 'wallpapermazes' ? '#3498db' : 'white',
+            textDecoration: 'none',
+            fontWeight: page === 'wallpapermazes' ? 'bold' : 'normal',
+            fontSize: '16px',
+          }}
+        >
+          🧱 Wallpaper Mazes
+        </a>
       </nav>
 
       {/* Page Content */}
-      {page === 'main' ? <App /> : <PolyformExplorer />}
+      {page === 'main' && <App />}
+      {page === 'polyforms' && <PolyformExplorer />}
+      {page === 'wallpapermazes' && <WallpaperMazeExplorer />}
     </>
   );
 }
