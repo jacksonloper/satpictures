@@ -549,144 +549,201 @@ export function WallpaperMazeExplorer() {
     
     const dotRadius = 4;
     const arrowSize = 6;
-    const graphPadding = 30;
+    const graphPadding = 20;
     const graphCellSize = 30; // Smaller spacing for graph view
     
-    const graphWidth = graphPadding * 2 + length * graphCellSize;
-    const graphHeight = graphPadding * 2 + length * graphCellSize;
+    const gridSize = length * graphCellSize;
+    const totalWidth = graphPadding * 2 + multiplier * gridSize;
+    const totalHeight = graphPadding * 2 + multiplier * gridSize;
     
-    const dots: React.ReactNode[] = [];
-    const arrows: React.ReactNode[] = [];
-    
-    // Helper to get position for a cell
-    const getPos = (row: number, col: number) => ({
-      x: graphPadding + col * graphCellSize + graphCellSize / 2,
-      y: graphPadding + row * graphCellSize + graphCellSize / 2,
+    // Helper to get position for a cell within a single grid
+    const getPos = (row: number, col: number, offsetX: number, offsetY: number) => ({
+      x: offsetX + col * graphCellSize + graphCellSize / 2,
+      y: offsetY + row * graphCellSize + graphCellSize / 2,
     });
     
-    // Draw dots for each cell
-    for (let row = 0; row < length; row++) {
-      for (let col = 0; col < length; col++) {
-        const { x, y } = getPos(row, col);
-        const isRoot = row === rootRow && col === rootCol;
-        const distance = solution.distanceFromRoot.get(cellKey(row, col)) ?? 0;
-        const fillColor = isRoot ? "#ffeb3b" : getDistanceColor(distance, maxDistance);
-        
-        dots.push(
-          <circle
-            key={`dot-${row}-${col}`}
-            cx={x}
-            cy={y}
-            r={isRoot ? dotRadius + 2 : dotRadius}
-            fill={fillColor}
-            stroke={isRoot ? "#000" : "#333"}
-            strokeWidth={isRoot ? 2 : 1}
+    // Render a single graph grid
+    const renderSingleGraph = (copyIndex: number, offsetX: number, offsetY: number) => {
+      const dots: React.ReactNode[] = [];
+      const arrows: React.ReactNode[] = [];
+      const gridLines: React.ReactNode[] = [];
+      
+      // Draw grid lines for reference
+      for (let i = 0; i <= length; i++) {
+        gridLines.push(
+          <line
+            key={`vline-${copyIndex}-${i}`}
+            x1={offsetX + i * graphCellSize}
+            y1={offsetY}
+            x2={offsetX + i * graphCellSize}
+            y2={offsetY + gridSize}
+            stroke="#eee"
+            strokeWidth={1}
+          />
+        );
+        gridLines.push(
+          <line
+            key={`hline-${copyIndex}-${i}`}
+            x1={offsetX}
+            y1={offsetY + i * graphCellSize}
+            x2={offsetX + gridSize}
+            y2={offsetY + i * graphCellSize}
+            stroke="#eee"
+            strokeWidth={1}
           />
         );
       }
-    }
+      
+      // Draw dots for each cell
+      for (let row = 0; row < length; row++) {
+        for (let col = 0; col < length; col++) {
+          const { x, y } = getPos(row, col, offsetX, offsetY);
+          const isRoot = row === rootRow && col === rootCol;
+          const distance = solution.distanceFromRoot.get(cellKey(row, col)) ?? 0;
+          const fillColor = isRoot ? "#ffeb3b" : getDistanceColor(distance, maxDistance);
+          
+          dots.push(
+            <circle
+              key={`dot-${copyIndex}-${row}-${col}`}
+              cx={x}
+              cy={y}
+              r={isRoot ? dotRadius + 2 : dotRadius}
+              fill={fillColor}
+              stroke={isRoot ? "#000" : "#333"}
+              strokeWidth={isRoot ? 2 : 1}
+            />
+          );
+        }
+      }
+      
+      // Draw arrows from each cell to its parent
+      for (let row = 0; row < length; row++) {
+        for (let col = 0; col < length; col++) {
+          const key = cellKey(row, col);
+          const parent = solution.parentOf.get(key);
+          
+          if (parent == null) continue; // Root has no parent
+          
+          const childPos = getPos(row, col, offsetX, offsetY);
+          
+          // Determine the cardinal direction to the parent
+          // Instead of drawing to wrapped position, draw in the logical direction
+          const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
+          
+          let direction: "N" | "S" | "E" | "W" | null = null;
+          if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
+            direction = "N";
+          } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
+            direction = "S";
+          } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
+            direction = "E";
+          } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
+            direction = "W";
+          }
+          
+          if (!direction) continue;
+          
+          // Calculate arrow endpoint in the cardinal direction
+          // Draw towards parent, stopping short of the parent dot
+          const arrowLength = graphCellSize * 0.7;
+          let dx = 0, dy = 0;
+          
+          switch (direction) {
+            case "N": dy = -arrowLength; break;
+            case "S": dy = arrowLength; break;
+            case "E": dx = arrowLength; break;
+            case "W": dx = -arrowLength; break;
+          }
+          
+          const endX = childPos.x + dx;
+          const endY = childPos.y + dy;
+          
+          // Calculate arrowhead points
+          const angle = Math.atan2(dy, dx);
+          const arrowAngle = Math.PI / 6; // 30 degrees
+          
+          const arrowPoint1X = endX - arrowSize * Math.cos(angle - arrowAngle);
+          const arrowPoint1Y = endY - arrowSize * Math.sin(angle - arrowAngle);
+          const arrowPoint2X = endX - arrowSize * Math.cos(angle + arrowAngle);
+          const arrowPoint2Y = endY - arrowSize * Math.sin(angle + arrowAngle);
+          
+          // Get color based on distance
+          const distance = solution.distanceFromRoot.get(key) ?? 0;
+          const strokeColor = getDistanceColor(distance, maxDistance);
+          
+          arrows.push(
+            <g key={`arrow-${copyIndex}-${row}-${col}`}>
+              {/* Arrow line */}
+              <line
+                x1={childPos.x}
+                y1={childPos.y}
+                x2={endX}
+                y2={endY}
+                stroke={strokeColor}
+                strokeWidth={2}
+              />
+              {/* Arrowhead */}
+              <polygon
+                points={`${endX},${endY} ${arrowPoint1X},${arrowPoint1Y} ${arrowPoint2X},${arrowPoint2Y}`}
+                fill={strokeColor}
+              />
+            </g>
+          );
+        }
+      }
+      
+      return (
+        <g key={`graph-${copyIndex}`}>
+          {gridLines}
+          {arrows}
+          {dots}
+        </g>
+      );
+    };
     
-    // Draw arrows from each cell to its parent
-    for (let row = 0; row < length; row++) {
-      for (let col = 0; col < length; col++) {
-        const key = cellKey(row, col);
-        const parent = solution.parentOf.get(key);
+    // Calculate grid positions based on wallpaper group
+    const getGraphCopyPosition = (copyRow: number, copyCol: number): { x: number; y: number; rotation: number } => {
+      const x = graphPadding + copyCol * gridSize;
+      const y = graphPadding + copyRow * gridSize;
+      
+      if (wallpaperGroup === "P1") {
+        // P1: Simple translation
+        return { x, y, rotation: 0 };
+      } else {
+        // P2: 180° rotation for odd positions
+        const isRotated = (copyRow + copyCol) % 2 === 1;
+        return { x, y, rotation: isRotated ? 180 : 0 };
+      }
+    };
+    
+    // Render all graph copies
+    const allGraphs: React.ReactNode[] = [];
+    
+    for (let row = 0; row < multiplier; row++) {
+      for (let col = 0; col < multiplier; col++) {
+        const copyIndex = row * multiplier + col;
+        const { x, y, rotation } = getGraphCopyPosition(row, col);
         
-        if (parent == null) continue; // Root has no parent
-        
-        const childPos = getPos(row, col);
-        
-        // Determine the cardinal direction to the parent
-        // Instead of drawing to wrapped position, draw in the logical direction
-        const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-        
-        let direction: "N" | "S" | "E" | "W" | null = null;
-        if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
-          direction = "N";
-        } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
-          direction = "S";
-        } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
-          direction = "E";
-        } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
-          direction = "W";
+        if (rotation !== 0) {
+          const centerX = x + gridSize / 2;
+          const centerY = y + gridSize / 2;
+          allGraphs.push(
+            <g
+              key={`graph-group-${copyIndex}`}
+              transform={`rotate(${rotation}, ${centerX}, ${centerY})`}
+            >
+              {renderSingleGraph(copyIndex, x, y)}
+            </g>
+          );
+        } else {
+          allGraphs.push(renderSingleGraph(copyIndex, x, y));
         }
-        
-        if (!direction) continue;
-        
-        // Calculate arrow endpoint in the cardinal direction
-        // Draw towards parent, stopping short of the parent dot
-        const arrowLength = graphCellSize * 0.7;
-        let dx = 0, dy = 0;
-        
-        switch (direction) {
-          case "N": dy = -arrowLength; break;
-          case "S": dy = arrowLength; break;
-          case "E": dx = arrowLength; break;
-          case "W": dx = -arrowLength; break;
-        }
-        
-        const endX = childPos.x + dx;
-        const endY = childPos.y + dy;
-        
-        // Calculate arrowhead points
-        const angle = Math.atan2(dy, dx);
-        const arrowAngle = Math.PI / 6; // 30 degrees
-        
-        const arrowPoint1X = endX - arrowSize * Math.cos(angle - arrowAngle);
-        const arrowPoint1Y = endY - arrowSize * Math.sin(angle - arrowAngle);
-        const arrowPoint2X = endX - arrowSize * Math.cos(angle + arrowAngle);
-        const arrowPoint2Y = endY - arrowSize * Math.sin(angle + arrowAngle);
-        
-        // Get color based on distance
-        const distance = solution.distanceFromRoot.get(key) ?? 0;
-        const strokeColor = getDistanceColor(distance, maxDistance);
-        
-        arrows.push(
-          <g key={`arrow-${row}-${col}`}>
-            {/* Arrow line */}
-            <line
-              x1={childPos.x}
-              y1={childPos.y}
-              x2={endX}
-              y2={endY}
-              stroke={strokeColor}
-              strokeWidth={2}
-            />
-            {/* Arrowhead */}
-            <polygon
-              points={`${endX},${endY} ${arrowPoint1X},${arrowPoint1Y} ${arrowPoint2X},${arrowPoint2Y}`}
-              fill={strokeColor}
-            />
-          </g>
-        );
       }
     }
     
     return (
-      <svg width={graphWidth} height={graphHeight} style={{ backgroundColor: "#fff" }}>
-        {/* Grid lines for reference */}
-        <g stroke="#eee" strokeWidth={1}>
-          {Array.from({ length: length + 1 }, (_, i) => (
-            <line
-              key={`vline-${i}`}
-              x1={graphPadding + i * graphCellSize}
-              y1={graphPadding}
-              x2={graphPadding + i * graphCellSize}
-              y2={graphPadding + length * graphCellSize}
-            />
-          ))}
-          {Array.from({ length: length + 1 }, (_, i) => (
-            <line
-              key={`hline-${i}`}
-              x1={graphPadding}
-              y1={graphPadding + i * graphCellSize}
-              x2={graphPadding + length * graphCellSize}
-              y2={graphPadding + i * graphCellSize}
-            />
-          ))}
-        </g>
-        {arrows}
-        {dots}
+      <svg width={totalWidth} height={totalHeight} style={{ backgroundColor: "#fff" }}>
+        {allGraphs}
       </svg>
     );
   };
