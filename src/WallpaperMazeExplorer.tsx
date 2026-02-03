@@ -35,6 +35,7 @@ interface MazeEdge {
 interface MazeSolution {
   edges: MazeEdge[];
   parentOf: Map<string, GridCell | null>; // Maps "row,col" to parent cell (null for root)
+  distanceFromRoot: Map<string, number>; // Maps "row,col" to distance from root
 }
 
 // Get canonical key for a cell
@@ -293,9 +294,68 @@ function buildMazeSATCNF(
 }
 
 /**
- * Solve CNF using MiniSat solver
+ * Compute distances from root via BFS on kept edges
  */
-function solveCNF(cnf: CNF): Map<number, boolean> | null {
+function computeDistances(
+  length: number,
+  rootRow: number,
+  rootCol: number,
+  keptEdges: Set<string>,
+  wallpaperGroup: WallpaperGroup
+): Map<string, number> {
+  const distances = new Map<string, number>();
+  const rootKey = cellKey(rootRow, rootCol);
+  distances.set(rootKey, 0);
+  
+  const queue: GridCell[] = [{ row: rootRow, col: rootCol }];
+  
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentKey = cellKey(current.row, current.col);
+    const currentDist = distances.get(currentKey)!;
+    
+    const neighbors = getWrappedNeighbors(current.row, current.col, length, wallpaperGroup);
+    const allNeighbors = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
+    
+    for (const neighbor of allNeighbors) {
+      const neighborKey = cellKey(neighbor.row, neighbor.col);
+      
+      // Check if edge is kept (in either direction)
+      const edgeKey1 = `${currentKey}-${neighborKey}`;
+      const edgeKey2 = `${neighborKey}-${currentKey}`;
+      const isConnected = keptEdges.has(edgeKey1) || keptEdges.has(edgeKey2);
+      
+      if (isConnected && !distances.has(neighborKey)) {
+        distances.set(neighborKey, currentDist + 1);
+        queue.push(neighbor);
+      }
+    }
+  }
+  
+  return distances;
+}
+
+// Color palette based on distance from root (gradient from root color)
+function getDistanceColor(distance: number, maxDistance: number): string {
+  // Use HSL for smooth gradient
+  // Root is bright, farther cells are darker/different hue
+  const hue = (distance * 30) % 360; // Rotate hue based on distance
+  const saturation = 70;
+  const lightness = 60 - (distance / Math.max(maxDistance, 1)) * 20; // Slightly darker as distance increases
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
+
+/**
+ * Solve the maze using MiniSat solver
+ */
+function solveMaze(
+  length: number,
+  rootRow: number,
+  rootCol: number,
+  wallpaperGroup: WallpaperGroup
+): MazeSolution | null {
+  const cnf = buildMazeSATCNF(length, rootRow, rootCol, wallpaperGroup);
+  
   const solver = new MiniSatSolver();
   
   // Create all variables
@@ -315,22 +375,7 @@ function solveCNF(cnf: CNF): Map<number, boolean> | null {
     return null;
   }
   
-  return result.assignment!;
-}
-
-/**
- * Solve the maze and extract the solution
- */
-function solveMaze(
-  length: number,
-  rootRow: number,
-  rootCol: number,
-  wallpaperGroup: WallpaperGroup
-): MazeSolution | null {
-  const cnf = buildMazeSATCNF(length, rootRow, rootCol, wallpaperGroup);
-  const assignment = solveCNF(cnf);
-  
-  if (!assignment) return null;
+  const assignment = result.assignment!;
   
   const parentOf = new Map<string, GridCell | null>();
   parentOf.set(cellKey(rootRow, rootCol), null);
@@ -372,20 +417,22 @@ function solveMaze(
     return { from: e.from, to: e.to, isKept };
   });
   
-  return { edges, parentOf };
+  // Build set of kept edges for distance computation
+  const keptEdgeSet = new Set<string>();
+  for (const edge of edges) {
+    if (edge.isKept) {
+      const fromKey = cellKey(edge.from.row, edge.from.col);
+      const toKey = cellKey(edge.to.row, edge.to.col);
+      keptEdgeSet.add(`${fromKey}-${toKey}`);
+      keptEdgeSet.add(`${toKey}-${fromKey}`);
+    }
+  }
+  
+  // Compute distances from root
+  const distanceFromRoot = computeDistances(length, rootRow, rootCol, keptEdgeSet, wallpaperGroup);
+  
+  return { edges, parentOf, distanceFromRoot };
 }
-
-// Color palette for multiple maze copies
-const MAZE_COLORS = [
-  "#e74c3c", // red
-  "#3498db", // blue
-  "#2ecc71", // green
-  "#f39c12", // orange
-  "#9b59b6", // purple
-  "#1abc9c", // teal
-  "#e91e63", // pink
-  "#00bcd4", // cyan
-];
 
 export function WallpaperMazeExplorer() {
   const [length, setLength] = useState(4);
@@ -437,16 +484,34 @@ export function WallpaperMazeExplorer() {
     return getWrappedNeighbors(selectedCell.row, selectedCell.col, length, wallpaperGroup);
   }, [selectedCell, length, wallpaperGroup]);
   
+  // Compute max distance for color scaling
+  const maxDistance = useMemo(() => {
+    if (!solution) return 1;
+    let max = 0;
+    for (const dist of solution.distanceFromRoot.values()) {
+      if (dist > max) max = dist;
+    }
+    return Math.max(max, 1);
+  }, [solution]);
+  
   // Render a single maze grid
   const renderMazeGrid = (
     copyIndex: number,
     offsetX: number,
-    offsetY: number,
-    color: string
+    offsetY: number
   ) => {
     const cells: React.ReactNode[] = [];
     const walls: React.ReactNode[] = [];
-    const labels: React.ReactNode[] = [];
+    const highlights: React.ReactNode[] = [];
+    
+    // Determine which cells are neighbors of the selected cell (for highlighting)
+    const neighborCells = new Set<string>();
+    if (selectedCell && neighborInfo) {
+      neighborCells.add(cellKey(neighborInfo.N.row, neighborInfo.N.col));
+      neighborCells.add(cellKey(neighborInfo.S.row, neighborInfo.S.col));
+      neighborCells.add(cellKey(neighborInfo.E.row, neighborInfo.E.col));
+      neighborCells.add(cellKey(neighborInfo.W.row, neighborInfo.W.col));
+    }
     
     // Render cells
     for (let row = 0; row < length; row++) {
@@ -455,6 +520,18 @@ export function WallpaperMazeExplorer() {
         const y = offsetY + row * cellSize;
         const isRoot = row === rootRow && col === rootCol;
         const isSelected = selectedCell && selectedCell.row === row && selectedCell.col === col;
+        const isNeighbor = neighborCells.has(cellKey(row, col));
+        
+        // Determine cell color based on distance from root
+        let fillColor: string;
+        if (isRoot) {
+          fillColor = "#ffeb3b"; // Yellow for root
+        } else if (solution && solution.distanceFromRoot.has(cellKey(row, col))) {
+          const dist = solution.distanceFromRoot.get(cellKey(row, col))!;
+          fillColor = getDistanceColor(dist, maxDistance);
+        } else {
+          fillColor = "#e0e0e0"; // Gray for unsolved cells
+        }
         
         cells.push(
           <rect
@@ -463,60 +540,43 @@ export function WallpaperMazeExplorer() {
             y={y}
             width={cellSize}
             height={cellSize}
-            fill={isRoot ? "#ffeb3b" : color}
-            stroke={isSelected ? "#000" : "#333"}
-            strokeWidth={isSelected ? 3 : 1}
-            style={{ cursor: "pointer", opacity: copyIndex === 0 ? 1 : 0.7 }}
+            fill={fillColor}
+            stroke="none"
+            style={{ cursor: copyIndex === 0 ? "pointer" : "default" }}
             onClick={copyIndex === 0 ? () => handleCellClick(row, col) : undefined}
           />
         );
         
-        // Add neighbor labels for selected cell
-        if (copyIndex === 0 && selectedCell && isSelected && neighborInfo) {
-          const labelOffset = 12;
-          labels.push(
-            <g key={`labels-${row}-${col}`}>
-              <text
-                x={x + cellSize / 2}
-                y={y + labelOffset}
-                textAnchor="middle"
-                fontSize="10"
-                fill="#000"
-                fontWeight="bold"
-              >
-                N({neighborInfo.N.row},{neighborInfo.N.col})
-              </text>
-              <text
-                x={x + cellSize / 2}
-                y={y + cellSize - 4}
-                textAnchor="middle"
-                fontSize="10"
-                fill="#000"
-                fontWeight="bold"
-              >
-                S({neighborInfo.S.row},{neighborInfo.S.col})
-              </text>
-              <text
-                x={x + 4}
-                y={y + cellSize / 2 + 3}
-                textAnchor="start"
-                fontSize="8"
-                fill="#000"
-                fontWeight="bold"
-              >
-                W({neighborInfo.W.row},{neighborInfo.W.col})
-              </text>
-              <text
-                x={x + cellSize - 4}
-                y={y + cellSize / 2 + 3}
-                textAnchor="end"
-                fontSize="8"
-                fill="#000"
-                fontWeight="bold"
-              >
-                E({neighborInfo.E.row},{neighborInfo.E.col})
-              </text>
-            </g>
+        // Highlight selected cell with a thick border
+        if (copyIndex === 0 && isSelected) {
+          highlights.push(
+            <rect
+              key={`selected-${row}-${col}`}
+              x={x + 2}
+              y={y + 2}
+              width={cellSize - 4}
+              height={cellSize - 4}
+              fill="none"
+              stroke="#000"
+              strokeWidth={3}
+            />
+          );
+        }
+        
+        // Highlight neighbor cells with a colored border
+        if (copyIndex === 0 && isNeighbor && !isSelected) {
+          highlights.push(
+            <rect
+              key={`neighbor-${row}-${col}`}
+              x={x + 2}
+              y={y + 2}
+              width={cellSize - 4}
+              height={cellSize - 4}
+              fill="none"
+              stroke="#ff4081"
+              strokeWidth={3}
+              strokeDasharray="4,2"
+            />
           );
         }
         
@@ -671,7 +731,7 @@ export function WallpaperMazeExplorer() {
       <g key={`maze-${copyIndex}`}>
         {cells}
         {walls}
-        {labels}
+        {highlights}
       </g>
     );
   };
@@ -701,7 +761,6 @@ export function WallpaperMazeExplorer() {
       for (let col = 0; col < multiplier; col++) {
         const copyIndex = row * multiplier + col;
         const { x, y, rotation } = getCopyPosition(row, col);
-        const color = MAZE_COLORS[copyIndex % MAZE_COLORS.length];
         
         if (rotation !== 0) {
           const centerX = x + gridSize / 2;
@@ -711,11 +770,11 @@ export function WallpaperMazeExplorer() {
               key={`maze-group-${copyIndex}`}
               transform={`rotate(${rotation}, ${centerX}, ${centerY})`}
             >
-              {renderMazeGrid(copyIndex, x, y, color)}
+              {renderMazeGrid(copyIndex, x, y)}
             </g>
           );
         } else {
-          mazes.push(renderMazeGrid(copyIndex, x, y, color));
+          mazes.push(renderMazeGrid(copyIndex, x, y));
         }
       }
     }
@@ -832,19 +891,14 @@ export function WallpaperMazeExplorer() {
           marginBottom: "20px",
           fontFamily: "monospace"
         }}>
-          <strong>Selected Cell ({selectedCell.row}, {selectedCell.col}) Neighbors:</strong>
-          <br />
-          North → ({neighborInfo.N.row}, {neighborInfo.N.col}) |{" "}
-          South → ({neighborInfo.S.row}, {neighborInfo.S.col}) |{" "}
-          East → ({neighborInfo.E.row}, {neighborInfo.E.col}) |{" "}
-          West → ({neighborInfo.W.row}, {neighborInfo.W.col})
+          <strong>Selected: ({selectedCell.row}, {selectedCell.col})</strong> — Neighbors highlighted with <span style={{ color: "#ff4081" }}>pink dashed border</span>
         </div>
       )}
       
       <div style={{ 
         border: "1px solid #ccc", 
         borderRadius: "5px", 
-        backgroundColor: "#f9f9f9",
+        backgroundColor: "#fff",
         display: "inline-block"
       }}>
         <svg width={svgWidth} height={svgHeight}>
@@ -854,7 +908,7 @@ export function WallpaperMazeExplorer() {
       
       {solution && (
         <div style={{ marginTop: "20px", color: "#2ecc71" }}>
-          ✓ Maze solved! Click on cells in the first copy to see their neighbors.
+          ✓ Maze solved! Cells colored by distance from root. Click cells to see neighbors.
         </div>
       )}
     </div>
