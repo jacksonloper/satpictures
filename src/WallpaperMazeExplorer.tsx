@@ -156,43 +156,37 @@ function traceToRoot(
     const neighbors = getWrappedNeighbors(currentRow, currentCol, length, wallpaperGroup);
     
     // Check which neighbor matches the parent and if it's a wrapped edge
-    let wrapped = false;
     let wrapDeltaCopyRow = 0;
     let wrapDeltaCopyCol = 0;
     
     if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
       // Moving north
       if (currentRow === 0) {
-        // Wrapped north edge
-        wrapped = true;
+        // Wrapped north edge - crosses to adjacent copy above
         wrapDeltaCopyRow = -1;
-        if (wallpaperGroup === "P2") {
-          // P2 wrapping also affects col position in copy space
-          // The column flips, which can change effective copy
-        }
       }
     } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
       // Moving south
       if (currentRow === length - 1) {
-        wrapped = true;
+        // Wrapped south edge - crosses to adjacent copy below
         wrapDeltaCopyRow = 1;
       }
     } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
       // Moving east
       if (currentCol === length - 1) {
-        wrapped = true;
+        // Wrapped east edge - crosses to adjacent copy right
         wrapDeltaCopyCol = 1;
       }
     } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
       // Moving west
       if (currentCol === 0) {
-        wrapped = true;
+        // Wrapped west edge - crosses to adjacent copy left
         wrapDeltaCopyCol = -1;
       }
     }
     
-    if (wrapped) {
-      // Update copy coordinates with wrapping
+    // Update copy coordinates with wrapping
+    if (wrapDeltaCopyRow !== 0 || wrapDeltaCopyCol !== 0) {
       currentCopyRow = ((currentCopyRow + wrapDeltaCopyRow) % multiplier + multiplier) % multiplier;
       currentCopyCol = ((currentCopyCol + wrapDeltaCopyCol) % multiplier + multiplier) % multiplier;
     }
