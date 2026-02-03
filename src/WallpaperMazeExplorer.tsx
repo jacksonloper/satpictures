@@ -1,5 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
-import { MiniSatSolver } from "./solvers";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import WallpaperMazeWorker from "./problem/wallpaper-maze.worker?worker";
+import type { WallpaperMazeRequest, WallpaperMazeResponse } from "./problem/wallpaper-maze.worker";
 import "./App.css";
 
 /**
@@ -104,236 +105,6 @@ function getWrappedNeighbors(
   }
 }
 
-/**
- * Get all unique edges in the wrapped grid.
- * Each edge is stored once with a canonical ordering.
- */
-function getAllEdges(
-  length: number,
-  wallpaperGroup: WallpaperGroup
-): Array<{ from: GridCell; to: GridCell; direction: "N" | "S" | "E" | "W" }> {
-  const edges: Array<{ from: GridCell; to: GridCell; direction: "N" | "S" | "E" | "W" }> = [];
-  const seen = new Set<string>();
-  
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-      const directions = ["N", "S", "E", "W"] as const;
-      
-      for (const dir of directions) {
-        const neighbor = neighbors[dir];
-        // Create canonical edge key (sort by cell key)
-        const fromKey = cellKey(row, col);
-        const toKey = cellKey(neighbor.row, neighbor.col);
-        const edgeId = fromKey < toKey ? `${fromKey}-${toKey}` : `${toKey}-${fromKey}`;
-        
-        if (!seen.has(edgeId)) {
-          seen.add(edgeId);
-          edges.push({ from: { row, col }, to: neighbor, direction: dir });
-        }
-      }
-    }
-  }
-  
-  return edges;
-}
-
-/**
- * Build the SAT problem for the spanning tree maze.
- * Uses the Sinz encoding (unary distance representation) to ensure acyclicity.
- */
-interface CNF {
-  numVars: number;
-  clauses: number[][];
-  varOf: Map<string, number>;
-}
-
-function buildMazeSATCNF(
-  length: number,
-  rootRow: number,
-  rootCol: number,
-  wallpaperGroup: WallpaperGroup
-): CNF {
-  const cnf: CNF = {
-    numVars: 0,
-    clauses: [],
-    varOf: new Map(),
-  };
-  
-  // Helper to get or create a variable
-  function v(name: string): number {
-    if (cnf.varOf.has(name)) return cnf.varOf.get(name)!;
-    const id = ++cnf.numVars;
-    cnf.varOf.set(name, id);
-    return id;
-  }
-  
-  // Add a clause
-  function addClause(lits: number[]): void {
-    const s = new Set<number>();
-    for (const lit of lits) {
-      if (s.has(-lit)) return; // tautology
-      s.add(lit);
-    }
-    cnf.clauses.push([...s]);
-  }
-  
-  // Add implication: a -> b
-  function addImp(a: number, b: number): void {
-    addClause([-a, b]);
-  }
-  
-  const N = length * length; // Total number of cells
-  const rootKey = cellKey(rootRow, rootCol);
-  
-  // Variable definitions:
-  // par(u,v) = "v is the parent of u" (u -> v in the tree)
-  // dist_d(u) = "distance of u from root is >= d" (unary encoding)
-  
-  const parentVar = (uRow: number, uCol: number, vRow: number, vCol: number) =>
-    v(`par(${cellKey(uRow, uCol)})->(${cellKey(vRow, vCol)})`);
-  
-  const distVar = (row: number, col: number, d: number) =>
-    v(`dist(${cellKey(row, col)})>=${d}`);
-  
-  // Build adjacency for all cells
-  const adjacency = new Map<string, GridCell[]>();
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-      adjacency.set(cellKey(row, col), [neighbors.N, neighbors.S, neighbors.E, neighbors.W]);
-    }
-  }
-  
-  // Constraint 1: Root has distance 0 (dist_d(root) is false for all d >= 1)
-  addClause([-distVar(rootRow, rootCol, 1)]);
-  
-  // Constraint 2: Root has no parent
-  for (const neighbor of adjacency.get(rootKey)!) {
-    addClause([-parentVar(rootRow, rootCol, neighbor.row, neighbor.col)]);
-  }
-  
-  // Constraint 3: Unary distance chain - dist_d(u) -> dist_(d-1)(u) for d >= 2
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      for (let d = 2; d <= N; d++) {
-        addImp(distVar(row, col, d), distVar(row, col, d - 1));
-      }
-    }
-  }
-  
-  // Constraint 4: Global distance cap - dist_N(u) is false for all nodes
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      addClause([-distVar(row, col, N)]);
-    }
-  }
-  
-  // Constraint 5: Non-root nodes must have exactly one parent
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      if (row === rootRow && col === rootCol) continue;
-      
-      const neighbors = adjacency.get(cellKey(row, col))!;
-      const parentLits = neighbors.map(n => parentVar(row, col, n.row, n.col));
-      
-      // At least one parent
-      addClause(parentLits);
-      
-      // At most one parent (pairwise)
-      for (let i = 0; i < parentLits.length; i++) {
-        for (let j = i + 1; j < parentLits.length; j++) {
-          addClause([-parentLits[i], -parentLits[j]]);
-        }
-      }
-      
-      // Non-root must have positive distance
-      addClause([distVar(row, col, 1)]);
-    }
-  }
-  
-  // Constraint 6: Anti-parallel parent constraint
-  // If u chooses v as parent, v cannot choose u as parent
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      const neighbors = adjacency.get(cellKey(row, col))!;
-      for (const n of neighbors) {
-        addClause([
-          -parentVar(row, col, n.row, n.col),
-          -parentVar(n.row, n.col, row, col)
-        ]);
-      }
-    }
-  }
-  
-  // Constraint 7: Distance increment - if v is parent of u, then dist(u) = dist(v) + 1
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      const neighbors = adjacency.get(cellKey(row, col))!;
-      
-      for (const v of neighbors) {
-        const p = parentVar(row, col, v.row, v.col);
-        
-        // par(u,v) -> dist(u) >= 1
-        addImp(p, distVar(row, col, 1));
-        
-        // par(u,v) ∧ dist(v)>=d -> dist(u)>=(d+1)
-        for (let d = 1; d < N; d++) {
-          addClause([-p, -distVar(v.row, v.col, d), distVar(row, col, d + 1)]);
-        }
-        
-        // par(u,v) ∧ dist(u)>=d -> dist(v)>=(d-1)
-        for (let d = 2; d <= N; d++) {
-          addClause([-p, -distVar(row, col, d), distVar(v.row, v.col, d - 1)]);
-        }
-      }
-    }
-  }
-  
-  return cnf;
-}
-
-/**
- * Compute distances from root via BFS on kept edges
- */
-function computeDistances(
-  length: number,
-  rootRow: number,
-  rootCol: number,
-  keptEdges: Set<string>,
-  wallpaperGroup: WallpaperGroup
-): Map<string, number> {
-  const distances = new Map<string, number>();
-  const rootKey = cellKey(rootRow, rootCol);
-  distances.set(rootKey, 0);
-  
-  const queue: GridCell[] = [{ row: rootRow, col: rootCol }];
-  
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const currentKey = cellKey(current.row, current.col);
-    const currentDist = distances.get(currentKey)!;
-    
-    const neighbors = getWrappedNeighbors(current.row, current.col, length, wallpaperGroup);
-    const allNeighbors = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
-    
-    for (const neighbor of allNeighbors) {
-      const neighborKey = cellKey(neighbor.row, neighbor.col);
-      
-      // Check if edge is kept (in either direction)
-      const edgeKey1 = `${currentKey}-${neighborKey}`;
-      const edgeKey2 = `${neighborKey}-${currentKey}`;
-      const isConnected = keptEdges.has(edgeKey1) || keptEdges.has(edgeKey2);
-      
-      if (isConnected && !distances.has(neighborKey)) {
-        distances.set(neighborKey, currentDist + 1);
-        queue.push(neighbor);
-      }
-    }
-  }
-  
-  return distances;
-}
 
 // Color palette based on distance from root (gradient from root color)
 function getDistanceColor(distance: number, maxDistance: number): string {
@@ -346,95 +117,6 @@ function getDistanceColor(distance: number, maxDistance: number): string {
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
-/**
- * Solve the maze using MiniSat solver
- */
-function solveMaze(
-  length: number,
-  rootRow: number,
-  rootCol: number,
-  wallpaperGroup: WallpaperGroup
-): MazeSolution | null {
-  const cnf = buildMazeSATCNF(length, rootRow, rootCol, wallpaperGroup);
-  
-  const solver = new MiniSatSolver();
-  
-  // Create all variables
-  for (let i = 1; i <= cnf.numVars; i++) {
-    solver.newVariable();
-  }
-  
-  // Add all clauses
-  for (const clause of cnf.clauses) {
-    solver.addClause(clause);
-  }
-  
-  // Solve
-  const result = solver.solve();
-  
-  if (!result.satisfiable) {
-    return null;
-  }
-  
-  const assignment = result.assignment!;
-  
-  const parentOf = new Map<string, GridCell | null>();
-  parentOf.set(cellKey(rootRow, rootCol), null);
-  
-  // Extract parent relationships from solution
-  for (let row = 0; row < length; row++) {
-    for (let col = 0; col < length; col++) {
-      if (row === rootRow && col === rootCol) continue;
-      
-      const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-      const directions = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
-      
-      for (const n of directions) {
-        const varName = `par(${cellKey(row, col)})->(${cellKey(n.row, n.col)})`;
-        const varId = cnf.varOf.get(varName);
-        if (varId && assignment.get(varId)) {
-          parentOf.set(cellKey(row, col), n);
-          break;
-        }
-      }
-    }
-  }
-  
-  // Build edges with kept/wall status
-  const allEdges = getAllEdges(length, wallpaperGroup);
-  const edges: MazeEdge[] = allEdges.map(e => {
-    const fromKey = cellKey(e.from.row, e.from.col);
-    const toKey = cellKey(e.to.row, e.to.col);
-    
-    // Check if there's a parent-child relationship
-    const parentOfFrom = parentOf.get(fromKey);
-    const parentOfTo = parentOf.get(toKey);
-    
-    const isKept = Boolean(
-      (parentOfFrom && cellKey(parentOfFrom.row, parentOfFrom.col) === toKey) ||
-      (parentOfTo && cellKey(parentOfTo.row, parentOfTo.col) === fromKey)
-    );
-    
-    return { from: e.from, to: e.to, isKept };
-  });
-  
-  // Build set of kept edges for distance computation
-  const keptEdgeSet = new Set<string>();
-  for (const edge of edges) {
-    if (edge.isKept) {
-      const fromKey = cellKey(edge.from.row, edge.from.col);
-      const toKey = cellKey(edge.to.row, edge.to.col);
-      keptEdgeSet.add(`${fromKey}-${toKey}`);
-      keptEdgeSet.add(`${toKey}-${fromKey}`);
-    }
-  }
-  
-  // Compute distances from root
-  const distanceFromRoot = computeDistances(length, rootRow, rootCol, keptEdgeSet, wallpaperGroup);
-  
-  return { edges, parentOf, distanceFromRoot };
-}
-
 export function WallpaperMazeExplorer() {
   const [length, setLength] = useState(4);
   const [multiplier, setMultiplier] = useState(2);
@@ -444,22 +126,98 @@ export function WallpaperMazeExplorer() {
   const [solution, setSolution] = useState<MazeSolution | null>(null);
   const [solving, setSolving] = useState(false);
   const [selectedCell, setSelectedCell] = useState<GridCell | null>(null);
+  const [satStats, setSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Worker ref for cancel support
+  const workerRef = useRef<Worker | null>(null);
   
   const cellSize = 40;
   const padding = 20;
   
-  // Handle solve button click
+  // Cleanup worker on unmount
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+      }
+    };
+  }, []);
+  
+  // Handle solve button click - uses CadicalSolver via worker
   const handleSolve = useCallback(() => {
+    // Terminate any existing worker
+    if (workerRef.current) {
+      workerRef.current.terminate();
+    }
+    
     setSolving(true);
     setSolution(null);
+    setErrorMessage(null);
+    setSatStats(null);
     
-    // Use setTimeout to allow UI to update
-    setTimeout(() => {
-      const result = solveMaze(length, rootRow, rootCol, wallpaperGroup);
-      setSolution(result);
+    // Create a new worker
+    const worker = new WallpaperMazeWorker();
+    workerRef.current = worker;
+    
+    worker.onmessage = (event: MessageEvent<WallpaperMazeResponse>) => {
+      const response = event.data;
+      
+      if (response.messageType === "progress") {
+        // Progress message with stats
+        if (response.stats) {
+          setSatStats(response.stats);
+        }
+        return;
+      }
+      
+      // Result message
+      if (response.success && response.result) {
+        // Convert arrays back to Maps
+        const parentOf = new Map<string, GridCell | null>(
+          response.result.parentOf.map(([key, value]) => [key, value])
+        );
+        const distanceFromRoot = new Map<string, number>(response.result.distanceFromRoot);
+        
+        setSolution({
+          edges: response.result.edges,
+          parentOf,
+          distanceFromRoot,
+        });
+        setErrorMessage(null);
+      } else {
+        setErrorMessage(response.error || "Failed to solve maze");
+      }
+      
       setSolving(false);
-    }, 10);
+      workerRef.current = null;
+    };
+    
+    worker.onerror = (error) => {
+      setErrorMessage(`Worker error: ${error.message}`);
+      setSolving(false);
+      workerRef.current = null;
+    };
+    
+    // Send the request to the worker
+    const request: WallpaperMazeRequest = {
+      length,
+      rootRow,
+      rootCol,
+      wallpaperGroup,
+    };
+    worker.postMessage(request);
   }, [length, rootRow, rootCol, wallpaperGroup]);
+  
+  // Handle cancel button click
+  const handleCancel = useCallback(() => {
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+      setSolving(false);
+      setErrorMessage("Solving cancelled");
+    }
+  }, []);
   
   // Handle cell click for root selection or neighbor visualization
   const handleCellClick = useCallback((row: number, col: number) => {
@@ -866,23 +624,68 @@ export function WallpaperMazeExplorer() {
         
         <div>
           <label style={{ display: "block", marginBottom: "5px" }}>&nbsp;</label>
-          <button
-            onClick={handleSolve}
-            disabled={solving}
-            style={{
-              padding: "10px 20px",
-              fontSize: "16px",
-              backgroundColor: "#3498db",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: solving ? "not-allowed" : "pointer",
-            }}
-          >
-            {solving ? "Solving..." : "Solve"}
-          </button>
+          {solving ? (
+            <button
+              onClick={handleCancel}
+              style={{
+                padding: "10px 20px",
+                fontSize: "16px",
+                backgroundColor: "#e74c3c",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          ) : (
+            <button
+              onClick={handleSolve}
+              style={{
+                padding: "10px 20px",
+                fontSize: "16px",
+                backgroundColor: "#3498db",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              Solve
+            </button>
+          )}
         </div>
       </div>
+      
+      {/* Show solving status with SAT stats */}
+      {solving && (
+        <div style={{ 
+          backgroundColor: "#fff3cd", 
+          padding: "10px", 
+          borderRadius: "5px",
+          marginBottom: "20px",
+          fontFamily: "monospace"
+        }}>
+          <strong>⏳ Solving with CaDiCaL...</strong>
+          {satStats && (
+            <span> ({satStats.numVars.toLocaleString()} variables, {satStats.numClauses.toLocaleString()} clauses)</span>
+          )}
+        </div>
+      )}
+      
+      {/* Show error message */}
+      {errorMessage && !solving && (
+        <div style={{ 
+          backgroundColor: "#f8d7da", 
+          padding: "10px", 
+          borderRadius: "5px",
+          marginBottom: "20px",
+          color: "#721c24"
+        }}>
+          {errorMessage}
+        </div>
+      )}
       
       {selectedCell && neighborInfo && (
         <div style={{ 
