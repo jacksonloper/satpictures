@@ -18,6 +18,8 @@ export interface WallpaperMazeRequest {
   rootRow: number;
   rootCol: number;
   wallpaperGroup: WallpaperGroup;
+  /** Array of cell keys (row,col) that are vacant/blocked */
+  vacantCells?: string[];
 }
 
 export interface WallpaperMazeResponse {
@@ -334,7 +336,8 @@ function buildMazeSATCNF(
   length: number,
   rootRow: number,
   rootCol: number,
-  wallpaperGroup: WallpaperGroup
+  wallpaperGroup: WallpaperGroup,
+  vacantCells: Set<string> = new Set()
 ): CNF {
   const cnf: CNF = {
     numVars: 0,
@@ -362,7 +365,8 @@ function buildMazeSATCNF(
     addClause([-a, b]);
   }
   
-  const N = length * length;
+  // Count non-vacant cells for distance bounds
+  const nonVacantCount = length * length - vacantCells.size;
   const rootKey = cellKey(rootRow, rootCol);
   
   const parentVar = (uRow: number, uCol: number, vRow: number, vCol: number) =>
@@ -372,16 +376,22 @@ function buildMazeSATCNF(
     v(`dist(${cellKey(row, col)})>=${d}`);
   
   // Build adjacency with deduplicated neighbors (important for small grids where multiple directions can point to same cell)
+  // Also filter out vacant cells from being neighbors (they cannot be selected as parents)
   const adjacency = new Map<string, GridCell[]>();
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
+      // Skip vacant cells - they don't have adjacency lists
+      if (vacantCells.has(cellKey(row, col))) continue;
+      
       const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
       const allNeighbors = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
-      // Deduplicate neighbors by their cell key
+      // Deduplicate neighbors by their cell key, and filter out vacant cells
       const seen = new Set<string>();
       const uniqueNeighbors: GridCell[] = [];
       for (const n of allNeighbors) {
         const key = cellKey(n.row, n.col);
+        // Skip vacant cells - they cannot be parents
+        if (vacantCells.has(key)) continue;
         if (!seen.has(key)) {
           seen.add(key);
           uniqueNeighbors.push(n);
@@ -391,48 +401,65 @@ function buildMazeSATCNF(
     }
   }
   
+  // Root has no parent and distance 0
   addClause([-distVar(rootRow, rootCol, 1)]);
   
-  for (const neighbor of adjacency.get(rootKey)!) {
-    addClause([-parentVar(rootRow, rootCol, neighbor.row, neighbor.col)]);
+  const rootNeighbors = adjacency.get(rootKey);
+  if (rootNeighbors) {
+    for (const neighbor of rootNeighbors) {
+      addClause([-parentVar(rootRow, rootCol, neighbor.row, neighbor.col)]);
+    }
   }
   
+  // Distance monotonicity for non-vacant cells
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
-      for (let d = 2; d <= N; d++) {
+      if (vacantCells.has(cellKey(row, col))) continue;
+      for (let d = 2; d <= nonVacantCount; d++) {
         addImp(distVar(row, col, d), distVar(row, col, d - 1));
       }
     }
   }
   
+  // Upper bound on distance for non-vacant cells
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
-      addClause([-distVar(row, col, N)]);
+      if (vacantCells.has(cellKey(row, col))) continue;
+      addClause([-distVar(row, col, nonVacantCount)]);
     }
   }
   
+  // Each non-root, non-vacant cell must have exactly one parent
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
+      const key = cellKey(row, col);
+      if (vacantCells.has(key)) continue;
       if (row === rootRow && col === rootCol) continue;
       
-      const neighbors = adjacency.get(cellKey(row, col))!;
+      const neighbors = adjacency.get(key)!;
       const parentLits = neighbors.map(n => parentVar(row, col, n.row, n.col));
       
+      // At least one parent
       addClause(parentLits);
       
+      // At most one parent
       for (let i = 0; i < parentLits.length; i++) {
         for (let j = i + 1; j < parentLits.length; j++) {
           addClause([-parentLits[i], -parentLits[j]]);
         }
       }
       
+      // Non-root cells have positive distance
       addClause([distVar(row, col, 1)]);
     }
   }
   
+  // No mutual parent relationship for non-vacant cells
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
-      const neighbors = adjacency.get(cellKey(row, col))!;
+      const key = cellKey(row, col);
+      if (vacantCells.has(key)) continue;
+      const neighbors = adjacency.get(key)!;
       for (const n of neighbors) {
         addClause([
           -parentVar(row, col, n.row, n.col),
@@ -442,20 +469,23 @@ function buildMazeSATCNF(
     }
   }
   
+  // Distance constraints for non-vacant cells
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
-      const neighbors = adjacency.get(cellKey(row, col))!;
+      const key = cellKey(row, col);
+      if (vacantCells.has(key)) continue;
+      const neighbors = adjacency.get(key)!;
       
       for (const vv of neighbors) {
         const p = parentVar(row, col, vv.row, vv.col);
         
         addImp(p, distVar(row, col, 1));
         
-        for (let d = 1; d < N; d++) {
+        for (let d = 1; d < nonVacantCount; d++) {
           addClause([-p, -distVar(vv.row, vv.col, d), distVar(row, col, d + 1)]);
         }
         
-        for (let d = 2; d <= N; d++) {
+        for (let d = 2; d <= nonVacantCount; d++) {
           addClause([-p, -distVar(row, col, d), distVar(vv.row, vv.col, d - 1)]);
         }
       }
@@ -519,7 +549,10 @@ function formatErrorMessage(error: unknown): string {
 }
 
 self.onmessage = async (event: MessageEvent<WallpaperMazeRequest>) => {
-  const { length, rootRow, rootCol, wallpaperGroup } = event.data;
+  const { length, rootRow, rootCol, wallpaperGroup, vacantCells: vacantCellsArray } = event.data;
+  
+  // Convert vacant cells array to Set
+  const vacantCells = new Set(vacantCellsArray || []);
 
   try {
     // Validate inputs
@@ -527,8 +560,13 @@ self.onmessage = async (event: MessageEvent<WallpaperMazeRequest>) => {
       throw new Error(`Root position (${rootRow}, ${rootCol}) is out of bounds for grid size ${length}`);
     }
     
-    // Build the CNF
-    const cnf = buildMazeSATCNF(length, rootRow, rootCol, wallpaperGroup);
+    // Validate that root is not vacant
+    if (vacantCells.has(cellKey(rootRow, rootCol))) {
+      throw new Error(`Root position (${rootRow}, ${rootCol}) cannot be vacant`);
+    }
+    
+    // Build the CNF with vacant cells
+    const cnf = buildMazeSATCNF(length, rootRow, rootCol, wallpaperGroup, vacantCells);
     
     // Send progress message with stats
     const progressResponse: WallpaperMazeResponse = {
@@ -573,18 +611,24 @@ self.onmessage = async (event: MessageEvent<WallpaperMazeRequest>) => {
     
     const assignment = result.assignment!;
     
-    // Extract parent relationships
+    // Extract parent relationships (only for non-vacant cells)
     const parentOf = new Map<string, GridCell | null>();
     parentOf.set(cellKey(rootRow, rootCol), null);
     
     for (let row = 0; row < length; row++) {
       for (let col = 0; col < length; col++) {
+        const key = cellKey(row, col);
+        // Skip vacant cells - they have no parent
+        if (vacantCells.has(key)) continue;
         if (row === rootRow && col === rootCol) continue;
         
         const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
         const directions = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
         
         for (const n of directions) {
+          // Skip vacant neighbors
+          if (vacantCells.has(cellKey(n.row, n.col))) continue;
+          
           const varName = `par(${cellKey(row, col)})->(${cellKey(n.row, n.col)})`;
           const varId = cnf.varOf.get(varName);
           if (varId && assignment.get(varId)) {

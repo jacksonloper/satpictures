@@ -34,10 +34,15 @@ interface GridCell {
 interface MazeSolution {
   parentOf: Map<string, GridCell | null>;
   distanceFromRoot: Map<string, number>;
+  wallpaperGroup: WallpaperGroupName; // Store the wallpaper group used for this solution
+  vacantCells: Set<string>; // Store which cells were vacant at solve time
 }
 
-// View mode type
-type ViewMode = "maze" | "graph";
+// View mode type for solution
+type SolutionViewMode = "maze" | "graph";
+
+// Tool types for interacting with the sketchpad
+type SketchpadTool = "rootSetter" | "neighborhoodViewer" | "blockSetter";
 
 export function WallpaperMazeExplorer() {
   const [length, setLength] = useState(DEFAULT_LENGTH);
@@ -50,8 +55,12 @@ export function WallpaperMazeExplorer() {
   const [selectedCell, setSelectedCell] = useState<GridCell | null>(null);
   const [satStats, setSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("maze");
+  const [solutionViewMode, setSolutionViewMode] = useState<SolutionViewMode>("maze");
   const [graphSelectedNode, setGraphSelectedNode] = useState<TiledNode | null>(null);
+  
+  // New state for tools and vacant cells
+  const [activeTool, setActiveTool] = useState<SketchpadTool>("rootSetter");
+  const [vacantCells, setVacantCells] = useState<Set<string>>(new Set());
   
   // Worker ref for cancel support
   const workerRef = useRef<Worker | null>(null);
@@ -68,28 +77,29 @@ export function WallpaperMazeExplorer() {
     };
   }, []);
   
-  // Reset solution and ensure root is valid when grid parameters change
+  // Reset root and vacant cells when grid size changes
   useEffect(() => {
-    setSolution(null);
     setGraphSelectedNode(null);
     // Always set root to (0,0) when length or wallpaper group changes
     // This ensures a valid root exists even if previous state was corrupted
     setRootRow(0);
     setRootCol(0);
+    setVacantCells(new Set()); // Reset vacant cells when grid size changes
   }, [length, wallpaperGroup]);
   
-  // Build the tiled graph when solution changes
+  // Build the tiled graph when solution changes (uses solution's stored wallpaper group)
   const tiledGraph = useMemo<TiledGraph | null>(() => {
     if (!solution) return null;
     return buildTiledGraph(
       length,
       multiplier,
-      wallpaperGroup,
+      solution.wallpaperGroup, // Use the wallpaper group stored in the solution
       rootRow,
       rootCol,
-      solution.parentOf
+      solution.parentOf,
+      solution.vacantCells // Pass vacant cells to the tiled graph builder
     );
-  }, [solution, length, multiplier, wallpaperGroup, rootRow, rootCol]);
+  }, [solution, length, multiplier, rootRow, rootCol]);
   
   // Get neighbor info for selected cell in fundamental domain
   const neighborInfo = useMemo(() => {
@@ -109,20 +119,39 @@ export function WallpaperMazeExplorer() {
       workerRef.current.terminate();
     }
     
-    // Ensure root is within bounds (state updates from useEffect may be async)
-    // We compute safe values here and use them for the worker, then also update
-    // state to keep UI in sync (even though this update is also async, it ensures
-    // the UI will eventually reflect the actual values sent to the worker)
-    const safeRootRow = rootRow >= length ? 0 : rootRow;
-    const safeRootCol = rootCol >= length ? 0 : rootCol;
+    // Ensure root is within bounds and not vacant
+    let safeRootRow = rootRow >= length ? 0 : rootRow;
+    let safeRootCol = rootCol >= length ? 0 : rootCol;
+    
+    // If current root is vacant, find a non-vacant cell
+    if (vacantCells.has(`${safeRootRow},${safeRootCol}`)) {
+      let found = false;
+      for (let r = 0; r < length && !found; r++) {
+        for (let c = 0; c < length && !found; c++) {
+          if (!vacantCells.has(`${r},${c}`)) {
+            safeRootRow = r;
+            safeRootCol = c;
+            found = true;
+          }
+        }
+      }
+      if (!found) {
+        setErrorMessage("Cannot solve: all cells are vacant");
+        return;
+      }
+    }
+    
     if (safeRootRow !== rootRow) setRootRow(safeRootRow);
     if (safeRootCol !== rootCol) setRootCol(safeRootCol);
     
     setSolving(true);
-    setSolution(null);
     setErrorMessage(null);
     setSatStats(null);
     setGraphSelectedNode(null);
+    
+    // Store a snapshot of current settings to be stored with the solution
+    const currentWallpaperGroup = wallpaperGroup;
+    const currentVacantCells = new Set(vacantCells);
     
     const worker = new WallpaperMazeWorker();
     workerRef.current = worker;
@@ -141,7 +170,12 @@ export function WallpaperMazeExplorer() {
         const parentOf = new Map<string, GridCell | null>(response.result.parentOf);
         const distanceFromRoot = new Map<string, number>(response.result.distanceFromRoot);
         
-        setSolution({ parentOf, distanceFromRoot });
+        setSolution({ 
+          parentOf, 
+          distanceFromRoot, 
+          wallpaperGroup: currentWallpaperGroup,
+          vacantCells: currentVacantCells
+        });
         setErrorMessage(null);
       } else {
         setErrorMessage(response.error || "Failed to solve maze");
@@ -162,9 +196,10 @@ export function WallpaperMazeExplorer() {
       rootRow: safeRootRow,
       rootCol: safeRootCol,
       wallpaperGroup,
+      vacantCells: Array.from(vacantCells),
     };
     worker.postMessage(request);
-  }, [length, rootRow, rootCol, wallpaperGroup]);
+  }, [length, rootRow, rootCol, wallpaperGroup, vacantCells]);
   
   // Handle cancel button click
   const handleCancel = useCallback(() => {
@@ -176,23 +211,46 @@ export function WallpaperMazeExplorer() {
     }
   }, []);
   
-  // Handle cell click for root selection (in maze view)
+  // Handle cell click based on active tool
   const handleCellClick = useCallback((row: number, col: number) => {
-    if (selectedCell && selectedCell.row === row && selectedCell.col === col) {
-      setSelectedCell(null);
-    } else {
-      setSelectedCell({ row, col });
+    const cellKey = `${row},${col}`;
+    
+    switch (activeTool) {
+      case "rootSetter":
+        // Don't set root on vacant cells
+        if (vacantCells.has(cellKey)) {
+          return;
+        }
+        setRootRow(row);
+        setRootCol(col);
+        break;
+        
+      case "neighborhoodViewer":
+        if (selectedCell && selectedCell.row === row && selectedCell.col === col) {
+          setSelectedCell(null);
+        } else {
+          setSelectedCell({ row, col });
+        }
+        break;
+        
+      case "blockSetter":
+        // Toggle vacancy state (but don't allow blocking the root)
+        if (row === rootRow && col === rootCol) {
+          // Don't allow blocking the root - move root first
+          return;
+        }
+        setVacantCells(prev => {
+          const next = new Set(prev);
+          if (next.has(cellKey)) {
+            next.delete(cellKey);
+          } else {
+            next.add(cellKey);
+          }
+          return next;
+        });
+        break;
     }
-  }, [selectedCell]);
-  
-  // Handle setting root
-  const handleSetRoot = useCallback(() => {
-    if (selectedCell) {
-      setRootRow(selectedCell.row);
-      setRootCol(selectedCell.col);
-      setSolution(null);
-    }
-  }, [selectedCell]);
+  }, [activeTool, selectedCell, vacantCells, rootRow, rootCol]);
   
   // Compute wall segments from tiled graph
   const wallSegments = useMemo(() => {
@@ -200,41 +258,26 @@ export function WallpaperMazeExplorer() {
     return computeWallSegments(tiledGraph, cellSize);
   }, [tiledGraph, cellSize]);
   
-  // Render maze view using tiled graph
-  const renderMazeView = () => {
-    if (!tiledGraph) {
-      // Render empty grid for unsolved state
-      return renderUnsolvedMazeView();
+  // Render solution maze view using tiled graph
+  const renderSolutionMazeView = () => {
+    if (!tiledGraph || !solution) {
+      return null;
     }
     
     const cells: React.ReactNode[] = [];
     const walls: React.ReactNode[] = [];
-    const highlights: React.ReactNode[] = [];
-    
-    // Determine which fundamental domain cells are neighbors of selected
-    const neighborCells = new Set<string>();
-    if (selectedCell && neighborInfo) {
-      neighborCells.add(`${neighborInfo.N.row},${neighborInfo.N.col}`);
-      neighborCells.add(`${neighborInfo.S.row},${neighborInfo.S.col}`);
-      neighborCells.add(`${neighborInfo.E.row},${neighborInfo.E.col}`);
-      neighborCells.add(`${neighborInfo.W.row},${neighborInfo.W.col}`);
-    }
     
     // Render cells from tiled graph
     for (const node of tiledGraph.nodes) {
       const x = padding + node.absCol * cellSize;
       const y = padding + node.absRow * cellSize;
       
-      // Color by root connection
-      const fillColor = getRootColor(node.rootIndex);
+      // Check if this cell was vacant at solve time
+      const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
+      const isVacant = solution.vacantCells.has(cellKey);
       
-      // Check if this is in the fundamental domain (copy 0,0) for interactivity
-      const isInFundamentalDomain = node.copyRow === 0 && node.copyCol === 0;
-      const isSelected = isInFundamentalDomain && selectedCell && 
-                         selectedCell.row === node.fundamentalRow && 
-                         selectedCell.col === node.fundamentalCol;
-      const isNeighbor = isInFundamentalDomain && 
-                         neighborCells.has(`${node.fundamentalRow},${node.fundamentalCol}`);
+      // Color: vacant cells are black, others colored by root connection
+      const fillColor = isVacant ? "#000" : getRootColor(node.rootIndex);
       
       cells.push(
         <rect
@@ -245,13 +288,11 @@ export function WallpaperMazeExplorer() {
           height={cellSize}
           fill={fillColor}
           stroke="none"
-          style={{ cursor: isInFundamentalDomain ? "pointer" : "default" }}
-          onClick={isInFundamentalDomain ? () => handleCellClick(node.fundamentalRow, node.fundamentalCol) : undefined}
         />
       );
       
-      // Root indicator
-      if (node.isRoot) {
+      // Root indicator (only for non-vacant cells)
+      if (node.isRoot && !isVacant) {
         cells.push(
           <circle
             key={`root-${node.id}`}
@@ -259,39 +300,6 @@ export function WallpaperMazeExplorer() {
             cy={y + cellSize / 2}
             r={cellSize / 6}
             fill="#000"
-          />
-        );
-      }
-      
-      // Highlight selected cell
-      if (isSelected) {
-        highlights.push(
-          <rect
-            key={`selected-${node.id}`}
-            x={x + 2}
-            y={y + 2}
-            width={cellSize - 4}
-            height={cellSize - 4}
-            fill="none"
-            stroke="#000"
-            strokeWidth={3}
-          />
-        );
-      }
-      
-      // Highlight neighbors
-      if (isNeighbor && !isSelected) {
-        highlights.push(
-          <rect
-            key={`neighbor-${node.id}`}
-            x={x + 2}
-            y={y + 2}
-            width={cellSize - 4}
-            height={cellSize - 4}
-            fill="none"
-            stroke="#ff4081"
-            strokeWidth={3}
-            strokeDasharray="4,2"
           />
         );
       }
@@ -320,19 +328,18 @@ export function WallpaperMazeExplorer() {
       <svg width={totalSize} height={totalSize}>
         {cells}
         {walls}
-        {highlights}
       </svg>
     );
   };
   
-  // Render unsolved maze view (empty grid)
-  const renderUnsolvedMazeView = () => {
+  // Render sketchpad (always visible, editable)
+  const renderSketchpad = () => {
     const cells: React.ReactNode[] = [];
     const highlights: React.ReactNode[] = [];
     
-    // Determine which cells are neighbors of selected
+    // Determine which cells are neighbors of selected (when using neighborhood viewer)
     const neighborCells = new Set<string>();
-    if (selectedCell && neighborInfo) {
+    if (activeTool === "neighborhoodViewer" && selectedCell && neighborInfo) {
       neighborCells.add(`${neighborInfo.N.row},${neighborInfo.N.col}`);
       neighborCells.add(`${neighborInfo.S.row},${neighborInfo.S.col}`);
       neighborCells.add(`${neighborInfo.E.row},${neighborInfo.E.col}`);
@@ -343,9 +350,19 @@ export function WallpaperMazeExplorer() {
       for (let col = 0; col < length; col++) {
         const x = padding + col * cellSize;
         const y = padding + row * cellSize;
+        const cellKey = `${row},${col}`;
         const isRoot = row === rootRow && col === rootCol;
-        const isSelected = selectedCell && selectedCell.row === row && selectedCell.col === col;
-        const isNeighbor = neighborCells.has(`${row},${col}`);
+        const isSelected = activeTool === "neighborhoodViewer" && selectedCell && selectedCell.row === row && selectedCell.col === col;
+        const isNeighbor = neighborCells.has(cellKey);
+        const isVacant = vacantCells.has(cellKey);
+        
+        // Determine fill color: vacant cells are black, root is orange, others are gray
+        let fillColor = "#e0e0e0";
+        if (isVacant) {
+          fillColor = "#000";
+        } else if (isRoot) {
+          fillColor = "#ffa726";
+        }
         
         cells.push(
           <rect
@@ -354,7 +371,7 @@ export function WallpaperMazeExplorer() {
             y={y}
             width={cellSize}
             height={cellSize}
-            fill={isRoot ? "#ffa726" : "#e0e0e0"}
+            fill={fillColor}
             stroke="#ccc"
             strokeWidth={1}
             style={{ cursor: "pointer" }}
@@ -394,7 +411,8 @@ export function WallpaperMazeExplorer() {
           );
         }
         
-        if (isRoot) {
+        // Root indicator (only for non-vacant cells)
+        if (isRoot && !isVacant) {
           cells.push(
             <circle
               key={`root-${row}-${col}`}
@@ -418,9 +436,9 @@ export function WallpaperMazeExplorer() {
     );
   };
   
-  // Render graph view
-  const renderGraphView = () => {
-    if (!tiledGraph) return null;
+  // Render solution graph view
+  const renderSolutionGraphView = () => {
+    if (!tiledGraph || !solution) return null;
     
     const dotRadius = 4;
     const graphCellSize = 30;
@@ -462,10 +480,17 @@ export function WallpaperMazeExplorer() {
       );
     }
     
-    // Draw edges (from each node to its parent)
+    // Draw edges (from each node to its parent) - skip edges involving vacant cells
     for (const edge of tiledGraph.edges) {
       const fromNode = tiledGraph.nodes[edge.fromId];
       const toNode = tiledGraph.nodes[edge.toId];
+      
+      // Skip edges involving vacant cells
+      const fromKey = `${fromNode.fundamentalRow},${fromNode.fundamentalCol}`;
+      const toKey = `${toNode.fundamentalRow},${toNode.fundamentalCol}`;
+      if (solution.vacantCells.has(fromKey) || solution.vacantCells.has(toKey)) {
+        continue;
+      }
       
       const x1 = graphPadding + fromNode.absCol * graphCellSize + graphCellSize / 2;
       const y1 = graphPadding + fromNode.absRow * graphCellSize + graphCellSize / 2;
@@ -485,8 +510,13 @@ export function WallpaperMazeExplorer() {
       );
     }
     
-    // Draw dots for each node
+    // Draw dots for each node - skip vacant cells (they are "empty squares" - no dot)
     for (const node of tiledGraph.nodes) {
+      const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
+      if (solution.vacantCells.has(cellKey)) {
+        continue; // Skip vacant cells - they render as empty (no dot)
+      }
+      
       const cx = graphPadding + node.absCol * graphCellSize + graphCellSize / 2;
       const cy = graphPadding + node.absRow * graphCellSize + graphCellSize / 2;
       
@@ -579,9 +609,79 @@ export function WallpaperMazeExplorer() {
     <div className="wallpaper-maze-explorer">
       <h2>Wallpaper Maze Explorer</h2>
       
-      <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
-        {/* Controls */}
+      <div style={{ display: "flex", gap: "40px", marginBottom: "20px" }}>
+        {/* Left panel: Sketchpad and Controls */}
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <h3 style={{ margin: 0 }}>Sketchpad ({wallpaperGroup})</h3>
+          
+          {/* Tool selector */}
+          <div style={{ display: "flex", gap: "5px", marginBottom: "10px" }}>
+            <button
+              onClick={() => setActiveTool("rootSetter")}
+              style={{
+                padding: "5px 10px",
+                backgroundColor: activeTool === "rootSetter" ? "#4caf50" : "#e0e0e0",
+                color: activeTool === "rootSetter" ? "white" : "black",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+              title="Click to set the root cell"
+            >
+              🎯 Root Setter
+            </button>
+            <button
+              onClick={() => setActiveTool("neighborhoodViewer")}
+              style={{
+                padding: "5px 10px",
+                backgroundColor: activeTool === "neighborhoodViewer" ? "#2196f3" : "#e0e0e0",
+                color: activeTool === "neighborhoodViewer" ? "white" : "black",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+              title="Click to view neighbors (highlights in pink)"
+            >
+              🔍 Neighborhood Viewer
+            </button>
+            <button
+              onClick={() => setActiveTool("blockSetter")}
+              style={{
+                padding: "5px 10px",
+                backgroundColor: activeTool === "blockSetter" ? "#f44336" : "#e0e0e0",
+                color: activeTool === "blockSetter" ? "white" : "black",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+              title="Click to toggle vacant/blocked cells"
+            >
+              ⬛ Block Setter
+            </button>
+          </div>
+          
+          {/* Sketchpad grid */}
+          {renderSketchpad()}
+          
+          {/* Tool info */}
+          <div style={{ fontSize: "12px", color: "#666", maxWidth: "200px" }}>
+            {activeTool === "rootSetter" && "Click a cell to set it as the root."}
+            {activeTool === "neighborhoodViewer" && selectedCell && (
+              <>
+                <strong>Selected:</strong> ({selectedCell.row}, {selectedCell.col})
+                <br />
+                <span style={{ color: "#ff4081" }}>Neighbors highlighted in pink</span>
+              </>
+            )}
+            {activeTool === "neighborhoodViewer" && !selectedCell && "Click a cell to view its neighbors."}
+            {activeTool === "blockSetter" && `Click to toggle vacant cells. ${vacantCells.size} vacant.`}
+          </div>
+          
+          <div style={{ marginTop: "10px" }}>
+            <strong>Root:</strong> ({rootRow}, {rootCol})
+          </div>
+          
+          {/* Settings */}
           <label>
             Grid Length:
             <input
@@ -592,23 +692,6 @@ export function WallpaperMazeExplorer() {
               onChange={(e) => {
                 const newLength = parseInt(e.target.value);
                 setLength(newLength);
-                // Root, solution, and graphSelectedNode are reset by useEffect when length changes
-                // This centralized approach ensures consistency and avoids duplication
-              }}
-              style={{ marginLeft: "10px", width: "60px" }}
-            />
-          </label>
-          
-          <label>
-            Multiplier:
-            <input
-              type="number"
-              min={1}
-              max={5}
-              value={multiplier}
-              onChange={(e) => {
-                setMultiplier(parseInt(e.target.value));
-                setSolution(null);
               }}
               style={{ marginLeft: "10px", width: "60px" }}
             />
@@ -620,7 +703,6 @@ export function WallpaperMazeExplorer() {
               value={wallpaperGroup}
               onChange={(e) => {
                 setWallpaperGroup(e.target.value as WallpaperGroupName);
-                setSolution(null);
               }}
               style={{ marginLeft: "10px" }}
             >
@@ -629,19 +711,6 @@ export function WallpaperMazeExplorer() {
               <option value="pgg">pgg (Glide Reflections)</option>
             </select>
           </label>
-          
-          <div style={{ marginTop: "10px" }}>
-            <strong>Root:</strong> ({rootRow}, {rootCol})
-            {selectedCell && (
-              <button
-                onClick={handleSetRoot}
-                style={{ marginLeft: "10px" }}
-                disabled={selectedCell.row === rootRow && selectedCell.col === rootCol}
-              >
-                Set ({selectedCell.row}, {selectedCell.col}) as Root
-              </button>
-            )}
-          </div>
           
           <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
             {!solving ? (
@@ -667,64 +736,75 @@ export function WallpaperMazeExplorer() {
           {errorMessage && (
             <div style={{ color: "red" }}>{errorMessage}</div>
           )}
-          
-          {solution && (
-            <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+        </div>
+        
+        {/* Right panel: Solution View (always shown once we have a solution) */}
+        {solution && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <h3 style={{ margin: 0 }}>Solution ({solution.wallpaperGroup})</h3>
+            
+            {/* Multiplier control (affects solution display) */}
+            <label>
+              Multiplier:
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={multiplier}
+                onChange={(e) => {
+                  setMultiplier(parseInt(e.target.value));
+                }}
+                style={{ marginLeft: "10px", width: "60px" }}
+              />
+            </label>
+            
+            {/* View mode toggle */}
+            <div style={{ display: "flex", gap: "10px" }}>
               <button
-                onClick={() => setViewMode("maze")}
+                onClick={() => setSolutionViewMode("maze")}
                 style={{ 
                   padding: "5px 15px",
-                  backgroundColor: viewMode === "maze" ? "#1976d2" : "#e0e0e0",
-                  color: viewMode === "maze" ? "white" : "black",
+                  backgroundColor: solutionViewMode === "maze" ? "#1976d2" : "#e0e0e0",
+                  color: solutionViewMode === "maze" ? "white" : "black",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
                 }}
               >
                 Maze
               </button>
               <button
-                onClick={() => setViewMode("graph")}
+                onClick={() => setSolutionViewMode("graph")}
                 style={{ 
                   padding: "5px 15px",
-                  backgroundColor: viewMode === "graph" ? "#1976d2" : "#e0e0e0",
-                  color: viewMode === "graph" ? "white" : "black",
+                  backgroundColor: solutionViewMode === "graph" ? "#1976d2" : "#e0e0e0",
+                  color: solutionViewMode === "graph" ? "white" : "black",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
                 }}
               >
                 Graph
               </button>
             </div>
-          )}
-          
-          {/* Selected node info for graph view */}
-          {viewMode === "graph" && graphSelectedNode && (
-            <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
-              <strong>Selected Cell</strong><br/>
-              Fundamental: ({graphSelectedNode.fundamentalRow}, {graphSelectedNode.fundamentalCol})<br/>
-              {!graphSelectedNode.isRoot && graphSelectedNode.parentDirection && (
-                <>Parent direction: {graphSelectedNode.parentDirection}<br/></>
-              )}
-              {graphSelectedNode.isRoot && <span style={{ color: "#ff9800" }}>Root</span>}
-            </div>
-          )}
-        </div>
-        
-        {/* Grid */}
-        <div>
-          {viewMode === "maze" || !solution ? (
-            renderMazeView()
-          ) : (
-            renderGraphView()
-          )}
-        </div>
+            
+            {/* Solution view */}
+            {solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()}
+            
+            {/* Selected node info for graph view */}
+            {solutionViewMode === "graph" && graphSelectedNode && (
+              <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
+                <strong>Selected Cell</strong><br/>
+                Fundamental: ({graphSelectedNode.fundamentalRow}, {graphSelectedNode.fundamentalCol})<br/>
+                {!graphSelectedNode.isRoot && graphSelectedNode.parentDirection && (
+                  <>Parent direction: {graphSelectedNode.parentDirection}<br/></>
+                )}
+                {graphSelectedNode.isRoot && <span style={{ color: "#ff9800" }}>Root</span>}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      
-      {/* Info panel */}
-      {selectedCell && !solution && (
-        <div style={{ marginTop: "10px" }}>
-          <strong>Selected Cell:</strong> ({selectedCell.row}, {selectedCell.col})
-          <span style={{ marginLeft: "20px", color: "#ff4081" }}>
-            Neighbors highlighted in pink
-          </span>
-        </div>
-      )}
     </div>
   );
 }

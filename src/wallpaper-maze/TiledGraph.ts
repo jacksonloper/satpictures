@@ -129,7 +129,8 @@ export function buildTiledGraph(
   wallpaperGroupName: WallpaperGroupName,
   rootRow: number,
   rootCol: number,
-  parentOf: Map<string, { row: number; col: number } | null>
+  parentOf: Map<string, { row: number; col: number } | null>,
+  vacantCells: Set<string> = new Set()
 ): TiledGraph {
   const wpg = getWallpaperGroup(wallpaperGroupName);
   const totalSize = length * multiplier;
@@ -138,7 +139,7 @@ export function buildTiledGraph(
   const nodeAt = new Map<string, number>();
   const roots: TiledNode[] = [];
   
-  // Step 1: Create all nodes
+  // Step 1: Create all nodes (including vacant ones - they're needed for grid structure)
   for (let copyRow = 0; copyRow < multiplier; copyRow++) {
     for (let copyCol = 0; copyCol < multiplier; copyCol++) {
       const type = wpg.getType(copyRow, copyCol);
@@ -150,9 +151,13 @@ export function buildTiledGraph(
           const absRow = copyRow * length + transformed.row;
           const absCol = copyCol * length + transformed.col;
           
-          // Get parent info from fundamental domain
-          const parentCell = parentOf.get(`${row},${col}`);
-          const isRoot = row === rootRow && col === rootCol;
+          // Check if this cell is vacant
+          const fundamentalKey = `${row},${col}`;
+          const isVacant = vacantCells.has(fundamentalKey);
+          
+          // Get parent info from fundamental domain (vacant cells have no parent)
+          const parentCell = isVacant ? null : parentOf.get(fundamentalKey);
+          const isRoot = !isVacant && row === rootRow && col === rootCol;
           
           // Determine parent direction in fundamental domain
           let parentDirection: Direction | null = null;
