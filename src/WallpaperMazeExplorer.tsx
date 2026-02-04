@@ -342,6 +342,7 @@ export function WallpaperMazeExplorer() {
   const [satStats, setSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("maze");
+  const [graphSelectedCell, setGraphSelectedCell] = useState<GridCell | null>(null);
   
   // Worker ref for cancel support
   const workerRef = useRef<Worker | null>(null);
@@ -823,6 +824,10 @@ export function WallpaperMazeExplorer() {
           const rootIdx = rootConnections?.get(key);
           const cellColor = rootIdx !== undefined ? getRootColor(rootIdx) : "#d0d0d0";
           
+          // Check if this cell is part of the selected equivalence class
+          const isEquivalentToSelected = graphSelectedCell && 
+            graphSelectedCell.row === row && graphSelectedCell.col === col;
+          
           dots.push(
             <circle
               key={`dot-${copyIndex}-${row}-${col}`}
@@ -830,10 +835,83 @@ export function WallpaperMazeExplorer() {
               cy={y}
               r={isRoot ? dotRadius + 2 : dotRadius}
               fill={cellColor}
-              stroke={isRoot ? "#000" : "#333"}
-              strokeWidth={isRoot ? 2 : 1}
+              stroke={isEquivalentToSelected ? "#ff00ff" : (isRoot ? "#000" : "#333")}
+              strokeWidth={isEquivalentToSelected ? 3 : (isRoot ? 2 : 1)}
+              style={{ cursor: "pointer" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (graphSelectedCell && graphSelectedCell.row === row && graphSelectedCell.col === col) {
+                  setGraphSelectedCell(null);
+                } else {
+                  setGraphSelectedCell({ row, col });
+                }
+              }}
             />
           );
+          
+          // If this is an equivalent cell, draw parent arrow pointing in the appropriate direction
+          if (isEquivalentToSelected && !isRoot) {
+            const parent = solution.parentOf.get(cellKey(row, col));
+            if (parent) {
+              // Find the direction to parent in the fundamental domain
+              const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
+              let parentDir: "N" | "S" | "E" | "W" | null = null;
+              if (neighbors.N.row === parent.row && neighbors.N.col === parent.col) parentDir = "N";
+              else if (neighbors.S.row === parent.row && neighbors.S.col === parent.col) parentDir = "S";
+              else if (neighbors.E.row === parent.row && neighbors.E.col === parent.col) parentDir = "E";
+              else if (neighbors.W.row === parent.row && neighbors.W.col === parent.col) parentDir = "W";
+              
+              if (parentDir) {
+                // Transform direction for rotated copies
+                const visualDir = getVisualDirection(parentDir, copyRow, copyCol, wallpaperGroup);
+                
+                // Calculate arrow endpoint in the visual direction
+                let dx = 0, dy = 0;
+                const arrowLength = graphCellSize * 0.7;
+                switch (visualDir) {
+                  case "N": dy = -arrowLength; break;
+                  case "S": dy = arrowLength; break;
+                  case "E": dx = arrowLength; break;
+                  case "W": dx = -arrowLength; break;
+                }
+                
+                const arrowHeadSize = 6;
+                const endX = x + dx;
+                const endY = y + dy;
+                
+                // Calculate arrow head points
+                let headAngle = 0;
+                switch (visualDir) {
+                  case "N": headAngle = Math.PI / 2; break;
+                  case "S": headAngle = -Math.PI / 2; break;
+                  case "E": headAngle = Math.PI; break;
+                  case "W": headAngle = 0; break;
+                }
+                
+                const leftX = endX + arrowHeadSize * Math.cos(headAngle - Math.PI / 6);
+                const leftY = endY + arrowHeadSize * Math.sin(headAngle - Math.PI / 6);
+                const rightX = endX + arrowHeadSize * Math.cos(headAngle + Math.PI / 6);
+                const rightY = endY + arrowHeadSize * Math.sin(headAngle + Math.PI / 6);
+                
+                dots.push(
+                  <g key={`parent-arrow-${copyIndex}-${row}-${col}`}>
+                    <line
+                      x1={x}
+                      y1={y}
+                      x2={endX}
+                      y2={endY}
+                      stroke="#ff00ff"
+                      strokeWidth={2}
+                    />
+                    <polygon
+                      points={`${endX},${endY} ${leftX},${leftY} ${rightX},${rightY}`}
+                      fill="#ff00ff"
+                    />
+                  </g>
+                );
+              }
+            }
+          }
         }
       }
       
