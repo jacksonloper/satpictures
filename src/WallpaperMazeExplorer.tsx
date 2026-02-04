@@ -125,178 +125,183 @@ function tiledCellKey(copyRow: number, copyCol: number, row: number, col: number
 }
 
 /**
- * Get the parent direction for a cell, considering whether the copy is rotated.
- * For P2 with rotated copies (copyRow + copyCol is odd), the parent direction is flipped.
+ * Get the child directions for a cell - these are the directions of cells that have THIS cell as parent.
+ * For P2 with rotated copies (copyRow + copyCol is odd), directions are flipped.
+ * 
+ * Returns an array of { direction, childRow, childCol } for children in the fundamental domain.
  */
-function getParentDirection(
+function getChildrenInFundamentalDomain(
   row: number,
   col: number,
-  copyRow: number,
-  copyCol: number,
   length: number,
   wallpaperGroup: WallpaperGroup,
   parentOf: Map<string, GridCell | null>
-): "N" | "S" | "E" | "W" | null {
-  const key = cellKey(row, col);
-  const parent = parentOf.get(key);
+): Array<{ direction: "N" | "S" | "E" | "W"; row: number; col: number }> {
+  const children: Array<{ direction: "N" | "S" | "E" | "W"; row: number; col: number }> = [];
   
-  if (parent == null) {
-    return null; // This is a root
-  }
-  
-  // Determine original parent direction
+  // Check all 4 neighbors to see if they have this cell as parent
   const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
+  const directions: Array<{ dir: "N" | "S" | "E" | "W"; neighbor: GridCell }> = [
+    { dir: "N", neighbor: neighbors.N },
+    { dir: "S", neighbor: neighbors.S },
+    { dir: "E", neighbor: neighbors.E },
+    { dir: "W", neighbor: neighbors.W },
+  ];
   
-  let direction: "N" | "S" | "E" | "W" | null = null;
-  if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
-    direction = "N";
-  } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
-    direction = "S";
-  } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
-    direction = "E";
-  } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
-    direction = "W";
+  for (const { dir, neighbor } of directions) {
+    const neighborKey = cellKey(neighbor.row, neighbor.col);
+    const neighborParent = parentOf.get(neighborKey);
+    
+    // If neighbor's parent is this cell, then neighbor is a child
+    if (neighborParent && neighborParent.row === row && neighborParent.col === col) {
+      children.push({ direction: dir, row: neighbor.row, col: neighbor.col });
+    }
   }
   
-  if (direction == null) return null;
-  
-  // For P2, if this copy is rotated (copyRow + copyCol is odd), flip the direction
+  return children;
+}
+
+/**
+ * Get the visual direction in tiled space (accounting for P2 rotation).
+ * For rotated copies in P2, directions are flipped.
+ */
+function getVisualDirection(
+  direction: "N" | "S" | "E" | "W",
+  copyRow: number,
+  copyCol: number,
+  wallpaperGroup: WallpaperGroup
+): "N" | "S" | "E" | "W" {
   if (wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1) {
     const flipMap: Record<string, "N" | "S" | "E" | "W"> = {
-      "N": "S",
-      "S": "N",
-      "E": "W",
-      "W": "E"
+      "N": "S", "S": "N", "E": "W", "W": "E"
     };
-    direction = flipMap[direction];
+    return flipMap[direction];
   }
-  
   return direction;
 }
 
 /**
- * Build the full tiled graph and compute which root each cell connects to.
- * Returns a map from tiledCellKey to root index.
+ * Compute which root each cell connects to by tracing DOWN from each root.
+ * Uses BFS from each root, following child edges in ordinary cardinal directions.
+ * NO WRAPPING - cells outside the visible tiled space are not colored.
+ * Returns a map from tiledCellKey to root index, or undefined for uncolored cells.
  */
 function computeRootConnections(
   length: number,
   multiplier: number,
   wallpaperGroup: WallpaperGroup,
+  rootRow: number,
+  rootCol: number,
   parentOf: Map<string, GridCell | null>
 ): Map<string, number> {
   const rootConnections = new Map<string, number>();
+  const totalSize = multiplier * length;
   
-  // For each cell in the full tiled space, trace to find which root it connects to
-  for (let copyRow = 0; copyRow < multiplier; copyRow++) {
-    for (let copyCol = 0; copyCol < multiplier; copyCol++) {
-      for (let row = 0; row < length; row++) {
-        for (let col = 0; col < length; col++) {
-          const key = tiledCellKey(copyRow, copyCol, row, col);
-          
-          // Trace to root using ordinary cardinal navigation in tiled space
-          const rootCopy = traceToRootInTiledSpace(
-            row, col, copyRow, copyCol, 
-            length, multiplier, wallpaperGroup,
-            parentOf
+  // For each root position in the tiled space
+  for (let rootCopyRow = 0; rootCopyRow < multiplier; rootCopyRow++) {
+    for (let rootCopyCol = 0; rootCopyCol < multiplier; rootCopyCol++) {
+      const rootIdx = rootCopyRow * multiplier + rootCopyCol;
+      
+      // BFS from this root position
+      // Queue entries: { copyRow, copyCol, row, col, absRow, absCol }
+      // absRow/absCol are the visual positions in the full tiled space
+      
+      // Calculate the visual position of the root in tiled space
+      let rootAbsRow = rootCopyRow * length + rootRow;
+      let rootAbsCol = rootCopyCol * length + rootCol;
+      if (wallpaperGroup === "P2" && (rootCopyRow + rootCopyCol) % 2 === 1) {
+        rootAbsRow = rootCopyRow * length + (length - 1 - rootRow);
+        rootAbsCol = rootCopyCol * length + (length - 1 - rootCol);
+      }
+      
+      const queue: Array<{
+        copyRow: number;
+        copyCol: number;
+        row: number;
+        col: number;
+        absRow: number;
+        absCol: number;
+      }> = [{ 
+        copyRow: rootCopyRow, 
+        copyCol: rootCopyCol, 
+        row: rootRow, 
+        col: rootCol,
+        absRow: rootAbsRow,
+        absCol: rootAbsCol
+      }];
+      
+      const visited = new Set<string>();
+      
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const key = tiledCellKey(current.copyRow, current.copyCol, current.row, current.col);
+        
+        // Skip if already visited or already colored by another root
+        if (visited.has(key)) continue;
+        if (rootConnections.has(key)) continue;
+        
+        visited.add(key);
+        rootConnections.set(key, rootIdx);
+        
+        // Find children in the fundamental domain
+        const children = getChildrenInFundamentalDomain(
+          current.row, current.col, length, wallpaperGroup, parentOf
+        );
+        
+        for (const child of children) {
+          // Get the visual direction to move in tiled space
+          const visualDir = getVisualDirection(
+            child.direction, current.copyRow, current.copyCol, wallpaperGroup
           );
           
-          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
-          rootConnections.set(key, rootIdx);
+          // Calculate new absolute position (no wrapping!)
+          let newAbsRow = current.absRow;
+          let newAbsCol = current.absCol;
+          switch (visualDir) {
+            case "N": newAbsRow--; break;
+            case "S": newAbsRow++; break;
+            case "E": newAbsCol++; break;
+            case "W": newAbsCol--; break;
+          }
+          
+          // Check bounds - NO WRAPPING
+          if (newAbsRow < 0 || newAbsRow >= totalSize || 
+              newAbsCol < 0 || newAbsCol >= totalSize) {
+            continue; // Out of bounds, don't color
+          }
+          
+          // Convert back to copy + cell coordinates
+          const newCopyRow = Math.floor(newAbsRow / length);
+          const newCopyCol = Math.floor(newAbsCol / length);
+          let newRow = newAbsRow % length;
+          let newCol = newAbsCol % length;
+          
+          // For rotated copies, convert visual position back to logical cell coordinates
+          if (wallpaperGroup === "P2" && (newCopyRow + newCopyCol) % 2 === 1) {
+            newRow = length - 1 - newRow;
+            newCol = length - 1 - newCol;
+          }
+          
+          // Verify this matches the expected child
+          if (newRow !== child.row || newCol !== child.col) {
+            // Mismatch - this edge crossed a copy boundary in a way that doesn't match
+            continue;
+          }
+          
+          queue.push({
+            copyRow: newCopyRow,
+            copyCol: newCopyCol,
+            row: newRow,
+            col: newCol,
+            absRow: newAbsRow,
+            absCol: newAbsCol
+          });
         }
       }
     }
   }
   
   return rootConnections;
-}
-
-/**
- * Trace to root in the full tiled space using ordinary cardinal directions.
- * Returns the copy coordinates of the root we connect to.
- */
-function traceToRootInTiledSpace(
-  row: number,
-  col: number,
-  copyRow: number,
-  copyCol: number,
-  length: number,
-  multiplier: number,
-  wallpaperGroup: WallpaperGroup,
-  parentOf: Map<string, GridCell | null>
-): { copyRow: number; copyCol: number } {
-  let currentRow = row;
-  let currentCol = col;
-  let currentCopyRow = copyRow;
-  let currentCopyCol = copyCol;
-  
-  // Safety limit: maximum possible cells in the tiled space
-  const maxIterations = length * length * multiplier * multiplier;
-  let iterations = 0;
-  
-  while (iterations < maxIterations) {
-    // Get parent direction for this cell (considering rotation)
-    const direction = getParentDirection(
-      currentRow, currentCol, currentCopyRow, currentCopyCol,
-      length, wallpaperGroup, parentOf
-    );
-    
-    if (direction == null) {
-      // We've reached a root
-      break;
-    }
-    
-    // Move in the parent direction using ordinary cardinal navigation
-    // Calculate the absolute position in tiled space
-    let absRow = currentCopyRow * length + currentRow;
-    let absCol = currentCopyCol * length + currentCol;
-    
-    // For rotated copies, the visual position is flipped
-    if (wallpaperGroup === "P2" && (currentCopyRow + currentCopyCol) % 2 === 1) {
-      absRow = currentCopyRow * length + (length - 1 - currentRow);
-      absCol = currentCopyCol * length + (length - 1 - currentCol);
-    }
-    
-    // Move in the direction (in absolute tiled space)
-    switch (direction) {
-      case "N": absRow--; break;
-      case "S": absRow++; break;
-      case "E": absCol++; break;
-      case "W": absCol--; break;
-    }
-    
-    // Wrap in tiled space
-    const totalRows = multiplier * length;
-    const totalCols = multiplier * length;
-    absRow = ((absRow % totalRows) + totalRows) % totalRows;
-    absCol = ((absCol % totalCols) + totalCols) % totalCols;
-    
-    // Convert back to copy + cell coordinates
-    const newCopyRow = Math.floor(absRow / length);
-    const newCopyCol = Math.floor(absCol / length);
-    let newRow = absRow % length;
-    let newCol = absCol % length;
-    
-    // For rotated copies, convert the visual position back to logical cell coordinates
-    if (wallpaperGroup === "P2" && (newCopyRow + newCopyCol) % 2 === 1) {
-      newRow = length - 1 - newRow;
-      newCol = length - 1 - newCol;
-    }
-    
-    currentCopyRow = newCopyRow;
-    currentCopyCol = newCopyCol;
-    currentRow = newRow;
-    currentCol = newCol;
-    iterations++;
-  }
-  
-  return { copyRow: currentCopyRow, copyCol: currentCopyCol };
-}
-
-/**
- * Get a unique root index from copy coordinates
- */
-function rootIndexFromCopy(copyRow: number, copyCol: number, multiplier: number): number {
-  return copyRow * multiplier + copyCol;
 }
 
 // View mode type
@@ -431,9 +436,9 @@ export function WallpaperMazeExplorer() {
   const rootConnections = useMemo(() => {
     if (!solution) return null;
     return computeRootConnections(
-      length, multiplier, wallpaperGroup, solution.parentOf
+      length, multiplier, wallpaperGroup, rootRow, rootCol, solution.parentOf
     );
-  }, [solution, length, multiplier, wallpaperGroup]);
+  }, [solution, length, multiplier, wallpaperGroup, rootRow, rootCol]);
   
   // Render a single maze grid
   const renderMazeGrid = (
@@ -471,8 +476,12 @@ export function WallpaperMazeExplorer() {
         let fillColor: string;
         if (rootConnections) {
           const key = tiledCellKey(copyRow, copyCol, row, col);
-          const rootIdx = rootConnections.get(key) ?? 0;
-          fillColor = getRootColor(rootIdx);
+          const rootIdx = rootConnections.get(key);
+          if (rootIdx !== undefined) {
+            fillColor = getRootColor(rootIdx);
+          } else {
+            fillColor = "#d0d0d0"; // Gray for cells not reachable from any visible root
+          }
         } else {
           fillColor = "#e0e0e0"; // Gray for unsolved cells
         }
@@ -788,8 +797,8 @@ export function WallpaperMazeExplorer() {
           
           // Use precomputed root connections for color
           const key = tiledCellKey(copyRow, copyCol, row, col);
-          const rootIdx = rootConnections?.get(key) ?? 0;
-          const cellColor = getRootColor(rootIdx);
+          const rootIdx = rootConnections?.get(key);
+          const cellColor = rootIdx !== undefined ? getRootColor(rootIdx) : "#d0d0d0";
           
           dots.push(
             <circle
@@ -805,48 +814,70 @@ export function WallpaperMazeExplorer() {
         }
       }
       
-      // Draw lines from each cell to its parent
+      // Draw lines from each cell to its children (direction we traverse when coloring)
+      // This matches the direction we traced down from the root
       for (let row = 0; row < length; row++) {
         for (let col = 0; col < length; col++) {
-          // Get parent direction (flipped for rotated copies)
-          const direction = getParentDirection(
-            row, col, copyRow, copyCol,
-            length, wallpaperGroup, solution.parentOf
+          const children = getChildrenInFundamentalDomain(
+            row, col, length, wallpaperGroup, solution.parentOf
           );
           
-          if (!direction) continue; // Root has no parent
+          if (children.length === 0) continue;
           
-          const childPos = getPos(row, col, offsetX, offsetY);
+          const parentPos = getPos(row, col, offsetX, offsetY);
+          const parentKey = tiledCellKey(copyRow, copyCol, row, col);
+          const parentRootIdx = rootConnections?.get(parentKey);
           
-          // Calculate line endpoint - go all the way to the next grid position
-          let dx = 0, dy = 0;
-          
-          switch (direction) {
-            case "N": dy = -graphCellSize; break;
-            case "S": dy = graphCellSize; break;
-            case "E": dx = graphCellSize; break;
-            case "W": dx = -graphCellSize; break;
+          for (const child of children) {
+            // Get the visual direction to the child
+            const visualDir = getVisualDirection(
+              child.direction, copyRow, copyCol, wallpaperGroup
+            );
+            
+            // Calculate line endpoint
+            let dx = 0, dy = 0;
+            switch (visualDir) {
+              case "N": dy = -graphCellSize; break;
+              case "S": dy = graphCellSize; break;
+              case "E": dx = graphCellSize; break;
+              case "W": dx = -graphCellSize; break;
+            }
+            
+            const endX = parentPos.x + dx;
+            const endY = parentPos.y + dy;
+            
+            // Check if the child is in the same connected component (same color)
+            // by verifying the endpoint is within bounds
+            const childAbsRow = copyRow * length + (wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1 ? (length - 1 - row) : row);
+            const childAbsCol = copyCol * length + (wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1 ? (length - 1 - col) : col);
+            let targetAbsRow = childAbsRow, targetAbsCol = childAbsCol;
+            switch (visualDir) {
+              case "N": targetAbsRow--; break;
+              case "S": targetAbsRow++; break;
+              case "E": targetAbsCol++; break;
+              case "W": targetAbsCol--; break;
+            }
+            
+            const totalSize = multiplier * length;
+            if (targetAbsRow < 0 || targetAbsRow >= totalSize || 
+                targetAbsCol < 0 || targetAbsCol >= totalSize) {
+              continue; // Edge goes out of bounds - don't draw
+            }
+            
+            const edgeColor = parentRootIdx !== undefined ? getRootColor(parentRootIdx) : "#d0d0d0";
+            
+            arrows.push(
+              <line
+                key={`edge-${copyIndex}-${row}-${col}-${child.direction}`}
+                x1={parentPos.x}
+                y1={parentPos.y}
+                x2={endX}
+                y2={endY}
+                stroke={edgeColor}
+                strokeWidth={2}
+              />
+            );
           }
-          
-          const endX = childPos.x + dx;
-          const endY = childPos.y + dy;
-          
-          // Use precomputed root connections for color
-          const key = tiledCellKey(copyRow, copyCol, row, col);
-          const rootIdx = rootConnections?.get(key) ?? 0;
-          const edgeColor = getRootColor(rootIdx);
-          
-          arrows.push(
-            <line
-              key={`edge-${copyIndex}-${row}-${col}`}
-              x1={childPos.x}
-              y1={childPos.y}
-              x2={endX}
-              y2={endY}
-              stroke={edgeColor}
-              strokeWidth={2}
-            />
-          );
         }
       }
       
