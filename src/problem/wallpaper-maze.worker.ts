@@ -11,7 +11,7 @@ import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 // Types for wallpaper maze problems
-export type WallpaperGroup = "P1" | "P2";
+export type WallpaperGroup = "P1" | "P2" | "pgg";
 
 export interface WallpaperMazeRequest {
   length: number;
@@ -231,7 +231,7 @@ function getWrappedNeighbors(
       E: { row, col: (col + 1) % length },
       W: { row, col: (col - 1 + length) % length },
     };
-  } else {
+  } else if (wallpaperGroup === "P2") {
     let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
     
     if (row === 0) {
@@ -254,6 +254,39 @@ function getWrappedNeighbors(
     
     if (col === length - 1) {
       E = { row: (length - 1 - row), col: length - 1 };
+    } else {
+      E = { row, col: col + 1 };
+    }
+    
+    return { N, S, E, W };
+  } else {
+    // pgg: torus-like but with flips
+    let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
+    
+    // North of (0, k) wraps to (length-1, length-k-1)
+    if (row === 0) {
+      N = { row: length - 1, col: length - col - 1 };
+    } else {
+      N = { row: row - 1, col };
+    }
+    
+    // South of (length-1, k) wraps to (0, length-k-1)
+    if (row === length - 1) {
+      S = { row: 0, col: length - col - 1 };
+    } else {
+      S = { row: row + 1, col };
+    }
+    
+    // West of (k, 0) wraps to (length-k-1, length-1)
+    if (col === 0) {
+      W = { row: length - row - 1, col: length - 1 };
+    } else {
+      W = { row, col: col - 1 };
+    }
+    
+    // East of (k, length-1) wraps to (length-k-1, 0)
+    if (col === length - 1) {
+      E = { row: length - row - 1, col: 0 };
     } else {
       E = { row, col: col + 1 };
     }
@@ -338,11 +371,23 @@ function buildMazeSATCNF(
   const distVar = (row: number, col: number, d: number) =>
     v(`dist(${cellKey(row, col)})>=${d}`);
   
+  // Build adjacency with deduplicated neighbors (important for small grids where multiple directions can point to same cell)
   const adjacency = new Map<string, GridCell[]>();
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
       const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-      adjacency.set(cellKey(row, col), [neighbors.N, neighbors.S, neighbors.E, neighbors.W]);
+      const allNeighbors = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
+      // Deduplicate neighbors by their cell key
+      const seen = new Set<string>();
+      const uniqueNeighbors: GridCell[] = [];
+      for (const n of allNeighbors) {
+        const key = cellKey(n.row, n.col);
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueNeighbors.push(n);
+        }
+      }
+      adjacency.set(cellKey(row, col), uniqueNeighbors);
     }
   }
   
