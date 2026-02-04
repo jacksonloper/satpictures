@@ -108,11 +108,12 @@ export function WallpaperMazeExplorer() {
       workerRef.current.terminate();
     }
     
-    // Ensure root is within bounds (state updates may be async)
+    // Ensure root is within bounds (state updates from useEffect may be async)
+    // We compute safe values here and use them for the worker, then also update
+    // state to keep UI in sync (even though this update is also async, it ensures
+    // the UI will eventually reflect the actual values sent to the worker)
     const safeRootRow = rootRow >= length ? 0 : rootRow;
     const safeRootCol = rootCol >= length ? 0 : rootCol;
-    
-    // Update state if needed
     if (safeRootRow !== rootRow) setRootRow(safeRootRow);
     if (safeRootCol !== rootCol) setRootCol(safeRootCol);
     
