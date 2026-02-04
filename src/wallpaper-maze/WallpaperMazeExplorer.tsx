@@ -592,8 +592,8 @@ export function WallpaperMazeExplorer() {
               onChange={(e) => {
                 const newLength = parseInt(e.target.value);
                 setLength(newLength);
-                // Root will be reset to (0,0) by useEffect when length changes
-                // No need to set it here - the useEffect handles it
+                // Root, solution, and graphSelectedNode are reset by useEffect when length changes
+                // This centralized approach ensures consistency and avoids duplication
               }}
               style={{ marginLeft: "10px", width: "60px" }}
             />
