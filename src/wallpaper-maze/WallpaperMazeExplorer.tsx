@@ -19,6 +19,12 @@ import "../App.css";
  * Currently supports P1 (torus/regular wrapping) and P2 (180° rotation wrapping).
  */
 
+// Constants
+const DEFAULT_LENGTH = 4;
+const DEFAULT_MULTIPLIER = 2;
+const CELL_SIZE = 40;
+const GRID_PADDING = 20;
+
 // Types
 interface GridCell {
   row: number;
@@ -34,8 +40,8 @@ interface MazeSolution {
 type ViewMode = "maze" | "graph";
 
 export function WallpaperMazeExplorer() {
-  const [length, setLength] = useState(4);
-  const [multiplier, setMultiplier] = useState(2);
+  const [length, setLength] = useState(DEFAULT_LENGTH);
+  const [multiplier, setMultiplier] = useState(DEFAULT_MULTIPLIER);
   const [wallpaperGroup, setWallpaperGroup] = useState<WallpaperGroupName>("P1");
   const [rootRow, setRootRow] = useState(0);
   const [rootCol, setRootCol] = useState(0);
@@ -50,8 +56,8 @@ export function WallpaperMazeExplorer() {
   // Worker ref for cancel support
   const workerRef = useRef<Worker | null>(null);
   
-  const cellSize = 40;
-  const padding = 20;
+  const cellSize = CELL_SIZE;
+  const padding = GRID_PADDING;
   
   // Cleanup worker on unmount
   useEffect(() => {

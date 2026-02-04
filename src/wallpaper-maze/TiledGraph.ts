@@ -219,31 +219,43 @@ export function buildTiledGraph(
     }
   }
   
-  // Step 3: Compute root connections using BFS from each root
+  // Step 3: Build children index for efficient BFS
+  const childrenOf = new Map<number, number[]>();
+  for (const node of nodes) {
+    if (node.parentId !== null) {
+      const children = childrenOf.get(node.parentId) || [];
+      children.push(node.id);
+      childrenOf.set(node.parentId, children);
+    }
+  }
+  
+  // Step 4: Compute root connections using BFS from each root
   for (let rootIdx = 0; rootIdx < roots.length; rootIdx++) {
     const rootNode = roots[rootIdx];
     rootNode.rootIndex = rootIdx;
     
-    // BFS following child edges (nodes whose parentId points to us)
+    // BFS following child edges
     const visited = new Set<number>();
     const queue: number[] = [rootNode.id];
+    let queueIdx = 0; // Use index instead of shift() for O(1) dequeue
     visited.add(rootNode.id);
     
-    while (queue.length > 0) {
-      const currentId = queue.shift()!;
+    while (queueIdx < queue.length) {
+      const currentId = queue[queueIdx++];
       
-      // Find all children (nodes whose parentId is currentId)
-      for (const node of nodes) {
-        if (node.parentId === currentId && !visited.has(node.id)) {
-          visited.add(node.id);
-          node.rootIndex = rootIdx;
-          queue.push(node.id);
+      // Find all children using the pre-built index
+      const children = childrenOf.get(currentId) || [];
+      for (const childId of children) {
+        if (!visited.has(childId)) {
+          visited.add(childId);
+          nodes[childId].rootIndex = rootIdx;
+          queue.push(childId);
         }
       }
     }
   }
   
-  // Step 4: Build edges list (parent-child only, for graph view)
+  // Step 5: Build edges list (parent-child only, for graph view)
   const edges: TiledEdge[] = [];
   for (const node of nodes) {
     if (node.parentId !== null) {
@@ -275,6 +287,11 @@ export function buildTiledGraph(
 }
 
 /**
+ * Golden ratio for evenly spreading colors
+ */
+const GOLDEN_RATIO = 0.618033988749895;
+
+/**
  * Get a color for a root index
  */
 export function getRootColor(rootIndex: number): string {
@@ -282,8 +299,7 @@ export function getRootColor(rootIndex: number): string {
     return "#d0d0d0"; // Gray for unconnected
   }
   // Use golden ratio to spread colors evenly
-  const goldenRatio = 0.618033988749895;
-  const hue = ((rootIndex * goldenRatio) % 1) * 360;
+  const hue = ((rootIndex * GOLDEN_RATIO) % 1) * 360;
   const saturation = 65;
   const lightness = 50;
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
