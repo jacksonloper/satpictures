@@ -148,6 +148,35 @@ function getHexagonTranslation(
   return { x, y };
 }
 
+// Get the P3 wallpaper group (static, never changes)
+const P3_WALLPAPER_GROUP = getWallpaperGroup("P3");
+
+/**
+ * Check if there's a parent-child relationship between two cells
+ */
+function hasParentChildRelationship(
+  cellKey: string,
+  neighborKey: string,
+  parentOf: Map<string, { row: number; col: number } | null>
+): boolean {
+  const cellParent = parentOf.get(cellKey);
+  const neighborParent = parentOf.get(neighborKey);
+  
+  // Parse cell coordinates
+  const [cellRow, cellCol] = cellKey.split(",").map(Number);
+  const [neighborRow, neighborCol] = neighborKey.split(",").map(Number);
+  
+  // Check if neighbor is parent of this cell
+  const isParentOfCell = cellParent && 
+    cellParent.row === neighborRow && cellParent.col === neighborCol;
+  
+  // Check if this cell is parent of neighbor
+  const isChildOfCell = neighborParent && 
+    neighborParent.row === cellRow && neighborParent.col === cellCol;
+  
+  return !!(isParentOfCell || isChildOfCell);
+}
+
 export function P3RhombusRenderer({
   length,
   multiplier,
@@ -159,7 +188,6 @@ export function P3RhombusRenderer({
   wallpaperGroupName: _wallpaperGroupName,
   tiledGraph,
 }: P3RhombusRendererProps) {
-  const wpg = getWallpaperGroup("P3");
   
   // Pre-compute dimensions
   const dimensions = useMemo(() => {
@@ -244,34 +272,16 @@ export function P3RhombusRenderer({
               
               // Add maze walls based on parent relationships
               if (!isVacant) {
-                const parent = parentOf.get(cellKey);
-                
                 // Check each direction - add wall if not connected to parent
                 const directions: Direction[] = ["N", "S", "E", "W"];
                 for (const dir of directions) {
-                  const neighbor = wpg.getWrappedNeighbor(row, col, dir, length);
+                  const neighbor = P3_WALLPAPER_GROUP.getWrappedNeighbor(row, col, dir, length);
                   const neighborKey = `${neighbor.row},${neighbor.col}`;
                   const neighborIsVacant = vacantCells.has(neighborKey);
                   
-                  // Add wall if:
-                  // 1. Neighbor is vacant, OR
-                  // 2. This cell is not root and parent is not in this direction, AND
-                  //    The neighbor is not this cell's child (neighbor's parent is not this cell)
-                  let shouldAddWall = false;
-                  
-                  if (neighborIsVacant) {
-                    shouldAddWall = true;
-                  } else {
-                    // Check if this is a passage (either direction is parent-child)
-                    const isParentOfThis = parent && 
-                      parent.row === neighbor.row && parent.col === neighbor.col;
-                    const neighborParent = parentOf.get(neighborKey);
-                    const isChildOfThis = neighborParent && 
-                      neighborParent.row === row && neighborParent.col === col;
-                    
-                    // Wall exists if no parent-child relationship in either direction
-                    shouldAddWall = !isParentOfThis && !isChildOfThis;
-                  }
+                  // Add wall if neighbor is vacant or no parent-child relationship
+                  const shouldAddWall = neighborIsVacant || 
+                    !hasParentChildRelationship(cellKey, neighborKey, parentOf);
                   
                   if (shouldAddWall) {
                     const segment = getWallSegment(row, col, dir, cellSize);
@@ -330,7 +340,7 @@ export function P3RhombusRenderer({
     }
     
     return { hexagonElements: hexElements, wallElements: walls };
-  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf, wpg]);
+  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf]);
 
   const padding = 60;
 
