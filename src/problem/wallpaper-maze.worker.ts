@@ -371,11 +371,23 @@ function buildMazeSATCNF(
   const distVar = (row: number, col: number, d: number) =>
     v(`dist(${cellKey(row, col)})>=${d}`);
   
+  // Build adjacency with deduplicated neighbors (important for small grids where multiple directions can point to same cell)
   const adjacency = new Map<string, GridCell[]>();
   for (let row = 0; row < length; row++) {
     for (let col = 0; col < length; col++) {
       const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-      adjacency.set(cellKey(row, col), [neighbors.N, neighbors.S, neighbors.E, neighbors.W]);
+      const allNeighbors = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
+      // Deduplicate neighbors by their cell key
+      const seen = new Set<string>();
+      const uniqueNeighbors: GridCell[] = [];
+      for (const n of allNeighbors) {
+        const key = cellKey(n.row, n.col);
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueNeighbors.push(n);
+        }
+      }
+      adjacency.set(cellKey(row, col), uniqueNeighbors);
     }
   }
   
