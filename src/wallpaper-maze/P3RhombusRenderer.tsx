@@ -81,10 +81,12 @@ function getCellRhombusPath(
  * y = 0
  */
 function getPivotPoint(length: number, cellSize: number): { x: number; y: number } {
-  // Top-right corner of the fundamental domain (at row=0, col=length-1)
-  // After shearing, cell (0, length-1) has top-right corner at:
-  // x = (length-1) * cellSize + cellSize = length * cellSize
-  // y = 0
+  // Top-right corner of cell (0, length-1) in the fundamental domain.
+  // For row=0, col=length-1: 
+  //   x = col * cellSize + row * cellSize * shearX + cellSize
+  //     = (length-1) * cellSize + 0 + cellSize 
+  //     = length * cellSize
+  //   y = row * cellSize * shearY = 0
   return { x: length * cellSize, y: 0 };
 }
 
@@ -113,6 +115,7 @@ function getHexagonTranslation(
   length: number,
   cellSize: number,
 ): { x: number; y: number } {
+  const shearX = 0.5;
   const shearY = Math.sqrt(3) / 2;
   
   // The hexagon has a specific size based on the rhombus dimensions
@@ -129,8 +132,8 @@ function getHexagonTranslation(
   // For a hexagon tiling, the horizontal spacing is 1.5 * hexagon_width
   // and vertical spacing is sqrt(3) * hexagon_height, with alternating row offset
   
-  // Approximate dimensions based on the rhombus extent from the pivot
-  const rhombusWidth = length * cellSize * 1.5; // includes shear
+  // Rhombus dimensions: base width + shear offset = length * cellSize * (1 + shearX) = 1.5 * length * cellSize
+  const rhombusWidth = length * cellSize * (1 + shearX);
   const rhombusHeight = length * cellSize * shearY;
   
   // Hexagon dimensions (3 rhombi around a point create a hexagon roughly 2x the rhombus extent)
@@ -201,30 +204,22 @@ export function P3RhombusRenderer({
               const isVacant = vacantCells.has(cellKey);
               const isRoot = row === rootRow && col === rootCol;
               
-              // Determine color
+              // Determine color based on hexagon and rhombus position
+              // Each hexagon contains 3 rhombi (rhombusIdx 0, 1, 2)
+              // Use unique color per rhombus for visual distinction
+              const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
+              
               let fillColor = "#e0e0e0";
               if (isVacant) {
                 fillColor = "#000";
               } else if (tiledGraph) {
-                // For P3, the copy indices need to be calculated properly
-                // For now, use a simple scheme based on hexIndex and rhombusIdx
-                const copyRow = Math.floor(hexIndex / multiplier);
-                const copyCol = hexIndex % multiplier;
-                const node = tiledGraph.nodes.find(
-                  n => n.copyRow === copyRow && 
-                       n.copyCol === copyCol && 
-                       n.fundamentalRow === row && 
-                       n.fundamentalCol === col
-                );
-                if (node) {
-                  fillColor = getRootColor(node.rootIndex);
-                } else {
-                  // Fallback: color by rhombus index
-                  fillColor = getRootColor(hexIndex * 3 + rhombusIdx);
-                }
+                // Try to find matching node in tiled graph
+                // Note: The tiled graph structure may not directly map to hexagon/rhombus indices
+                // For now, use rhombus color index as primary coloring
+                fillColor = getRootColor(rhombusColorIndex);
               } else {
                 // Color by rhombus index when no tiled graph
-                fillColor = getRootColor(hexIndex * 3 + rhombusIdx);
+                fillColor = getRootColor(rhombusColorIndex);
               }
               
               const path = getCellRhombusPath(row, col, cellSize);
