@@ -182,8 +182,6 @@ function computeRootConnections(
   length: number,
   multiplier: number,
   wallpaperGroup: WallpaperGroup,
-  _rootRow: number,
-  _rootCol: number,
   parentOf: Map<string, GridCell | null>
 ): Map<string, number> {
   const rootConnections = new Map<string, number>();
@@ -231,6 +229,7 @@ function traceToRootInTiledSpace(
   let currentCopyRow = copyRow;
   let currentCopyCol = copyCol;
   
+  // Safety limit: maximum possible cells in the tiled space
   const maxIterations = length * length * multiplier * multiplier;
   let iterations = 0;
   
@@ -432,9 +431,9 @@ export function WallpaperMazeExplorer() {
   const rootConnections = useMemo(() => {
     if (!solution) return null;
     return computeRootConnections(
-      length, multiplier, wallpaperGroup, rootRow, rootCol, solution.parentOf
+      length, multiplier, wallpaperGroup, solution.parentOf
     );
-  }, [solution, length, multiplier, wallpaperGroup, rootRow, rootCol]);
+  }, [solution, length, multiplier, wallpaperGroup]);
   
   // Render a single maze grid
   const renderMazeGrid = (
