@@ -194,9 +194,9 @@ export const P2: WallpaperGroup = {
  * 
  * Copy type is determined by (copyRow % 2, copyCol % 2).
  * 
- * Boundary wrapping is torus-like but with flips (using modular arithmetic):
- * - West of (k, 0) wraps to ((length - k) % length, length-1)
- * - North of (0, k) wraps to (length-1, (length - k) % length)
+ * Boundary wrapping is torus-like but with flips:
+ * - West of (k, 0) wraps to (length-k-1, length-1)
+ * - North of (0, k) wraps to (length-1, length-k-1)
  * - Similarly for east and south edges
  */
 export const pgg: WallpaperGroup = {
@@ -259,29 +259,29 @@ export const pgg: WallpaperGroup = {
     switch (dir) {
       case "N":
         if (row === 0) {
-          // North of (0, k) wraps to (length-1, (length - k) % length)
-          return { row: length - 1, col: (length - col) % length };
+          // North of (0, k) wraps to (length-1, length-k-1)
+          return { row: length - 1, col: length - col - 1 };
         }
         return { row: row - 1, col };
       
       case "S":
         if (row === length - 1) {
-          // South of (length-1, k) wraps to (0, (length - k) % length)
-          return { row: 0, col: (length - col) % length };
+          // South of (length-1, k) wraps to (0, length-k-1)
+          return { row: 0, col: length - col - 1 };
         }
         return { row: row + 1, col };
       
       case "W":
         if (col === 0) {
-          // West of (k, 0) wraps to ((length - k) % length, length-1)
-          return { row: (length - row) % length, col: length - 1 };
+          // West of (k, 0) wraps to (length-k-1, length-1)
+          return { row: length - row - 1, col: length - 1 };
         }
         return { row, col: col - 1 };
       
       case "E":
         if (col === length - 1) {
-          // East of (k, length-1) wraps to ((length - k) % length, 0)
-          return { row: (length - row) % length, col: 0 };
+          // East of (k, length-1) wraps to (length-k-1, 0)
+          return { row: length - row - 1, col: 0 };
         }
         return { row, col: col + 1 };
     }

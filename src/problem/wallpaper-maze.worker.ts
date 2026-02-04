@@ -263,30 +263,30 @@ function getWrappedNeighbors(
     // pgg: torus-like but with flips
     let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
     
-    // North of (0, k) wraps to (length-1, (length - k) % length)
+    // North of (0, k) wraps to (length-1, length-k-1)
     if (row === 0) {
-      N = { row: length - 1, col: (length - col) % length };
+      N = { row: length - 1, col: length - col - 1 };
     } else {
       N = { row: row - 1, col };
     }
     
-    // South of (length-1, k) wraps to (0, (length - k) % length)
+    // South of (length-1, k) wraps to (0, length-k-1)
     if (row === length - 1) {
-      S = { row: 0, col: (length - col) % length };
+      S = { row: 0, col: length - col - 1 };
     } else {
       S = { row: row + 1, col };
     }
     
-    // West of (k, 0) wraps to ((length - k) % length, length-1)
+    // West of (k, 0) wraps to (length-k-1, length-1)
     if (col === 0) {
-      W = { row: (length - row) % length, col: length - 1 };
+      W = { row: length - row - 1, col: length - 1 };
     } else {
       W = { row, col: col - 1 };
     }
     
-    // East of (k, length-1) wraps to ((length - k) % length, 0)
+    // East of (k, length-1) wraps to (length-k-1, 0)
     if (col === length - 1) {
-      E = { row: (length - row) % length, col: 0 };
+      E = { row: length - row - 1, col: 0 };
     } else {
       E = { row, col: col + 1 };
     }
