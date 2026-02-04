@@ -68,13 +68,14 @@ export function WallpaperMazeExplorer() {
     };
   }, []);
   
-  // Reset solution when grid parameters change
+  // Reset solution and ensure root is valid when grid parameters change
   useEffect(() => {
     setSolution(null);
     setGraphSelectedNode(null);
-    // Ensure root is within bounds
-    if (rootRow >= length) setRootRow(0);
-    if (rootCol >= length) setRootCol(0);
+    // Always set root to (0,0) when length or wallpaper group changes
+    // This ensures a valid root exists even if previous state was corrupted
+    setRootRow(0);
+    setRootCol(0);
   }, [length, wallpaperGroup]);
   
   // Build the tiled graph when solution changes
@@ -591,9 +592,8 @@ export function WallpaperMazeExplorer() {
               onChange={(e) => {
                 const newLength = parseInt(e.target.value);
                 setLength(newLength);
-                setRootRow(Math.min(rootRow, newLength - 1));
-                setRootCol(Math.min(rootCol, newLength - 1));
-                setSolution(null);
+                // Root will be reset to (0,0) by useEffect when length changes
+                // No need to set it here - the useEffect handles it
               }}
               style={{ marginLeft: "10px", width: "60px" }}
             />
