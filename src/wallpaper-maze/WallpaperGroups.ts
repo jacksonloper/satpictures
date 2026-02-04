@@ -372,7 +372,8 @@ export const P3: WallpaperGroup = {
     if (type === 1) {
       return rotate90[dir];
     } else { // type === 2
-      return rotate90[rotate90[dir]]; // 180° rotation: N->S, E->W, S->N, W->E
+      // Apply 90° twice for 180° rotation as approximation of 240° on square grid
+      return rotate90[rotate90[dir]];
     }
   },
   

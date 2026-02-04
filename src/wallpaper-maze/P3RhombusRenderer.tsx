@@ -106,8 +106,10 @@ function getCopyTransform(
   // The positioning follows a triangular grid pattern
   
   // For each copy, compute base position
-  // Using a simple offset grid that accounts for the rhombus shape
-  const posX = copyCol * rhombusActualWidth * 0.66;
+  // The overlap factor (2/3) accounts for rhombus overlap in P3 tiling:
+  // adjacent rhombi share approximately 1/3 of their width when rotated
+  const P3_OVERLAP_FACTOR = 2 / 3;
+  const posX = copyCol * rhombusActualWidth * P3_OVERLAP_FACTOR;
   const posY = copyRow * rhombusHeight + (copyCol % 2) * (rhombusHeight / 2);
   
   // Transform: translate to position, then rotate around center
