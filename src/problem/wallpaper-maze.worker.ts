@@ -18,7 +18,7 @@ export interface WallpaperMazeRequest {
   rootRow: number;
   rootCol: number;
   wallpaperGroup: WallpaperGroup;
-  /** Array of cell keys (row,col) that are vacant/blocked */
+  /** Array of cell keys in "row,col" format that are vacant/blocked */
   vacantCells?: string[];
 }
 
