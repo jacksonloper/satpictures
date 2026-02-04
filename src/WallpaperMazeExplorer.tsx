@@ -249,53 +249,76 @@ function computeRootConnections(
         );
         
         for (const child of children) {
-          // Get the visual direction to move in tiled space
-          const visualDir = getVisualDirection(
-            child.direction, current.copyRow, current.copyCol, wallpaperGroup
-          );
+          // Check if this is a simple adjacent edge (direction moves by 1 in that axis)
+          // or a wrapped edge (P2 boundary wrapping within fundamental domain)
+          const isAdjacentN = child.direction === "N" && child.row === current.row - 1;
+          const isAdjacentS = child.direction === "S" && child.row === current.row + 1;
+          const isAdjacentE = child.direction === "E" && child.col === current.col + 1;
+          const isAdjacentW = child.direction === "W" && child.col === current.col - 1;
+          const isSimpleAdjacent = isAdjacentN || isAdjacentS || isAdjacentE || isAdjacentW;
           
-          // Calculate new absolute position (no wrapping!)
-          let newAbsRow = current.absRow;
-          let newAbsCol = current.absCol;
-          switch (visualDir) {
-            case "N": newAbsRow--; break;
-            case "S": newAbsRow++; break;
-            case "E": newAbsCol++; break;
-            case "W": newAbsCol--; break;
+          if (isSimpleAdjacent) {
+            // Simple adjacent edge - calculate new absolute position by direction
+            const visualDir = getVisualDirection(
+              child.direction, current.copyRow, current.copyCol, wallpaperGroup
+            );
+            
+            let newAbsRow = current.absRow;
+            let newAbsCol = current.absCol;
+            switch (visualDir) {
+              case "N": newAbsRow--; break;
+              case "S": newAbsRow++; break;
+              case "E": newAbsCol++; break;
+              case "W": newAbsCol--; break;
+            }
+            
+            // Check bounds - NO WRAPPING across copies
+            if (newAbsRow < 0 || newAbsRow >= totalSize || 
+                newAbsCol < 0 || newAbsCol >= totalSize) {
+              continue; // Out of bounds, don't color
+            }
+            
+            // Convert back to copy + cell coordinates
+            const newCopyRow = Math.floor(newAbsRow / length);
+            const newCopyCol = Math.floor(newAbsCol / length);
+            let newRow = newAbsRow % length;
+            let newCol = newAbsCol % length;
+            
+            // For rotated copies, convert visual position back to logical cell coordinates
+            if (wallpaperGroup === "P2" && (newCopyRow + newCopyCol) % 2 === 1) {
+              newRow = length - 1 - newRow;
+              newCol = length - 1 - newCol;
+            }
+            
+            // Verify this matches the expected child
+            if (newRow !== child.row || newCol !== child.col) {
+              continue;
+            }
+            
+            queue.push({
+              copyRow: newCopyRow,
+              copyCol: newCopyCol,
+              row: newRow,
+              col: newCol,
+              absRow: newAbsRow,
+              absCol: newAbsCol
+            });
+          } else {
+            // P2 wrapped edge - child is in the SAME copy but via boundary wrapping
+            // Calculate child's absolute position within the same copy
+            const isRotated = wallpaperGroup === "P2" && (current.copyRow + current.copyCol) % 2 === 1;
+            const newAbsRow = current.copyRow * length + (isRotated ? (length - 1 - child.row) : child.row);
+            const newAbsCol = current.copyCol * length + (isRotated ? (length - 1 - child.col) : child.col);
+            
+            queue.push({
+              copyRow: current.copyRow,
+              copyCol: current.copyCol,
+              row: child.row,
+              col: child.col,
+              absRow: newAbsRow,
+              absCol: newAbsCol
+            });
           }
-          
-          // Check bounds - NO WRAPPING
-          if (newAbsRow < 0 || newAbsRow >= totalSize || 
-              newAbsCol < 0 || newAbsCol >= totalSize) {
-            continue; // Out of bounds, don't color
-          }
-          
-          // Convert back to copy + cell coordinates
-          const newCopyRow = Math.floor(newAbsRow / length);
-          const newCopyCol = Math.floor(newAbsCol / length);
-          let newRow = newAbsRow % length;
-          let newCol = newAbsCol % length;
-          
-          // For rotated copies, convert visual position back to logical cell coordinates
-          if (wallpaperGroup === "P2" && (newCopyRow + newCopyCol) % 2 === 1) {
-            newRow = length - 1 - newRow;
-            newCol = length - 1 - newCol;
-          }
-          
-          // Verify this matches the expected child
-          if (newRow !== child.row || newCol !== child.col) {
-            // Mismatch - this edge crossed a copy boundary in a way that doesn't match
-            continue;
-          }
-          
-          queue.push({
-            copyRow: newCopyRow,
-            copyCol: newCopyCol,
-            row: newRow,
-            col: newCol,
-            absRow: newAbsRow,
-            absCol: newAbsCol
-          });
         }
       }
     }
@@ -827,56 +850,78 @@ export function WallpaperMazeExplorer() {
           const parentPos = getPos(row, col, offsetX, offsetY);
           const parentKey = tiledCellKey(copyRow, copyCol, row, col);
           const parentRootIdx = rootConnections?.get(parentKey);
+          const edgeColor = parentRootIdx !== undefined ? getRootColor(parentRootIdx) : "#d0d0d0";
           
           for (const child of children) {
-            // Get the visual direction to the child
-            const visualDir = getVisualDirection(
-              child.direction, copyRow, copyCol, wallpaperGroup
-            );
+            // Check if this is a simple adjacent edge or a P2 wrapped edge
+            const isAdjacentN = child.direction === "N" && child.row === row - 1;
+            const isAdjacentS = child.direction === "S" && child.row === row + 1;
+            const isAdjacentE = child.direction === "E" && child.col === col + 1;
+            const isAdjacentW = child.direction === "W" && child.col === col - 1;
+            const isSimpleAdjacent = isAdjacentN || isAdjacentS || isAdjacentE || isAdjacentW;
             
-            // Calculate line endpoint
-            let dx = 0, dy = 0;
-            switch (visualDir) {
-              case "N": dy = -graphCellSize; break;
-              case "S": dy = graphCellSize; break;
-              case "E": dx = graphCellSize; break;
-              case "W": dx = -graphCellSize; break;
+            if (isSimpleAdjacent) {
+              // Simple adjacent edge - draw line in the visual direction
+              const visualDir = getVisualDirection(
+                child.direction, copyRow, copyCol, wallpaperGroup
+              );
+              
+              let dx = 0, dy = 0;
+              switch (visualDir) {
+                case "N": dy = -graphCellSize; break;
+                case "S": dy = graphCellSize; break;
+                case "E": dx = graphCellSize; break;
+                case "W": dx = -graphCellSize; break;
+              }
+              
+              const endX = parentPos.x + dx;
+              const endY = parentPos.y + dy;
+              
+              // Check if endpoint is within the total tiled area
+              const isRotated = wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1;
+              const parentAbsRow = copyRow * length + (isRotated ? (length - 1 - row) : row);
+              const parentAbsCol = copyCol * length + (isRotated ? (length - 1 - col) : col);
+              let targetAbsRow = parentAbsRow, targetAbsCol = parentAbsCol;
+              switch (visualDir) {
+                case "N": targetAbsRow--; break;
+                case "S": targetAbsRow++; break;
+                case "E": targetAbsCol++; break;
+                case "W": targetAbsCol--; break;
+              }
+              
+              const totalSize = multiplier * length;
+              if (targetAbsRow < 0 || targetAbsRow >= totalSize || 
+                  targetAbsCol < 0 || targetAbsCol >= totalSize) {
+                continue; // Edge goes out of bounds - don't draw
+              }
+              
+              arrows.push(
+                <line
+                  key={`edge-${copyIndex}-${row}-${col}-${child.direction}`}
+                  x1={parentPos.x}
+                  y1={parentPos.y}
+                  x2={endX}
+                  y2={endY}
+                  stroke={edgeColor}
+                  strokeWidth={2}
+                />
+              );
+            } else {
+              // P2 wrapped edge - draw line directly to child's position within same copy
+              const childPos = getPos(child.row, child.col, offsetX, offsetY);
+              
+              arrows.push(
+                <line
+                  key={`edge-${copyIndex}-${row}-${col}-${child.direction}`}
+                  x1={parentPos.x}
+                  y1={parentPos.y}
+                  x2={childPos.x}
+                  y2={childPos.y}
+                  stroke={edgeColor}
+                  strokeWidth={2}
+                />
+              );
             }
-            
-            const endX = parentPos.x + dx;
-            const endY = parentPos.y + dy;
-            
-            // Check if the child is in the same connected component (same color)
-            // by verifying the endpoint is within bounds
-            const childAbsRow = copyRow * length + (wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1 ? (length - 1 - row) : row);
-            const childAbsCol = copyCol * length + (wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1 ? (length - 1 - col) : col);
-            let targetAbsRow = childAbsRow, targetAbsCol = childAbsCol;
-            switch (visualDir) {
-              case "N": targetAbsRow--; break;
-              case "S": targetAbsRow++; break;
-              case "E": targetAbsCol++; break;
-              case "W": targetAbsCol--; break;
-            }
-            
-            const totalSize = multiplier * length;
-            if (targetAbsRow < 0 || targetAbsRow >= totalSize || 
-                targetAbsCol < 0 || targetAbsCol >= totalSize) {
-              continue; // Edge goes out of bounds - don't draw
-            }
-            
-            const edgeColor = parentRootIdx !== undefined ? getRootColor(parentRootIdx) : "#d0d0d0";
-            
-            arrows.push(
-              <line
-                key={`edge-${copyIndex}-${row}-${col}-${child.direction}`}
-                x1={parentPos.x}
-                y1={parentPos.y}
-                x2={endX}
-                y2={endY}
-                stroke={edgeColor}
-                strokeWidth={2}
-              />
-            );
           }
         }
       }
