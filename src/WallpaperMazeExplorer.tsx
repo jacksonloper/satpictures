@@ -1068,11 +1068,17 @@ export function WallpaperMazeExplorer() {
             display: "inline-block"
           }}>
             <strong>Selected cell (fundamental domain):</strong> ({graphSelectedCell.row}, {graphSelectedCell.col})
-            {solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col)) !== null && (
-              <span style={{ marginLeft: "10px" }}>
-                | Parent: ({solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col))!.row}, {solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col))!.col})
-              </span>
-            )}
+            {(() => {
+              const parent = solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col));
+              if (parent) {
+                return (
+                  <span style={{ marginLeft: "10px" }}>
+                    | Parent: ({parent.row}, {parent.col})
+                  </span>
+                );
+              }
+              return null;
+            })()}
             {graphSelectedCell.row === rootRow && graphSelectedCell.col === rootCol && (
               <span style={{ marginLeft: "10px", color: "#666" }}>| <em>This is a root</em></span>
             )}
