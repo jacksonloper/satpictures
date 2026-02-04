@@ -118,13 +118,105 @@ function getRootColor(rootIndex: number): string {
 }
 
 /**
- * Trace parent links from a cell in a specific copy, tracking which copy we end up in.
- * Returns the copy coordinates (copyRow, copyCol) of the root we connect to.
- * 
- * When following a parent link that wraps (due to wallpaper group), we track
- * how that affects our position in copy-space.
+ * Key for a cell in the full tiled space (includes copy coordinates)
  */
-function traceToRoot(
+function tiledCellKey(copyRow: number, copyCol: number, row: number, col: number): string {
+  return `${copyRow},${copyCol},${row},${col}`;
+}
+
+/**
+ * Get the parent direction for a cell, considering whether the copy is rotated.
+ * For P2 with rotated copies (copyRow + copyCol is odd), the parent direction is flipped.
+ */
+function getParentDirection(
+  row: number,
+  col: number,
+  copyRow: number,
+  copyCol: number,
+  length: number,
+  wallpaperGroup: WallpaperGroup,
+  parentOf: Map<string, GridCell | null>
+): "N" | "S" | "E" | "W" | null {
+  const key = cellKey(row, col);
+  const parent = parentOf.get(key);
+  
+  if (parent == null) {
+    return null; // This is a root
+  }
+  
+  // Determine original parent direction
+  const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
+  
+  let direction: "N" | "S" | "E" | "W" | null = null;
+  if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
+    direction = "N";
+  } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
+    direction = "S";
+  } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
+    direction = "E";
+  } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
+    direction = "W";
+  }
+  
+  if (direction == null) return null;
+  
+  // For P2, if this copy is rotated (copyRow + copyCol is odd), flip the direction
+  if (wallpaperGroup === "P2" && (copyRow + copyCol) % 2 === 1) {
+    const flipMap: Record<string, "N" | "S" | "E" | "W"> = {
+      "N": "S",
+      "S": "N",
+      "E": "W",
+      "W": "E"
+    };
+    direction = flipMap[direction];
+  }
+  
+  return direction;
+}
+
+/**
+ * Build the full tiled graph and compute which root each cell connects to.
+ * Returns a map from tiledCellKey to root index.
+ */
+function computeRootConnections(
+  length: number,
+  multiplier: number,
+  wallpaperGroup: WallpaperGroup,
+  _rootRow: number,
+  _rootCol: number,
+  parentOf: Map<string, GridCell | null>
+): Map<string, number> {
+  const rootConnections = new Map<string, number>();
+  
+  // For each cell in the full tiled space, trace to find which root it connects to
+  for (let copyRow = 0; copyRow < multiplier; copyRow++) {
+    for (let copyCol = 0; copyCol < multiplier; copyCol++) {
+      for (let row = 0; row < length; row++) {
+        for (let col = 0; col < length; col++) {
+          const key = tiledCellKey(copyRow, copyCol, row, col);
+          
+          // Trace to root using ordinary cardinal navigation in tiled space
+          const rootCopy = traceToRootInTiledSpace(
+            row, col, copyRow, copyCol, 
+            length, multiplier, wallpaperGroup,
+            parentOf
+          );
+          
+          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+          rootConnections.set(key, rootIdx);
+        }
+      }
+    }
+  }
+  
+  return rootConnections;
+}
+
+/**
+ * Trace to root in the full tiled space using ordinary cardinal directions.
+ * Returns the copy coordinates of the root we connect to.
+ */
+function traceToRootInTiledSpace(
   row: number,
   col: number,
   copyRow: number,
@@ -139,61 +231,62 @@ function traceToRoot(
   let currentCopyRow = copyRow;
   let currentCopyCol = copyCol;
   
-  // Follow parent links until we reach the root
+  const maxIterations = length * length * multiplier * multiplier;
   let iterations = 0;
-  const maxIterations = length * length * multiplier * multiplier; // Safety limit
   
   while (iterations < maxIterations) {
-    const key = cellKey(currentRow, currentCol);
-    const parent = parentOf.get(key);
+    // Get parent direction for this cell (considering rotation)
+    const direction = getParentDirection(
+      currentRow, currentCol, currentCopyRow, currentCopyCol,
+      length, wallpaperGroup, parentOf
+    );
     
-    if (parent == null) {
-      // We've reached the root
+    if (direction == null) {
+      // We've reached a root
       break;
     }
     
-    // Determine which direction we're moving to the parent
-    const neighbors = getWrappedNeighbors(currentRow, currentCol, length, wallpaperGroup);
+    // Move in the parent direction using ordinary cardinal navigation
+    // Calculate the absolute position in tiled space
+    let absRow = currentCopyRow * length + currentRow;
+    let absCol = currentCopyCol * length + currentCol;
     
-    // Check which neighbor matches the parent and if it's a wrapped edge
-    let wrapDeltaCopyRow = 0;
-    let wrapDeltaCopyCol = 0;
-    
-    if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
-      // Moving north
-      if (currentRow === 0) {
-        // Wrapped north edge - crosses to adjacent copy above
-        wrapDeltaCopyRow = -1;
-      }
-    } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
-      // Moving south
-      if (currentRow === length - 1) {
-        // Wrapped south edge - crosses to adjacent copy below
-        wrapDeltaCopyRow = 1;
-      }
-    } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
-      // Moving east
-      if (currentCol === length - 1) {
-        // Wrapped east edge - crosses to adjacent copy right
-        wrapDeltaCopyCol = 1;
-      }
-    } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
-      // Moving west
-      if (currentCol === 0) {
-        // Wrapped west edge - crosses to adjacent copy left
-        wrapDeltaCopyCol = -1;
-      }
+    // For rotated copies, the visual position is flipped
+    if (wallpaperGroup === "P2" && (currentCopyRow + currentCopyCol) % 2 === 1) {
+      absRow = currentCopyRow * length + (length - 1 - currentRow);
+      absCol = currentCopyCol * length + (length - 1 - currentCol);
     }
     
-    // Update copy coordinates with wrapping
-    if (wrapDeltaCopyRow !== 0 || wrapDeltaCopyCol !== 0) {
-      currentCopyRow = ((currentCopyRow + wrapDeltaCopyRow) % multiplier + multiplier) % multiplier;
-      currentCopyCol = ((currentCopyCol + wrapDeltaCopyCol) % multiplier + multiplier) % multiplier;
+    // Move in the direction (in absolute tiled space)
+    switch (direction) {
+      case "N": absRow--; break;
+      case "S": absRow++; break;
+      case "E": absCol++; break;
+      case "W": absCol--; break;
     }
     
-    // Move to parent
-    currentRow = parent.row;
-    currentCol = parent.col;
+    // Wrap in tiled space
+    const totalRows = multiplier * length;
+    const totalCols = multiplier * length;
+    absRow = ((absRow % totalRows) + totalRows) % totalRows;
+    absCol = ((absCol % totalCols) + totalCols) % totalCols;
+    
+    // Convert back to copy + cell coordinates
+    const newCopyRow = Math.floor(absRow / length);
+    const newCopyCol = Math.floor(absCol / length);
+    let newRow = absRow % length;
+    let newCol = absCol % length;
+    
+    // For rotated copies, convert the visual position back to logical cell coordinates
+    if (wallpaperGroup === "P2" && (newCopyRow + newCopyCol) % 2 === 1) {
+      newRow = length - 1 - newRow;
+      newCol = length - 1 - newCol;
+    }
+    
+    currentCopyRow = newCopyRow;
+    currentCopyCol = newCopyCol;
+    currentRow = newRow;
+    currentCol = newCol;
     iterations++;
   }
   
@@ -335,6 +428,14 @@ export function WallpaperMazeExplorer() {
     return getWrappedNeighbors(selectedCell.row, selectedCell.col, length, wallpaperGroup);
   }, [selectedCell, length, wallpaperGroup]);
   
+  // Compute root connections for all cells in the tiled space
+  const rootConnections = useMemo(() => {
+    if (!solution) return null;
+    return computeRootConnections(
+      length, multiplier, wallpaperGroup, rootRow, rootCol, solution.parentOf
+    );
+  }, [solution, length, multiplier, wallpaperGroup, rootRow, rootCol]);
+  
   // Render a single maze grid
   const renderMazeGrid = (
     copyIndex: number,
@@ -367,16 +468,11 @@ export function WallpaperMazeExplorer() {
         const isSelected = selectedCell && selectedCell.row === row && selectedCell.col === col;
         const isNeighbor = neighborCells.has(cellKey(row, col));
         
-        // Determine cell color by tracing to root
+        // Determine cell color using precomputed root connections
         let fillColor: string;
-        if (solution) {
-          // Trace parent links to find which root this cell connects to
-          const rootCopy = traceToRoot(
-            row, col, copyRow, copyCol,
-            length, multiplier, wallpaperGroup,
-            solution.parentOf
-          );
-          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+        if (rootConnections) {
+          const key = tiledCellKey(copyRow, copyCol, row, col);
+          const rootIdx = rootConnections.get(key) ?? 0;
           fillColor = getRootColor(rootIdx);
         } else {
           fillColor = "#e0e0e0"; // Gray for unsolved cells
@@ -691,13 +787,9 @@ export function WallpaperMazeExplorer() {
           const { x, y } = getPos(row, col, offsetX, offsetY);
           const isRoot = row === rootRow && col === rootCol;
           
-          // Trace to root to determine color
-          const rootCopy = traceToRoot(
-            row, col, copyRow, copyCol,
-            length, multiplier, wallpaperGroup,
-            solution.parentOf
-          );
-          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+          // Use precomputed root connections for color
+          const key = tiledCellKey(copyRow, copyCol, row, col);
+          const rootIdx = rootConnections?.get(key) ?? 0;
           const cellColor = getRootColor(rootIdx);
           
           dots.push(
@@ -717,29 +809,15 @@ export function WallpaperMazeExplorer() {
       // Draw lines from each cell to its parent
       for (let row = 0; row < length; row++) {
         for (let col = 0; col < length; col++) {
-          const key = cellKey(row, col);
-          const parent = solution.parentOf.get(key);
+          // Get parent direction (flipped for rotated copies)
+          const direction = getParentDirection(
+            row, col, copyRow, copyCol,
+            length, wallpaperGroup, solution.parentOf
+          );
           
-          if (parent == null) continue; // Root has no parent
+          if (!direction) continue; // Root has no parent
           
           const childPos = getPos(row, col, offsetX, offsetY);
-          
-          // Determine the cardinal direction to the parent
-          // Instead of drawing to wrapped position, draw in the logical direction
-          const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-          
-          let direction: "N" | "S" | "E" | "W" | null = null;
-          if (parent.row === neighbors.N.row && parent.col === neighbors.N.col) {
-            direction = "N";
-          } else if (parent.row === neighbors.S.row && parent.col === neighbors.S.col) {
-            direction = "S";
-          } else if (parent.row === neighbors.E.row && parent.col === neighbors.E.col) {
-            direction = "E";
-          } else if (parent.row === neighbors.W.row && parent.col === neighbors.W.col) {
-            direction = "W";
-          }
-          
-          if (!direction) continue;
           
           // Calculate line endpoint - go all the way to the next grid position
           let dx = 0, dy = 0;
@@ -754,13 +832,9 @@ export function WallpaperMazeExplorer() {
           const endX = childPos.x + dx;
           const endY = childPos.y + dy;
           
-          // Trace to root to determine color
-          const rootCopy = traceToRoot(
-            row, col, copyRow, copyCol,
-            length, multiplier, wallpaperGroup,
-            solution.parentOf
-          );
-          const rootIdx = rootIndexFromCopy(rootCopy.copyRow, rootCopy.copyCol, multiplier);
+          // Use precomputed root connections for color
+          const key = tiledCellKey(copyRow, copyCol, row, col);
+          const rootIdx = rootConnections?.get(key) ?? 0;
           const edgeColor = getRootColor(rootIdx);
           
           arrows.push(
