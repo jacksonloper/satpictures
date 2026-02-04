@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
-import WallpaperMazeExplorer from './WallpaperMazeExplorer.tsx';
+import { WallpaperMazeExplorer } from './wallpaper-maze';
 
 type Page = 'main' | 'polyforms' | 'wallpapermazes';
 
