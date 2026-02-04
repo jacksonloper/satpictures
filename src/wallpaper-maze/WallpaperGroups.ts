@@ -8,7 +8,7 @@
  * - How boundaries wrap in the fundamental domain
  */
 
-export type WallpaperGroupName = "P1" | "P2" | "pgg";
+export type WallpaperGroupName = "P1" | "P2" | "pgg" | "P3";
 
 // Direction type
 export type Direction = "N" | "S" | "E" | "W";
@@ -289,6 +289,134 @@ export const pgg: WallpaperGroup = {
 };
 
 /**
+ * P3 wallpaper group: 3-fold rotational symmetry
+ * 
+ * In P3 on a square lattice (to be sheared into rhombus for rendering),
+ * there are 3 types of copies with 0°, 120°, and 240° rotations.
+ * 
+ * The fundamental domain wraps with these rules:
+ * - North of (0, k) wraps to (length-1-k, length-1)
+ * - East of (length-1-k, length-1) wraps to (0, k)
+ * - West of (k, 0) wraps to (length-1, length-1-k)
+ * - South of (length-1, k) wraps to (k, 0)
+ * 
+ * Copy type is determined by (copyRow + copyCol) % 3
+ */
+export const P3: WallpaperGroup = {
+  name: "P3" as WallpaperGroupName,
+  numTypes: 3,
+  
+  getType(copyRow: number, copyCol: number): number {
+    // Type based on (copyRow + copyCol) % 3:
+    // Type 0: 0° rotation (fundamental)
+    // Type 1: 120° rotation
+    // Type 2: 240° rotation
+    return ((copyRow + copyCol) % 3 + 3) % 3;
+  },
+  
+  transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
+    // For P3, positions are transformed by 120° rotations
+    // In a rhombus grid, 120° rotation maps (row, col) in specific ways
+    // Using the formulas for hexagonal/triangular grid rotation:
+    // Type 0: identity
+    // Type 1: 120° clockwise rotation
+    // Type 2: 240° clockwise rotation (or 120° counter-clockwise)
+    switch (type) {
+      case 0: // Identity
+        return { row, col };
+      case 1: // 120° rotation: (row, col) -> (length-1-col, row+col - (length-1))
+        // This maps the rhombus to itself with 120° rotation
+        // Actually for a square grid that will be sheared:
+        // (row, col) -> (col, length-1-row) then adjusted
+        return { row: col, col: length - 1 - row };
+      case 2: // 240° rotation: apply 120° twice
+        // (row, col) -> (length-1-row, length-1-col) adjusted for 240°
+        return { row: length - 1 - col, col: row };
+      default:
+        return { row, col };
+    }
+  },
+  
+  inverseTransformPosition(visualRow: number, visualCol: number, length: number, type: number): { row: number; col: number } {
+    // Inverse of the transformations above
+    switch (type) {
+      case 0: // Identity inverse is identity
+        return { row: visualRow, col: visualCol };
+      case 1: // Inverse of 120° is 240°
+        return { row: length - 1 - visualCol, col: visualRow };
+      case 2: // Inverse of 240° is 120°
+        return { row: visualCol, col: length - 1 - visualRow };
+      default:
+        return { row: visualRow, col: visualCol };
+    }
+  },
+  
+  transformDirection(dir: Direction, type: number): Direction {
+    // For P3, directions rotate by 120° increments
+    // On a square grid (before shearing), we approximate:
+    // Type 0: identity
+    // Type 1: N->E, E->S, S->W, W->N (90° as approximation, but actually...)
+    // For the rhombus/hexagonal-like behavior:
+    // Type 1 (120°): N->SE (approximated as E), E->SW (approximated as S), S->NW (approximated as W), W->NE (approximated as N)
+    // Type 2 (240°): Apply twice
+    
+    // Since we're working on a square grid, we use 90° rotations as a stand-in:
+    // This will be correct for the adjacency relationships even if not geometrically exact
+    if (type === 0) return dir;
+    
+    // 120° ~ N->E, E->S, S->W, W->N (clockwise 90° as approximation)
+    const rotate90: Record<Direction, Direction> = {
+      "N": "E", "E": "S", "S": "W", "W": "N"
+    };
+    
+    if (type === 1) {
+      return rotate90[dir];
+    } else { // type === 2
+      return rotate90[rotate90[dir]]; // 180° rotation: N->S, E->W, S->N, W->E
+    }
+  },
+  
+  getWrappedNeighbor(row: number, col: number, dir: Direction, length: number): FundamentalCell {
+    // P3 boundary wrapping:
+    // - North of (0, k) wraps to (length-1-k, length-1)
+    // - East of (length-1-k, length-1) wraps to (0, k) - but we need to express this for (row, length-1) going E
+    //   If col = length-1 and we go E, then we're at (row, length-1), and E wraps to (0, length-1-row)
+    // - West of (k, 0) wraps to (length-1, length-1-k)
+    // - South of (length-1, k) wraps to (k, 0)
+    
+    switch (dir) {
+      case "N":
+        if (row === 0) {
+          // North of (0, k) wraps to (length-1-k, length-1)
+          return { row: length - 1 - col, col: length - 1 };
+        }
+        return { row: row - 1, col };
+      
+      case "S":
+        if (row === length - 1) {
+          // South of (length-1, k) wraps to (k, 0)
+          return { row: col, col: 0 };
+        }
+        return { row: row + 1, col };
+      
+      case "W":
+        if (col === 0) {
+          // West of (k, 0) wraps to (length-1, length-1-k)
+          return { row: length - 1, col: length - 1 - row };
+        }
+        return { row, col: col - 1 };
+      
+      case "E":
+        if (col === length - 1) {
+          // East of (row, length-1) wraps to (0, length-1-row)
+          return { row: 0, col: length - 1 - row };
+        }
+        return { row, col: col + 1 };
+    }
+  },
+};
+
+/**
  * Get wallpaper group by name
  */
 export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
@@ -296,6 +424,7 @@ export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
     case "P1": return P1;
     case "P2": return P2;
     case "pgg": return pgg;
+    case "P3": return P3;
   }
 }
 

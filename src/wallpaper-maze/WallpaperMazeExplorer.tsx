@@ -10,6 +10,7 @@ import {
 import type { TiledGraph, TiledNode } from "./TiledGraph";
 import { getWallpaperGroup, DIRECTION_DELTA } from "./WallpaperGroups";
 import type { WallpaperGroupName } from "./WallpaperGroups";
+import { P3RhombusRenderer } from "./P3RhombusRenderer";
 import "../App.css";
 
 /**
@@ -709,6 +710,7 @@ export function WallpaperMazeExplorer() {
               <option value="P1">P1 (Torus)</option>
               <option value="P2">P2 (180° Rotation)</option>
               <option value="pgg">pgg (Glide Reflections)</option>
+              <option value="P3">P3 (3-fold Rotation)</option>
             </select>
           </label>
           
@@ -788,11 +790,25 @@ export function WallpaperMazeExplorer() {
               </button>
             </div>
             
-            {/* Solution view */}
-            {solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()}
+            {/* Solution view - use P3RhombusRenderer for P3, standard renderers for others */}
+            {solution.wallpaperGroup === "P3" ? (
+              <P3RhombusRenderer
+                length={length}
+                multiplier={multiplier}
+                cellSize={cellSize}
+                parentOf={solution.parentOf}
+                rootRow={rootRow}
+                rootCol={rootCol}
+                vacantCells={solution.vacantCells}
+                wallpaperGroupName={solution.wallpaperGroup}
+                tiledGraph={tiledGraph}
+              />
+            ) : (
+              solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()
+            )}
             
             {/* Selected node info for graph view */}
-            {solutionViewMode === "graph" && graphSelectedNode && (
+            {solutionViewMode === "graph" && graphSelectedNode && solution.wallpaperGroup !== "P3" && (
               <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
                 <strong>Selected Cell</strong><br/>
                 Fundamental: ({graphSelectedNode.fundamentalRow}, {graphSelectedNode.fundamentalCol})<br/>
