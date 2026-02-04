@@ -862,13 +862,13 @@ export function WallpaperMazeExplorer() {
               else if (neighbors.W.row === parent.row && neighbors.W.col === parent.col) parentDir = "W";
               
               if (parentDir) {
-                // Transform direction for rotated copies
-                const visualDir = getVisualDirection(parentDir, copyRow, copyCol, wallpaperGroup);
+                // Use the raw parentDir - SVG transform handles rotation for P2 copies
+                // (since the entire <g> group is rotated 180° for rotated copies)
                 
-                // Calculate arrow endpoint in the visual direction
+                // Calculate arrow endpoint in the fundamental domain direction
                 let dx = 0, dy = 0;
                 const arrowLength = graphCellSize * 0.7;
-                switch (visualDir) {
+                switch (parentDir) {
                   case "N": dy = -arrowLength; break;
                   case "S": dy = arrowLength; break;
                   case "E": dx = arrowLength; break;
@@ -881,7 +881,7 @@ export function WallpaperMazeExplorer() {
                 
                 // Calculate arrow head points
                 let headAngle = 0;
-                switch (visualDir) {
+                switch (parentDir) {
                   case "N": headAngle = Math.PI / 2; break;
                   case "S": headAngle = -Math.PI / 2; break;
                   case "E": headAngle = Math.PI; break;
@@ -1054,9 +1054,31 @@ export function WallpaperMazeExplorer() {
     }
     
     return (
-      <svg width={totalWidth} height={totalHeight} style={{ backgroundColor: "#fff" }}>
-        {allGraphs}
-      </svg>
+      <div>
+        <svg width={totalWidth} height={totalHeight} style={{ backgroundColor: "#fff" }}>
+          {allGraphs}
+        </svg>
+        {graphSelectedCell && (
+          <div style={{ 
+            marginTop: "10px", 
+            padding: "10px", 
+            backgroundColor: "#f0f0ff", 
+            borderRadius: "4px",
+            border: "1px solid #ccc",
+            display: "inline-block"
+          }}>
+            <strong>Selected cell (fundamental domain):</strong> ({graphSelectedCell.row}, {graphSelectedCell.col})
+            {solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col)) !== null && (
+              <span style={{ marginLeft: "10px" }}>
+                | Parent: ({solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col))!.row}, {solution.parentOf.get(cellKey(graphSelectedCell.row, graphSelectedCell.col))!.col})
+              </span>
+            )}
+            {graphSelectedCell.row === rootRow && graphSelectedCell.col === rootCol && (
+              <span style={{ marginLeft: "10px", color: "#666" }}>| <em>This is a root</em></span>
+            )}
+          </div>
+        )}
+      </div>
     );
   };
   
