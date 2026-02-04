@@ -6,11 +6,14 @@
  * 2. Place 3 rhombi rotating around the corner at pre-skew (0, length-1)
  * 3. These 3 rhombi form a hexagon
  * 4. Tile that hexagon in a multiplier × multiplier grid
+ * 5. Render maze walls based on parent relationships
  */
 
 import { useMemo } from "react";
 import type { TiledGraph } from "./TiledGraph";
 import { getRootColor } from "./TiledGraph";
+import { getWallpaperGroup } from "./WallpaperGroups";
+import type { Direction } from "./WallpaperGroups";
 
 interface P3RhombusRendererProps {
   length: number;
@@ -24,90 +27,99 @@ interface P3RhombusRendererProps {
   tiledGraph: TiledGraph | null;
 }
 
-/**
- * For P3, we arrange 3 rhombi around a shared corner to form a hexagon.
- * Each rhombus is a sheared version of the square grid.
- * The shearing transforms a square into a 60° rhombus.
- * 
- * Shear matrix: | 1    cos(60°) |   | 1   0.5 |
- *              | 0    sin(60°) | = | 0   √3/2 |
- * 
- * The rotation point is the corner at pre-skew (0, length-1), which corresponds
- * to post-skew coordinates (length-1 + 0*0.5, 0) = (length-1, 0) times cellSize.
- * Actually, the top-right corner of cell (0, length-1) after shear.
- */
+// Shear constants
+const SHEAR_X = 0.5;  // cos(60°)
+const SHEAR_Y = Math.sqrt(3) / 2;  // sin(60°)
 
-// Helper to get the rhombus path for a cell
-function getCellRhombusPath(
-  row: number,
-  col: number,
-  cellSize: number,
-): string {
-  const shearX = 0.5;
-  const shearY = Math.sqrt(3) / 2;
+/**
+ * Get the 4 corners of a cell in the sheared grid (local coordinates)
+ */
+function getCellCorners(row: number, col: number, cellSize: number) {
   const baseWidth = cellSize;
-  const baseHeight = cellSize * shearY;
+  const baseHeight = cellSize * SHEAR_Y;
   
-  // Position of this cell within the rhombus
-  const localX = col * baseWidth + row * baseWidth * shearX;
+  // Position of this cell's top-left corner
+  const localX = col * baseWidth + row * baseWidth * SHEAR_X;
   const localY = row * baseHeight;
   
-  // The 4 corners of the cell's rhombus shape
-  const corners = [
-    { x: 0, y: 0 },
-    { x: baseWidth, y: 0 },
-    { x: baseWidth + baseWidth * shearX, y: baseHeight },
-    { x: baseWidth * shearX, y: baseHeight },
-  ];
+  return {
+    topLeft: { x: localX, y: localY },
+    topRight: { x: localX + baseWidth, y: localY },
+    bottomRight: { x: localX + baseWidth + baseWidth * SHEAR_X, y: localY + baseHeight },
+    bottomLeft: { x: localX + baseWidth * SHEAR_X, y: localY + baseHeight },
+  };
+}
+
+/**
+ * Get the path for a cell rhombus
+ */
+function getCellRhombusPath(row: number, col: number, cellSize: number): string {
+  const corners = getCellCorners(row, col, cellSize);
+  return `M ${corners.topLeft.x},${corners.topLeft.y} ` +
+    `L ${corners.topRight.x},${corners.topRight.y} ` +
+    `L ${corners.bottomRight.x},${corners.bottomRight.y} ` +
+    `L ${corners.bottomLeft.x},${corners.bottomLeft.y} Z`;
+}
+
+/**
+ * Get the wall segment for a cell edge in a specific direction
+ */
+function getWallSegment(
+  row: number, 
+  col: number, 
+  direction: Direction, 
+  cellSize: number
+): { x1: number; y1: number; x2: number; y2: number } {
+  const corners = getCellCorners(row, col, cellSize);
   
-  const offsetCorners = corners.map(c => ({
-    x: localX + c.x,
-    y: localY + c.y,
-  }));
-  
-  return `M ${offsetCorners[0].x},${offsetCorners[0].y} ` +
-    `L ${offsetCorners[1].x},${offsetCorners[1].y} ` +
-    `L ${offsetCorners[2].x},${offsetCorners[2].y} ` +
-    `L ${offsetCorners[3].x},${offsetCorners[3].y} Z`;
+  switch (direction) {
+    case "N": // Top edge: topLeft to topRight
+      return { 
+        x1: corners.topLeft.x, y1: corners.topLeft.y,
+        x2: corners.topRight.x, y2: corners.topRight.y 
+      };
+    case "E": // Right edge: topRight to bottomRight
+      return { 
+        x1: corners.topRight.x, y1: corners.topRight.y,
+        x2: corners.bottomRight.x, y2: corners.bottomRight.y 
+      };
+    case "S": // Bottom edge: bottomLeft to bottomRight
+      return { 
+        x1: corners.bottomLeft.x, y1: corners.bottomLeft.y,
+        x2: corners.bottomRight.x, y2: corners.bottomRight.y 
+      };
+    case "W": // Left edge: topLeft to bottomLeft
+      return { 
+        x1: corners.topLeft.x, y1: corners.topLeft.y,
+        x2: corners.bottomLeft.x, y2: corners.bottomLeft.y 
+      };
+  }
 }
 
 /**
  * Calculate the pivot point for P3 rotation.
- * This is the top-right corner of the rhombus (pre-skew coordinate (0, length-1)).
- * After shearing: x = (length-1)*cellSize + 0*cellSize*0.5 + cellSize = length*cellSize
- *                 y = 0
- * Actually, the corner of cell (0, length-1) at its top-right is:
- * x = col*w + row*w*shear + w = (length-1)*w + w = length*w where the shear contribution is 0 for row=0
- * y = 0
+ * This is the top-right corner of cell (0, length-1).
  */
 function getPivotPoint(length: number, cellSize: number): { x: number; y: number } {
-  // Top-right corner of cell (0, length-1) in the fundamental domain.
-  // For row=0, col=length-1: 
-  //   x = col * cellSize + row * cellSize * shearX + cellSize
-  //     = (length-1) * cellSize + 0 + cellSize 
-  //     = length * cellSize
-  //   y = row * cellSize * shearY = 0
   return { x: length * cellSize, y: 0 };
 }
 
 /**
  * Compute the transform for a single rhombus within a hexagon.
- * The hexagon is formed by 3 rhombi rotated 0°, 120°, 240° around the pivot.
  */
 function getRhombusTransformInHexagon(
-  rhombusIndex: number, // 0, 1, or 2
+  rhombusIndex: number,
   length: number,
   cellSize: number,
 ): string {
   const pivot = getPivotPoint(length, cellSize);
   const rotationAngle = rhombusIndex * 120;
-  
   return `rotate(${rotationAngle}, ${pivot.x}, ${pivot.y})`;
 }
 
 /**
  * Compute the translation for a hexagon in the tiled grid.
- * Each hexagon is centered at a pivot point and tiles in a hex grid pattern.
+ * Each hexagon is formed by 3 rhombi and tiles in a specific pattern.
  */
 function getHexagonTranslation(
   hexRow: number,
@@ -115,37 +127,23 @@ function getHexagonTranslation(
   length: number,
   cellSize: number,
 ): { x: number; y: number } {
-  const shearX = 0.5;
-  const shearY = Math.sqrt(3) / 2;
+  // The rhombus has specific dimensions after shearing
+  const rhombusWidth = length * cellSize * (1 + SHEAR_X);  // = 1.5 * length * cellSize
+  const rhombusHeight = length * cellSize * SHEAR_Y;
   
-  // The hexagon has a specific size based on the rhombus dimensions
-  // A rhombus spans length*cellSize horizontally (before shear adds more)
-  // and length*cellSize*shearY vertically
+  // For proper hexagon tiling:
+  // - The hexagon formed by 3 rhombi shares edges with adjacent hexagons
+  // - Horizontal spacing: rhombi share their slanted edges
+  // - Vertical spacing: based on the hexagon height
   
-  // For P3, the hexagon formed by 3 rhombi has dimensions:
-  // The pivot point is at (length*cellSize, 0)
-  // After rotating 3 rhombi around this point, the hexagon's width and height depend on the rhombus shape
+  // The horizontal spacing should be exactly rhombusWidth (the full rhombus)
+  // because each hexagon takes up rhombusWidth in a single direction before rotating
+  const horizSpacing = rhombusWidth;
+  const vertSpacing = 2 * rhombusHeight;
   
-  // Hexagon spacing: we need to figure out how hexagons tile
-  // Each hexagon's center is at the pivot, and hexagons tile in a triangular grid
-  
-  // For a hexagon tiling, the horizontal spacing is 1.5 * hexagon_width
-  // and vertical spacing is sqrt(3) * hexagon_height, with alternating row offset
-  
-  // Rhombus dimensions: base width + shear offset = length * cellSize * (1 + shearX) = 1.5 * length * cellSize
-  const rhombusWidth = length * cellSize * (1 + shearX);
-  const rhombusHeight = length * cellSize * shearY;
-  
-  // Hexagon dimensions (3 rhombi around a point create a hexagon roughly 2x the rhombus extent)
-  const hexWidth = 2 * rhombusWidth;
-  const hexHeight = 2 * rhombusHeight;
-  
-  // Hexagonal grid spacing
-  const horizSpacing = hexWidth * 0.75;
-  const vertSpacing = hexHeight;
-  
+  // Offset for odd columns (hex grid staggering)
   const x = hexCol * horizSpacing;
-  const y = hexRow * vertSpacing + (hexCol % 2) * (vertSpacing / 2);
+  const y = hexRow * vertSpacing + (hexCol % 2) * rhombusHeight;
   
   return { x, y };
 }
@@ -154,35 +152,33 @@ export function P3RhombusRenderer({
   length,
   multiplier,
   cellSize,
-  parentOf: _parentOf,
+  parentOf,
   rootRow,
   rootCol,
   vacantCells,
   wallpaperGroupName: _wallpaperGroupName,
   tiledGraph,
 }: P3RhombusRendererProps) {
-  const shearY = Math.sqrt(3) / 2;
-  
-  // Calculate pivot point
-  const pivot = getPivotPoint(length, cellSize);
+  const wpg = getWallpaperGroup("P3");
   
   // Pre-compute dimensions
   const dimensions = useMemo(() => {
-    const rhombusWidth = length * cellSize * 1.5;
-    const rhombusHeight = length * cellSize * shearY;
-    const hexWidth = 2 * rhombusWidth;
+    const rhombusWidth = length * cellSize * (1 + SHEAR_X);
+    const rhombusHeight = length * cellSize * SHEAR_Y;
+    const hexWidth = rhombusWidth;
     const hexHeight = 2 * rhombusHeight;
     
     // Total size for the SVG
-    const totalWidth = multiplier * hexWidth * 0.75 + hexWidth;
-    const totalHeight = multiplier * hexHeight + hexHeight;
+    const totalWidth = (multiplier + 1) * hexWidth;
+    const totalHeight = (multiplier + 1) * hexHeight;
     
     return { rhombusWidth, rhombusHeight, hexWidth, hexHeight, totalWidth, totalHeight };
-  }, [length, cellSize, multiplier, shearY]);
+  }, [length, cellSize, multiplier]);
 
-  // Generate all the cells for each hexagon
-  const hexagonElements = useMemo(() => {
-    const elements: React.ReactNode[] = [];
+  // Generate all the cells and walls for each hexagon
+  const { hexagonElements, wallElements } = useMemo(() => {
+    const hexElements: React.ReactNode[] = [];
+    const walls: React.ReactNode[] = [];
     
     // For each hexagon in the multiplier × multiplier grid
     for (let hexRow = 0; hexRow < multiplier; hexRow++) {
@@ -192,10 +188,12 @@ export function P3RhombusRenderer({
         
         // Each hexagon contains 3 rhombi
         const rhombiElements: React.ReactNode[] = [];
+        const rhombiWalls: React.ReactNode[] = [];
         
         for (let rhombusIdx = 0; rhombusIdx < 3; rhombusIdx++) {
           const rhombusTransform = getRhombusTransformInHexagon(rhombusIdx, length, cellSize);
           const cellElements: React.ReactNode[] = [];
+          const wallSegments: React.ReactNode[] = [];
           
           // For each cell in the rhombus (fundamental domain)
           for (let row = 0; row < length; row++) {
@@ -204,21 +202,14 @@ export function P3RhombusRenderer({
               const isVacant = vacantCells.has(cellKey);
               const isRoot = row === rootRow && col === rootCol;
               
-              // Determine color based on hexagon and rhombus position
-              // Each hexagon contains 3 rhombi (rhombusIdx 0, 1, 2)
-              // Use unique color per rhombus for visual distinction
+              // Determine color
               const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
-              
               let fillColor = "#e0e0e0";
               if (isVacant) {
                 fillColor = "#000";
               } else if (tiledGraph) {
-                // Try to find matching node in tiled graph
-                // Note: The tiled graph structure may not directly map to hexagon/rhombus indices
-                // For now, use rhombus color index as primary coloring
                 fillColor = getRootColor(rhombusColorIndex);
               } else {
-                // Color by rhombus index when no tiled graph
                 fillColor = getRootColor(rhombusColorIndex);
               }
               
@@ -229,16 +220,16 @@ export function P3RhombusRenderer({
                   key={`cell-${hexIndex}-${rhombusIdx}-${row}-${col}`}
                   d={path}
                   fill={fillColor}
-                  stroke="#888"
+                  stroke="#ccc"
                   strokeWidth={0.5}
                 />
               );
               
               // Root indicator
               if (isRoot && !isVacant) {
-                const shearX = 0.5;
-                const cx = col * cellSize + row * cellSize * shearX + cellSize * 0.75;
-                const cy = row * cellSize * shearY + cellSize * shearY / 2;
+                const corners = getCellCorners(row, col, cellSize);
+                const cx = (corners.topLeft.x + corners.bottomRight.x) / 2;
+                const cy = (corners.topLeft.y + corners.bottomRight.y) / 2;
                 
                 cellElements.push(
                   <circle
@@ -250,19 +241,75 @@ export function P3RhombusRenderer({
                   />
                 );
               }
+              
+              // Add maze walls based on parent relationships
+              if (!isVacant) {
+                const parent = parentOf.get(cellKey);
+                
+                // Check each direction - add wall if not connected to parent
+                const directions: Direction[] = ["N", "S", "E", "W"];
+                for (const dir of directions) {
+                  const neighbor = wpg.getWrappedNeighbor(row, col, dir, length);
+                  const neighborKey = `${neighbor.row},${neighbor.col}`;
+                  const neighborIsVacant = vacantCells.has(neighborKey);
+                  
+                  // Add wall if:
+                  // 1. Neighbor is vacant, OR
+                  // 2. This cell is not root and parent is not in this direction, AND
+                  //    The neighbor is not this cell's child (neighbor's parent is not this cell)
+                  let shouldAddWall = false;
+                  
+                  if (neighborIsVacant) {
+                    shouldAddWall = true;
+                  } else {
+                    // Check if this is a passage (either direction is parent-child)
+                    const isParentOfThis = parent && 
+                      parent.row === neighbor.row && parent.col === neighbor.col;
+                    const neighborParent = parentOf.get(neighborKey);
+                    const isChildOfThis = neighborParent && 
+                      neighborParent.row === row && neighborParent.col === col;
+                    
+                    // Wall exists if no parent-child relationship in either direction
+                    shouldAddWall = !isParentOfThis && !isChildOfThis;
+                  }
+                  
+                  if (shouldAddWall) {
+                    const segment = getWallSegment(row, col, dir, cellSize);
+                    wallSegments.push(
+                      <line
+                        key={`wall-${hexIndex}-${rhombusIdx}-${row}-${col}-${dir}`}
+                        x1={segment.x1}
+                        y1={segment.y1}
+                        x2={segment.x2}
+                        y2={segment.y2}
+                        stroke="#000"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                      />
+                    );
+                  }
+                }
+              }
             }
           }
           
           // Wrap cells in a group with the rhombus rotation transform
           rhombiElements.push(
-            <g key={`rhombus-${hexIndex}-${rhombusIdx}`} transform={rhombusTransform}>
+            <g key={`rhombus-cells-${hexIndex}-${rhombusIdx}`} transform={rhombusTransform}>
               {cellElements}
+            </g>
+          );
+          
+          // Wrap walls separately (rendered on top of all cells)
+          rhombiWalls.push(
+            <g key={`rhombus-walls-${hexIndex}-${rhombusIdx}`} transform={rhombusTransform}>
+              {wallSegments}
             </g>
           );
         }
         
         // Wrap all 3 rhombi in a group with the hexagon translation
-        elements.push(
+        hexElements.push(
           <g 
             key={`hexagon-${hexIndex}`} 
             transform={`translate(${hexTranslation.x}, ${hexTranslation.y})`}
@@ -270,13 +317,22 @@ export function P3RhombusRenderer({
             {rhombiElements}
           </g>
         );
+        
+        walls.push(
+          <g 
+            key={`hexagon-walls-${hexIndex}`} 
+            transform={`translate(${hexTranslation.x}, ${hexTranslation.y})`}
+          >
+            {rhombiWalls}
+          </g>
+        );
       }
     }
     
-    return elements;
-  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, shearY, pivot]);
+    return { hexagonElements: hexElements, wallElements: walls };
+  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf, wpg]);
 
-  const padding = 40;
+  const padding = 60;
 
   return (
     <svg 
@@ -285,7 +341,10 @@ export function P3RhombusRenderer({
       style={{ border: "1px solid #ccc" }}
     >
       <g transform={`translate(${padding}, ${padding})`}>
+        {/* First layer: cells */}
         {hexagonElements}
+        {/* Second layer: walls on top */}
+        {wallElements}
       </g>
     </svg>
   );
