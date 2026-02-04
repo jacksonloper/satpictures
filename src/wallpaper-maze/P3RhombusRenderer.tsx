@@ -3,7 +3,9 @@
  * 
  * For P3, we:
  * 1. Shear each square grid into a rhombus (60° parallelogram)
- * 2. Place copies with 0°, 120°, and 240° rotations to tile
+ * 2. Place 3 rhombi rotating around the corner at pre-skew (0, length-1)
+ * 3. These 3 rhombi form a hexagon
+ * 4. Tile that hexagon in a multiplier × multiplier grid
  */
 
 import { useMemo } from "react";
@@ -23,31 +25,30 @@ interface P3RhombusRendererProps {
 }
 
 /**
- * For P3, we arrange copies in a triangular/hexagonal pattern.
+ * For P3, we arrange 3 rhombi around a shared corner to form a hexagon.
  * Each rhombus is a sheared version of the square grid.
  * The shearing transforms a square into a 60° rhombus.
  * 
  * Shear matrix: | 1    cos(60°) |   | 1   0.5 |
  *              | 0    sin(60°) | = | 0   √3/2 |
+ * 
+ * The rotation point is the corner at pre-skew (0, length-1), which corresponds
+ * to post-skew coordinates (length-1 + 0*0.5, 0) = (length-1, 0) times cellSize.
+ * Actually, the top-right corner of cell (0, length-1) after shear.
  */
 
-// Helper to get the rhombus vertices for a cell within a fundamental domain copy
+// Helper to get the rhombus path for a cell
 function getCellRhombusPath(
   row: number,
   col: number,
-  _length: number,
   cellSize: number,
 ): string {
-  // Calculate the shear transformation for a 60° rhombus
-  const shearX = 0.5;  // cos(60°)
-  const shearY = Math.sqrt(3) / 2;  // sin(60°)
-  
-  // Size of one cell in the sheared grid
+  const shearX = 0.5;
+  const shearY = Math.sqrt(3) / 2;
   const baseWidth = cellSize;
   const baseHeight = cellSize * shearY;
   
-  // Position of this cell within the rhombus (before rotation)
-  // In a sheared grid: x' = col + row * shearX, y' = row * shearY
+  // Position of this cell within the rhombus
   const localX = col * baseWidth + row * baseWidth * shearX;
   const localY = row * baseHeight;
   
@@ -59,13 +60,11 @@ function getCellRhombusPath(
     { x: baseWidth * shearX, y: baseHeight },
   ];
   
-  // Apply local cell offset
   const offsetCorners = corners.map(c => ({
     x: localX + c.x,
     y: localY + c.y,
   }));
   
-  // Build path
   return `M ${offsetCorners[0].x},${offsetCorners[0].y} ` +
     `L ${offsetCorners[1].x},${offsetCorners[1].y} ` +
     `L ${offsetCorners[2].x},${offsetCorners[2].y} ` +
@@ -73,47 +72,79 @@ function getCellRhombusPath(
 }
 
 /**
- * Compute the transform for positioning and rotating each copy
+ * Calculate the pivot point for P3 rotation.
+ * This is the top-right corner of the rhombus (pre-skew coordinate (0, length-1)).
+ * After shearing: x = (length-1)*cellSize + 0*cellSize*0.5 + cellSize = length*cellSize
+ *                 y = 0
+ * Actually, the corner of cell (0, length-1) at its top-right is:
+ * x = col*w + row*w*shear + w = (length-1)*w + w = length*w where the shear contribution is 0 for row=0
+ * y = 0
  */
-function getCopyTransform(
-  copyRow: number,
-  copyCol: number,
+function getPivotPoint(length: number, cellSize: number): { x: number; y: number } {
+  // Top-right corner of the fundamental domain (at row=0, col=length-1)
+  // After shearing, cell (0, length-1) has top-right corner at:
+  // x = (length-1) * cellSize + cellSize = length * cellSize
+  // y = 0
+  return { x: length * cellSize, y: 0 };
+}
+
+/**
+ * Compute the transform for a single rhombus within a hexagon.
+ * The hexagon is formed by 3 rhombi rotated 0°, 120°, 240° around the pivot.
+ */
+function getRhombusTransformInHexagon(
+  rhombusIndex: number, // 0, 1, or 2
   length: number,
   cellSize: number,
 ): string {
-  const shearX = 0.5;
+  const pivot = getPivotPoint(length, cellSize);
+  const rotationAngle = rhombusIndex * 120;
+  
+  return `rotate(${rotationAngle}, ${pivot.x}, ${pivot.y})`;
+}
+
+/**
+ * Compute the translation for a hexagon in the tiled grid.
+ * Each hexagon is centered at a pivot point and tiles in a hex grid pattern.
+ */
+function getHexagonTranslation(
+  hexRow: number,
+  hexCol: number,
+  length: number,
+  cellSize: number,
+): { x: number; y: number } {
   const shearY = Math.sqrt(3) / 2;
-  const baseWidth = cellSize;
-  const baseHeight = cellSize * shearY;
   
-  // Size of one rhombus (fundamental domain) in sheared coordinates
-  // The rhombus spans from (0,0) to (length*baseWidth + length*baseWidth*shearX, length*baseHeight)
-  const rhombusActualWidth = length * baseWidth + length * baseWidth * shearX;
-  const rhombusHeight = length * baseHeight;
+  // The hexagon has a specific size based on the rhombus dimensions
+  // A rhombus spans length*cellSize horizontally (before shear adds more)
+  // and length*cellSize*shearY vertically
   
-  // Rotation angle based on position: (copyRow + copyCol) % 3 determines the type
-  const type = ((copyRow + copyCol) % 3 + 3) % 3;
-  const rotationAngle = type * 120;
+  // For P3, the hexagon formed by 3 rhombi has dimensions:
+  // The pivot point is at (length*cellSize, 0)
+  // After rotating 3 rhombi around this point, the hexagon's width and height depend on the rhombus shape
   
-  // For proper P3 tiling, we need to place rhombi in a pattern where
-  // each rotated copy meets edges of adjacent copies
+  // Hexagon spacing: we need to figure out how hexagons tile
+  // Each hexagon's center is at the pivot, and hexagons tile in a triangular grid
   
-  // Calculate the center of the rhombus for rotation
-  const centerX = rhombusActualWidth / 2;
-  const centerY = rhombusHeight / 2;
+  // For a hexagon tiling, the horizontal spacing is 1.5 * hexagon_width
+  // and vertical spacing is sqrt(3) * hexagon_height, with alternating row offset
   
-  // For P3 tiling: copies are arranged so that 3 copies meet at vertices
-  // The positioning follows a triangular grid pattern
+  // Approximate dimensions based on the rhombus extent from the pivot
+  const rhombusWidth = length * cellSize * 1.5; // includes shear
+  const rhombusHeight = length * cellSize * shearY;
   
-  // For each copy, compute base position
-  // The overlap factor (2/3) accounts for rhombus overlap in P3 tiling:
-  // adjacent rhombi share approximately 1/3 of their width when rotated
-  const P3_OVERLAP_FACTOR = 2 / 3;
-  const posX = copyCol * rhombusActualWidth * P3_OVERLAP_FACTOR;
-  const posY = copyRow * rhombusHeight + (copyCol % 2) * (rhombusHeight / 2);
+  // Hexagon dimensions (3 rhombi around a point create a hexagon roughly 2x the rhombus extent)
+  const hexWidth = 2 * rhombusWidth;
+  const hexHeight = 2 * rhombusHeight;
   
-  // Transform: translate to position, then rotate around center
-  return `translate(${posX}, ${posY}) rotate(${rotationAngle}, ${centerX}, ${centerY})`;
+  // Hexagonal grid spacing
+  const horizSpacing = hexWidth * 0.75;
+  const vertSpacing = hexHeight;
+  
+  const x = hexCol * horizSpacing;
+  const y = hexRow * vertSpacing + (hexCol % 2) * (vertSpacing / 2);
+  
+  return { x, y };
 }
 
 export function P3RhombusRenderer({
@@ -127,116 +158,130 @@ export function P3RhombusRenderer({
   wallpaperGroupName: _wallpaperGroupName,
   tiledGraph,
 }: P3RhombusRendererProps) {
-  // Pre-compute the rhombus dimensions
+  const shearY = Math.sqrt(3) / 2;
+  
+  // Calculate pivot point
+  const pivot = getPivotPoint(length, cellSize);
+  
+  // Pre-compute dimensions
   const dimensions = useMemo(() => {
-    const shearX = 0.5;
-    const shearY = Math.sqrt(3) / 2;
-    const baseWidth = cellSize;
-    const baseHeight = cellSize * shearY;
+    const rhombusWidth = length * cellSize * 1.5;
+    const rhombusHeight = length * cellSize * shearY;
+    const hexWidth = 2 * rhombusWidth;
+    const hexHeight = 2 * rhombusHeight;
     
-    // Rhombus dimensions with shear
-    const rhombusActualWidth = length * baseWidth + length * baseWidth * shearX;
-    const rhombusHeight = length * baseHeight;
+    // Total size for the SVG
+    const totalWidth = multiplier * hexWidth * 0.75 + hexWidth;
+    const totalHeight = multiplier * hexHeight + hexHeight;
     
-    // Total SVG size to fit all copies with rotation
-    // Account for rotated copies which might extend beyond base positions
-    const totalWidth = (multiplier + 1) * rhombusActualWidth;
-    const totalHeight = (multiplier + 1) * rhombusHeight;
-    
-    return {
-      shearX,
-      shearY,
-      baseWidth,
-      baseHeight,
-      rhombusActualWidth,
-      rhombusHeight,
-      totalWidth,
-      totalHeight,
-    };
-  }, [length, cellSize, multiplier]);
+    return { rhombusWidth, rhombusHeight, hexWidth, hexHeight, totalWidth, totalHeight };
+  }, [length, cellSize, multiplier, shearY]);
 
-  // Generate all the cells for each copy
-  const copyElements = useMemo(() => {
+  // Generate all the cells for each hexagon
+  const hexagonElements = useMemo(() => {
     const elements: React.ReactNode[] = [];
     
-    for (let copyRow = 0; copyRow < multiplier; copyRow++) {
-      for (let copyCol = 0; copyCol < multiplier; copyCol++) {
-        const copyIndex = copyRow * multiplier + copyCol;
+    // For each hexagon in the multiplier × multiplier grid
+    for (let hexRow = 0; hexRow < multiplier; hexRow++) {
+      for (let hexCol = 0; hexCol < multiplier; hexCol++) {
+        const hexIndex = hexRow * multiplier + hexCol;
+        const hexTranslation = getHexagonTranslation(hexRow, hexCol, length, cellSize);
         
-        // Render cells for this copy
-        const cellElements: React.ReactNode[] = [];
+        // Each hexagon contains 3 rhombi
+        const rhombiElements: React.ReactNode[] = [];
         
-        for (let row = 0; row < length; row++) {
-          for (let col = 0; col < length; col++) {
-            const cellKey = `${row},${col}`;
-            const isVacant = vacantCells.has(cellKey);
-            const isRoot = row === rootRow && col === rootCol;
-            
-            // Determine color based on root connection from tiledGraph
-            let fillColor = "#e0e0e0";
-            if (isVacant) {
-              fillColor = "#000";
-            } else if (tiledGraph) {
-              // Find the corresponding node in tiledGraph
-              const node = tiledGraph.nodes.find(
-                n => n.copyRow === copyRow && 
-                     n.copyCol === copyCol && 
-                     n.fundamentalRow === row && 
-                     n.fundamentalCol === col
-              );
-              if (node) {
-                fillColor = getRootColor(node.rootIndex);
+        for (let rhombusIdx = 0; rhombusIdx < 3; rhombusIdx++) {
+          const rhombusTransform = getRhombusTransformInHexagon(rhombusIdx, length, cellSize);
+          const cellElements: React.ReactNode[] = [];
+          
+          // For each cell in the rhombus (fundamental domain)
+          for (let row = 0; row < length; row++) {
+            for (let col = 0; col < length; col++) {
+              const cellKey = `${row},${col}`;
+              const isVacant = vacantCells.has(cellKey);
+              const isRoot = row === rootRow && col === rootCol;
+              
+              // Determine color
+              let fillColor = "#e0e0e0";
+              if (isVacant) {
+                fillColor = "#000";
+              } else if (tiledGraph) {
+                // For P3, the copy indices need to be calculated properly
+                // For now, use a simple scheme based on hexIndex and rhombusIdx
+                const copyRow = Math.floor(hexIndex / multiplier);
+                const copyCol = hexIndex % multiplier;
+                const node = tiledGraph.nodes.find(
+                  n => n.copyRow === copyRow && 
+                       n.copyCol === copyCol && 
+                       n.fundamentalRow === row && 
+                       n.fundamentalCol === col
+                );
+                if (node) {
+                  fillColor = getRootColor(node.rootIndex);
+                } else {
+                  // Fallback: color by rhombus index
+                  fillColor = getRootColor(hexIndex * 3 + rhombusIdx);
+                }
+              } else {
+                // Color by rhombus index when no tiled graph
+                fillColor = getRootColor(hexIndex * 3 + rhombusIdx);
               }
-            }
-            
-            // Calculate path for this cell
-            const path = getCellRhombusPath(row, col, length, cellSize);
-            
-            cellElements.push(
-              <path
-                key={`cell-${copyIndex}-${row}-${col}`}
-                d={path}
-                fill={fillColor}
-                stroke="#888"
-                strokeWidth={0.5}
-              />
-            );
-            
-            // Root indicator
-            if (isRoot && !isVacant) {
-              const shearX = 0.5;
-              const shearY = Math.sqrt(3) / 2;
-              const cx = col * cellSize + row * cellSize * shearX + cellSize * 0.75;
-              const cy = row * cellSize * shearY + cellSize * shearY / 2;
+              
+              const path = getCellRhombusPath(row, col, cellSize);
               
               cellElements.push(
-                <circle
-                  key={`root-${copyIndex}-${row}-${col}`}
-                  cx={cx}
-                  cy={cy}
-                  r={cellSize / 6}
-                  fill="#000"
+                <path
+                  key={`cell-${hexIndex}-${rhombusIdx}-${row}-${col}`}
+                  d={path}
+                  fill={fillColor}
+                  stroke="#888"
+                  strokeWidth={0.5}
                 />
               );
+              
+              // Root indicator
+              if (isRoot && !isVacant) {
+                const shearX = 0.5;
+                const cx = col * cellSize + row * cellSize * shearX + cellSize * 0.75;
+                const cy = row * cellSize * shearY + cellSize * shearY / 2;
+                
+                cellElements.push(
+                  <circle
+                    key={`root-${hexIndex}-${rhombusIdx}-${row}-${col}`}
+                    cx={cx}
+                    cy={cy}
+                    r={cellSize / 6}
+                    fill="#000"
+                  />
+                );
+              }
             }
           }
+          
+          // Wrap cells in a group with the rhombus rotation transform
+          rhombiElements.push(
+            <g key={`rhombus-${hexIndex}-${rhombusIdx}`} transform={rhombusTransform}>
+              {cellElements}
+            </g>
+          );
         }
         
-        // Get transform for this copy
-        const transform = getCopyTransform(copyRow, copyCol, length, cellSize);
-        
+        // Wrap all 3 rhombi in a group with the hexagon translation
         elements.push(
-          <g key={`copy-${copyIndex}`} transform={transform}>
-            {cellElements}
+          <g 
+            key={`hexagon-${hexIndex}`} 
+            transform={`translate(${hexTranslation.x}, ${hexTranslation.y})`}
+          >
+            {rhombiElements}
           </g>
         );
       }
     }
     
     return elements;
-  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph]);
+  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, shearY, pivot]);
 
-  const padding = 20;
+  const padding = 40;
 
   return (
     <svg 
@@ -245,7 +290,7 @@ export function P3RhombusRenderer({
       style={{ border: "1px solid #ccc" }}
     >
       <g transform={`translate(${padding}, ${padding})`}>
-        {copyElements}
+        {hexagonElements}
       </g>
     </svg>
   );

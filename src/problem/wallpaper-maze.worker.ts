@@ -272,9 +272,9 @@ function getWrappedNeighbors(
       N = { row: row - 1, col };
     }
     
-    // South of (length-1, k) wraps to (k, 0)
+    // South of (length-1, k) wraps to (length-1-k, 0)
     if (row === length - 1) {
-      S = { row: col, col: 0 };
+      S = { row: length - 1 - col, col: 0 };
     } else {
       S = { row: row + 1, col };
     }

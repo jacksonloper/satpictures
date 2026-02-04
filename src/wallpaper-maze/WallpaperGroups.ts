@@ -395,8 +395,8 @@ export const P3: WallpaperGroup = {
       
       case "S":
         if (row === length - 1) {
-          // South of (length-1, k) wraps to (k, 0)
-          return { row: col, col: 0 };
+          // South of (length-1, k) wraps to (length-1-k, 0)
+          return { row: length - 1 - col, col: 0 };
         }
         return { row: row + 1, col };
       
