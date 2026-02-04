@@ -477,6 +477,11 @@ self.onmessage = async (event: MessageEvent<WallpaperMazeRequest>) => {
   const { length, rootRow, rootCol, wallpaperGroup } = event.data;
 
   try {
+    // Validate inputs
+    if (rootRow < 0 || rootRow >= length || rootCol < 0 || rootCol >= length) {
+      throw new Error(`Root position (${rootRow}, ${rootCol}) is out of bounds for grid size ${length}`);
+    }
+    
     // Build the CNF
     const cnf = buildMazeSATCNF(length, rootRow, rootCol, wallpaperGroup);
     

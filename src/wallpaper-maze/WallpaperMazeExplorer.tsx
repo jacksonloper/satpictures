@@ -108,6 +108,14 @@ export function WallpaperMazeExplorer() {
       workerRef.current.terminate();
     }
     
+    // Ensure root is within bounds (state updates may be async)
+    const safeRootRow = rootRow >= length ? 0 : rootRow;
+    const safeRootCol = rootCol >= length ? 0 : rootCol;
+    
+    // Update state if needed
+    if (safeRootRow !== rootRow) setRootRow(safeRootRow);
+    if (safeRootCol !== rootCol) setRootCol(safeRootCol);
+    
     setSolving(true);
     setSolution(null);
     setErrorMessage(null);
@@ -149,8 +157,8 @@ export function WallpaperMazeExplorer() {
     
     const request: WallpaperMazeRequest = {
       length,
-      rootRow,
-      rootCol,
+      rootRow: safeRootRow,
+      rootCol: safeRootCol,
       wallpaperGroup,
     };
     worker.postMessage(request);
