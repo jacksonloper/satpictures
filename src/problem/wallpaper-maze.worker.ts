@@ -11,7 +11,7 @@ import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 // Types for wallpaper maze problems
-export type WallpaperGroup = "P1" | "P2";
+export type WallpaperGroup = "P1" | "P2" | "pgg";
 
 export interface WallpaperMazeRequest {
   length: number;
@@ -231,7 +231,7 @@ function getWrappedNeighbors(
       E: { row, col: (col + 1) % length },
       W: { row, col: (col - 1 + length) % length },
     };
-  } else {
+  } else if (wallpaperGroup === "P2") {
     let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
     
     if (row === 0) {
@@ -254,6 +254,39 @@ function getWrappedNeighbors(
     
     if (col === length - 1) {
       E = { row: (length - 1 - row), col: length - 1 };
+    } else {
+      E = { row, col: col + 1 };
+    }
+    
+    return { N, S, E, W };
+  } else {
+    // pgg: torus-like but with flips
+    let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
+    
+    // North of (0, k) wraps to (length-1, (length - k) % length)
+    if (row === 0) {
+      N = { row: length - 1, col: (length - col) % length };
+    } else {
+      N = { row: row - 1, col };
+    }
+    
+    // South of (length-1, k) wraps to (0, (length - k) % length)
+    if (row === length - 1) {
+      S = { row: 0, col: (length - col) % length };
+    } else {
+      S = { row: row + 1, col };
+    }
+    
+    // West of (k, 0) wraps to ((length - k) % length, length-1)
+    if (col === 0) {
+      W = { row: (length - row) % length, col: length - 1 };
+    } else {
+      W = { row, col: col - 1 };
+    }
+    
+    // East of (k, length-1) wraps to ((length - k) % length, 0)
+    if (col === length - 1) {
+      E = { row: (length - row) % length, col: 0 };
     } else {
       E = { row, col: col + 1 };
     }

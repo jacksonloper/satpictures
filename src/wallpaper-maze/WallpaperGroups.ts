@@ -8,7 +8,7 @@
  * - How boundaries wrap in the fundamental domain
  */
 
-export type WallpaperGroupName = "P1" | "P2";
+export type WallpaperGroupName = "P1" | "P2" | "pgg";
 
 // Direction type
 export type Direction = "N" | "S" | "E" | "W";
@@ -184,12 +184,118 @@ export const P2: WallpaperGroup = {
 };
 
 /**
+ * pgg wallpaper group: glide reflections
+ * 
+ * In pgg on a square lattice, there are 4 types of copies based on position:
+ * - (0,0): fundamental domain (identity)
+ * - (1,0): horizontal flip (col → length-1-col)
+ * - (0,1): vertical flip (row → length-1-row)
+ * - (1,1): 180° rotation
+ * 
+ * Copy type is determined by (copyRow % 2, copyCol % 2).
+ * 
+ * Boundary wrapping is torus-like but with flips (using modular arithmetic):
+ * - West of (k, 0) wraps to ((length - k) % length, length-1)
+ * - North of (0, k) wraps to (length-1, (length - k) % length)
+ * - Similarly for east and south edges
+ */
+export const pgg: WallpaperGroup = {
+  name: "pgg" as WallpaperGroupName,
+  numTypes: 4,
+  
+  getType(copyRow: number, copyCol: number): number {
+    // Type based on (copyRow % 2, copyCol % 2):
+    // (0,0) → 0 (fundamental)
+    // (1,0) → 1 (horizontal flip)
+    // (0,1) → 2 (vertical flip)
+    // (1,1) → 3 (180° rotation)
+    return (copyRow % 2) + 2 * (copyCol % 2);
+  },
+  
+  transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
+    switch (type) {
+      case 0: // Fundamental (identity)
+        return { row, col };
+      case 1: // Horizontal flip (flip column)
+        return { row, col: length - 1 - col };
+      case 2: // Vertical flip (flip row)
+        return { row: length - 1 - row, col };
+      case 3: // 180° rotation
+        return { row: length - 1 - row, col: length - 1 - col };
+      default:
+        return { row, col };
+    }
+  },
+  
+  inverseTransformPosition(visualRow: number, visualCol: number, length: number, type: number): { row: number; col: number } {
+    // All transforms are self-inverse (flips and 180° rotation)
+    return this.transformPosition(visualRow, visualCol, length, type);
+  },
+  
+  transformDirection(dir: Direction, type: number): Direction {
+    switch (type) {
+      case 0: // Fundamental (identity)
+        return dir;
+      case 1: // Horizontal flip - E↔W, N/S stay
+        if (dir === "E") return "W";
+        if (dir === "W") return "E";
+        return dir;
+      case 2: // Vertical flip - N↔S, E/W stay
+        if (dir === "N") return "S";
+        if (dir === "S") return "N";
+        return dir;
+      case 3: { // 180° rotation - all directions flip
+        const flipMap: Record<Direction, Direction> = {
+          "N": "S", "S": "N", "E": "W", "W": "E"
+        };
+        return flipMap[dir];
+      }
+      default:
+        return dir;
+    }
+  },
+  
+  getWrappedNeighbor(row: number, col: number, dir: Direction, length: number): FundamentalCell {
+    switch (dir) {
+      case "N":
+        if (row === 0) {
+          // North of (0, k) wraps to (length-1, (length - k) % length)
+          return { row: length - 1, col: (length - col) % length };
+        }
+        return { row: row - 1, col };
+      
+      case "S":
+        if (row === length - 1) {
+          // South of (length-1, k) wraps to (0, (length - k) % length)
+          return { row: 0, col: (length - col) % length };
+        }
+        return { row: row + 1, col };
+      
+      case "W":
+        if (col === 0) {
+          // West of (k, 0) wraps to ((length - k) % length, length-1)
+          return { row: (length - row) % length, col: length - 1 };
+        }
+        return { row, col: col - 1 };
+      
+      case "E":
+        if (col === length - 1) {
+          // East of (k, length-1) wraps to ((length - k) % length, 0)
+          return { row: (length - row) % length, col: 0 };
+        }
+        return { row, col: col + 1 };
+    }
+  },
+};
+
+/**
  * Get wallpaper group by name
  */
 export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
   switch (name) {
     case "P1": return P1;
     case "P2": return P2;
+    case "pgg": return pgg;
   }
 }
 
