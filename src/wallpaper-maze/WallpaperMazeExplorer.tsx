@@ -59,6 +59,10 @@ export function WallpaperMazeExplorer() {
   const [solutionViewMode, setSolutionViewMode] = useState<SolutionViewMode>("maze");
   const [graphSelectedNode, setGraphSelectedNode] = useState<TiledNode | null>(null);
   
+  // State for solution neighbor viewer
+  const [solutionSelectedCell, setSolutionSelectedCell] = useState<GridCell | null>(null);
+  const [showSolutionNeighbors, setShowSolutionNeighbors] = useState(false);
+  
   // New state for tools and vacant cells
   const [activeTool, setActiveTool] = useState<SketchpadTool>("rootSetter");
   const [vacantCells, setVacantCells] = useState<Set<string>>(new Set());
@@ -102,7 +106,7 @@ export function WallpaperMazeExplorer() {
     );
   }, [solution, length, multiplier, rootRow, rootCol]);
   
-  // Get neighbor info for selected cell in fundamental domain
+  // Get neighbor info for selected cell in fundamental domain (for sketchpad)
   const neighborInfo = useMemo(() => {
     if (!selectedCell) return null;
     const wpg = getWallpaperGroup(wallpaperGroup);
@@ -113,6 +117,28 @@ export function WallpaperMazeExplorer() {
       W: wpg.getWrappedNeighbor(selectedCell.row, selectedCell.col, "W", length),
     };
   }, [selectedCell, length, wallpaperGroup]);
+  
+  // Get neighbor info for selected cell in solution viewer
+  const solutionNeighborInfo = useMemo(() => {
+    if (!solutionSelectedCell || !solution) return null;
+    const wpg = getWallpaperGroup(solution.wallpaperGroup);
+    return {
+      N: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "N", length),
+      S: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "S", length),
+      E: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "E", length),
+      W: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "W", length),
+    };
+  }, [solutionSelectedCell, length, solution]);
+  
+  // Handle cell click in solution viewer
+  const handleSolutionCellClick = useCallback((row: number, col: number) => {
+    if (!showSolutionNeighbors) return;
+    if (solutionSelectedCell?.row === row && solutionSelectedCell?.col === col) {
+      setSolutionSelectedCell(null);
+    } else {
+      setSolutionSelectedCell({ row, col });
+    }
+  }, [showSolutionNeighbors, solutionSelectedCell]);
   
   // Handle solve button click
   const handleSolve = useCallback(() => {
@@ -267,6 +293,16 @@ export function WallpaperMazeExplorer() {
     
     const cells: React.ReactNode[] = [];
     const walls: React.ReactNode[] = [];
+    const highlights: React.ReactNode[] = [];
+    
+    // Compute which fundamental cells are neighbors of the selected cell
+    const neighborFundamentalCells = new Set<string>();
+    if (showSolutionNeighbors && solutionSelectedCell && solutionNeighborInfo) {
+      neighborFundamentalCells.add(`${solutionNeighborInfo.N.row},${solutionNeighborInfo.N.col}`);
+      neighborFundamentalCells.add(`${solutionNeighborInfo.S.row},${solutionNeighborInfo.S.col}`);
+      neighborFundamentalCells.add(`${solutionNeighborInfo.E.row},${solutionNeighborInfo.E.col}`);
+      neighborFundamentalCells.add(`${solutionNeighborInfo.W.row},${solutionNeighborInfo.W.col}`);
+    }
     
     // Render cells from tiled graph
     for (const node of tiledGraph.nodes) {
@@ -276,6 +312,10 @@ export function WallpaperMazeExplorer() {
       // Check if this cell was vacant at solve time
       const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
       const isVacant = solution.vacantCells.has(cellKey);
+      const isSelected = showSolutionNeighbors && solutionSelectedCell &&
+        node.fundamentalRow === solutionSelectedCell.row && 
+        node.fundamentalCol === solutionSelectedCell.col;
+      const isNeighbor = neighborFundamentalCells.has(cellKey);
       
       // Color: vacant cells are black, others colored by root connection
       const fillColor = isVacant ? "#000" : getRootColor(node.rootIndex);
@@ -289,8 +329,43 @@ export function WallpaperMazeExplorer() {
           height={cellSize}
           fill={fillColor}
           stroke="none"
+          style={{ cursor: showSolutionNeighbors ? "pointer" : "default" }}
+          onClick={() => handleSolutionCellClick(node.fundamentalRow, node.fundamentalCol)}
         />
       );
+      
+      // Highlight selected cell
+      if (isSelected) {
+        highlights.push(
+          <rect
+            key={`selected-${node.id}`}
+            x={x + 2}
+            y={y + 2}
+            width={cellSize - 4}
+            height={cellSize - 4}
+            fill="none"
+            stroke="#000"
+            strokeWidth={3}
+          />
+        );
+      }
+      
+      // Highlight neighbor cells
+      if (isNeighbor && !isSelected) {
+        highlights.push(
+          <rect
+            key={`neighbor-${node.id}`}
+            x={x + 2}
+            y={y + 2}
+            width={cellSize - 4}
+            height={cellSize - 4}
+            fill="none"
+            stroke="#ff4081"
+            strokeWidth={3}
+            strokeDasharray="4,2"
+          />
+        );
+      }
       
       // Root indicator (only for non-vacant cells)
       if (node.isRoot && !isVacant) {
@@ -329,6 +404,7 @@ export function WallpaperMazeExplorer() {
       <svg width={totalSize} height={totalSize}>
         {cells}
         {walls}
+        {highlights}
       </svg>
     );
   };
@@ -790,6 +866,36 @@ export function WallpaperMazeExplorer() {
               </button>
             </div>
             
+            {/* Show Neighbors toggle */}
+            <button
+              onClick={() => {
+                setShowSolutionNeighbors(!showSolutionNeighbors);
+                if (!showSolutionNeighbors) {
+                  setSolutionSelectedCell(null);
+                }
+              }}
+              style={{
+                padding: "5px 15px",
+                backgroundColor: showSolutionNeighbors ? "#2196f3" : "#e0e0e0",
+                color: showSolutionNeighbors ? "white" : "black",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+              title="Click cells in the solution to see their neighbors"
+            >
+              🔍 Show Neighbors
+            </button>
+            
+            {/* Show selected cell info when in neighbor mode */}
+            {showSolutionNeighbors && solutionSelectedCell && (
+              <div style={{ fontSize: "12px", color: "#666" }}>
+                <strong>Selected:</strong> ({solutionSelectedCell.row}, {solutionSelectedCell.col})
+                <br />
+                <span style={{ color: "#ff4081" }}>Neighbors highlighted in pink</span>
+              </div>
+            )}
+            
             {/* Solution view - use P3RhombusRenderer for P3, standard renderers for others */}
             {solution.wallpaperGroup === "P3" ? (
               <P3RhombusRenderer
@@ -802,6 +908,10 @@ export function WallpaperMazeExplorer() {
                 vacantCells={solution.vacantCells}
                 wallpaperGroupName={solution.wallpaperGroup}
                 tiledGraph={tiledGraph}
+                showNeighbors={showSolutionNeighbors}
+                selectedCell={solutionSelectedCell}
+                neighborInfo={solutionNeighborInfo}
+                onCellClick={handleSolutionCellClick}
               />
             ) : (
               solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()

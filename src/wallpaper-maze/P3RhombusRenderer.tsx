@@ -15,6 +15,13 @@ import { getRootColor } from "./TiledGraph";
 import { getWallpaperGroup } from "./WallpaperGroups";
 import type { Direction } from "./WallpaperGroups";
 
+interface NeighborInfo {
+  N: { row: number; col: number };
+  S: { row: number; col: number };
+  E: { row: number; col: number };
+  W: { row: number; col: number };
+}
+
 interface P3RhombusRendererProps {
   length: number;
   multiplier: number;
@@ -25,6 +32,11 @@ interface P3RhombusRendererProps {
   vacantCells: Set<string>;
   wallpaperGroupName: string;
   tiledGraph: TiledGraph | null;
+  // Neighbor highlighting props
+  showNeighbors?: boolean;
+  selectedCell?: { row: number; col: number } | null;
+  neighborInfo?: NeighborInfo | null;
+  onCellClick?: (row: number, col: number) => void;
 }
 
 // Shear constants
@@ -187,7 +199,22 @@ export function P3RhombusRenderer({
   vacantCells,
   wallpaperGroupName: _wallpaperGroupName,
   tiledGraph,
+  showNeighbors = false,
+  selectedCell = null,
+  neighborInfo = null,
+  onCellClick,
 }: P3RhombusRendererProps) {
+  
+  // Compute neighbor cell keys for highlighting
+  const neighborCellKeys = useMemo(() => {
+    if (!showNeighbors || !neighborInfo) return new Set<string>();
+    return new Set([
+      `${neighborInfo.N.row},${neighborInfo.N.col}`,
+      `${neighborInfo.S.row},${neighborInfo.S.col}`,
+      `${neighborInfo.E.row},${neighborInfo.E.col}`,
+      `${neighborInfo.W.row},${neighborInfo.W.col}`,
+    ]);
+  }, [showNeighbors, neighborInfo]);
   
   // Pre-compute dimensions
   const dimensions = useMemo(() => {
@@ -221,6 +248,7 @@ export function P3RhombusRenderer({
         for (let rhombusIdx = 0; rhombusIdx < 3; rhombusIdx++) {
           const rhombusTransform = getRhombusTransformInHexagon(rhombusIdx, length, cellSize);
           const cellElements: React.ReactNode[] = [];
+          const highlightElements: React.ReactNode[] = [];
           const wallSegments: React.ReactNode[] = [];
           
           // For each cell in the rhombus (fundamental domain)
@@ -229,6 +257,9 @@ export function P3RhombusRenderer({
               const cellKey = `${row},${col}`;
               const isVacant = vacantCells.has(cellKey);
               const isRoot = row === rootRow && col === rootCol;
+              const isSelected = showNeighbors && selectedCell && 
+                row === selectedCell.row && col === selectedCell.col;
+              const isNeighbor = neighborCellKeys.has(cellKey);
               
               // Determine color
               const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
@@ -242,6 +273,7 @@ export function P3RhombusRenderer({
               }
               
               const path = getCellRhombusPath(row, col, cellSize);
+              const corners = getCellCorners(row, col, cellSize);
               
               cellElements.push(
                 <path
@@ -250,12 +282,40 @@ export function P3RhombusRenderer({
                   fill={fillColor}
                   stroke="#ccc"
                   strokeWidth={0.5}
+                  style={{ cursor: showNeighbors ? "pointer" : "default" }}
+                  onClick={() => onCellClick?.(row, col)}
                 />
               );
               
+              // Highlight selected cell
+              if (isSelected) {
+                highlightElements.push(
+                  <path
+                    key={`selected-${hexIndex}-${rhombusIdx}-${row}-${col}`}
+                    d={path}
+                    fill="none"
+                    stroke="#000"
+                    strokeWidth={3}
+                  />
+                );
+              }
+              
+              // Highlight neighbor cells
+              if (isNeighbor && !isSelected) {
+                highlightElements.push(
+                  <path
+                    key={`neighbor-${hexIndex}-${rhombusIdx}-${row}-${col}`}
+                    d={path}
+                    fill="none"
+                    stroke="#ff4081"
+                    strokeWidth={3}
+                    strokeDasharray="4,2"
+                  />
+                );
+              }
+              
               // Root indicator
               if (isRoot && !isVacant) {
-                const corners = getCellCorners(row, col, cellSize);
                 const cx = (corners.topLeft.x + corners.bottomRight.x) / 2;
                 const cy = (corners.topLeft.y + corners.bottomRight.y) / 2;
                 
@@ -307,6 +367,7 @@ export function P3RhombusRenderer({
           rhombiElements.push(
             <g key={`rhombus-cells-${hexIndex}-${rhombusIdx}`} transform={rhombusTransform}>
               {cellElements}
+              {highlightElements}
             </g>
           );
           
@@ -340,7 +401,7 @@ export function P3RhombusRenderer({
     }
     
     return { hexagonElements: hexElements, wallElements: walls };
-  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf]);
+  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf, showNeighbors, selectedCell, neighborCellKeys, onCellClick]);
 
   const padding = 60;
 
