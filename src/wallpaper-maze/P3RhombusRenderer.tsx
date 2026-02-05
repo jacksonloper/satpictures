@@ -205,6 +205,14 @@ export function P3RhombusRenderer({
   onCellClick,
 }: P3RhombusRendererProps) {
   
+  // Direction deltas for neighbor computation
+  const DIRECTION_DELTAS = { 
+    N: { row: -1, col: 0 }, 
+    S: { row: 1, col: 0 }, 
+    E: { row: 0, col: 1 }, 
+    W: { row: 0, col: -1 } 
+  };
+  
   // Compute the 4 adjacent neighbor keys for the selected node
   // Each neighbor is identified by (hexRow, hexCol, rhombusIdx, fundamentalRow, fundamentalCol)
   const adjacentNeighborKeys = useMemo(() => {
@@ -222,7 +230,7 @@ export function P3RhombusRenderer({
       
       // Determine if we need to move to a different rhombus/hexagon
       // This depends on whether we crossed a boundary of the fundamental domain
-      const delta = { N: { row: -1, col: 0 }, S: { row: 1, col: 0 }, E: { row: 0, col: 1 }, W: { row: 0, col: -1 } }[dir];
+      const delta = DIRECTION_DELTAS[dir];
       const rawRow = fundamentalRow + delta.row;
       const rawCol = fundamentalCol + delta.col;
       
@@ -230,17 +238,14 @@ export function P3RhombusRenderer({
       let neighborHexCol = hexCol;
       let neighborRhombusIdx = rhombusIdx;
       
-      // Check if we crossed a boundary and need to adjust hexagon/rhombus
-      // For P3, this is complex because of the 3-fold rotation
-      // For now, we'll use a simplified approach: if we wrap, check if neighbor is in same or adjacent hex
+      // Check if we crossed a boundary and need to adjust rhombus
+      // TODO: This is a simplified implementation. For correct cross-hexagon neighbors,
+      // we would need to also adjust neighborHexRow/neighborHexCol when crossing
+      // between different hexagon tiles. Currently, neighbors that cross hexagon
+      // boundaries will only be highlighted within the same hexagon.
       if (rawRow < 0 || rawRow >= length || rawCol < 0 || rawCol >= length) {
-        // We wrapped - this means we might be in a different rhombus or hexagon
-        // The neighbor wrapping in P3 creates interesting patterns:
-        // - N boundary: wraps with a transformation that involves a different rhombus
-        // - For simplicity, we'll compute based on the rotation pattern
-        
-        // In P3, the 3 rhombi in a hexagon share boundaries
-        // When you cross a boundary, you enter the adjacent rhombus
+        // We wrapped within the fundamental domain - neighbor is in a different rhombus
+        // In P3, the 3 rhombi in a hexagon share boundaries via rotation
         if (dir === "N" && rawRow < 0) {
           // Going north from top edge - wraps to a rotated position
           neighborRhombusIdx = (rhombusIdx + 2) % 3;

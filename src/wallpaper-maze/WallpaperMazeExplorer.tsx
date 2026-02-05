@@ -972,8 +972,10 @@ export function WallpaperMazeExplorer() {
             {/* Show selected node info when in neighbor mode */}
             {showSolutionNeighbors && solutionSelectedNode && (
               <div style={{ fontSize: "12px", color: "#666" }}>
-                <strong>Selected:</strong> copy ({solutionSelectedNode.copyRow}, {solutionSelectedNode.copyCol}), 
-                cell ({solutionSelectedNode.fundamentalRow}, {solutionSelectedNode.fundamentalCol})
+                <strong>Selected:</strong> {solution.wallpaperGroup === "P3" 
+                  ? `hex (${solutionSelectedNode.hexRow ?? 0}, ${solutionSelectedNode.hexCol ?? 0}), rhombus ${solutionSelectedNode.rhombusIdx ?? 0}, cell (${solutionSelectedNode.fundamentalRow}, ${solutionSelectedNode.fundamentalCol})`
+                  : `copy (${solutionSelectedNode.copyRow}, ${solutionSelectedNode.copyCol}), cell (${solutionSelectedNode.fundamentalRow}, ${solutionSelectedNode.fundamentalCol})`
+                }
                 <br />
                 <span style={{ color: "#ff4081" }}>4 neighbors highlighted in pink</span>
               </div>
