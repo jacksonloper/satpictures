@@ -205,14 +205,6 @@ export function P3RhombusRenderer({
   onCellClick,
 }: P3RhombusRendererProps) {
   
-  // Direction deltas for neighbor computation
-  const DIRECTION_DELTAS = { 
-    N: { row: -1, col: 0 }, 
-    S: { row: 1, col: 0 }, 
-    E: { row: 0, col: 1 }, 
-    W: { row: 0, col: -1 } 
-  };
-  
   // Compute the 4 adjacent neighbor keys for the selected node
   // Each neighbor is identified by (hexRow, hexCol, rhombusIdx, fundamentalRow, fundamentalCol)
   const adjacentNeighborKeys = useMemo(() => {
@@ -228,36 +220,72 @@ export function P3RhombusRenderer({
       // Get the fundamental neighbor using wallpaper group wrapping
       const neighborFund = P3_WALLPAPER_GROUP.getWrappedNeighbor(fundamentalRow, fundamentalCol, dir, length);
       
-      // Determine if we need to move to a different rhombus/hexagon
-      // This depends on whether we crossed a boundary of the fundamental domain
-      const delta = DIRECTION_DELTAS[dir];
-      const rawRow = fundamentalRow + delta.row;
-      const rawCol = fundamentalCol + delta.col;
+      // Check if we're crossing a boundary
+      const isNorthBoundary = dir === "N" && fundamentalRow === 0;
+      const isSouthBoundary = dir === "S" && fundamentalRow === length - 1;
+      const isEastBoundary = dir === "E" && fundamentalCol === length - 1;
+      const isWestBoundary = dir === "W" && fundamentalCol === 0;
       
       let neighborHexRow = hexRow;
       let neighborHexCol = hexCol;
       let neighborRhombusIdx = rhombusIdx;
       
-      // Check if we crossed a boundary and need to adjust rhombus
-      // TODO: This is a simplified implementation. For correct cross-hexagon neighbors,
-      // we would need to also adjust neighborHexRow/neighborHexCol when crossing
-      // between different hexagon tiles. Currently, neighbors that cross hexagon
-      // boundaries will only be highlighted within the same hexagon.
-      if (rawRow < 0 || rawRow >= length || rawCol < 0 || rawCol >= length) {
-        // We wrapped within the fundamental domain - neighbor is in a different rhombus
-        // In P3, the 3 rhombi in a hexagon share boundaries via rotation
-        if (dir === "N" && rawRow < 0) {
-          // Going north from top edge - wraps to a rotated position
-          neighborRhombusIdx = (rhombusIdx + 2) % 3;
-        } else if (dir === "S" && rawRow >= length) {
-          // Going south from bottom edge
+      if (isNorthBoundary || isEastBoundary) {
+        // These boundaries connect to another rhombus within the SAME hexagon
+        // N from R0 goes to R1, E from R0 goes to R2
+        // N from R1 goes to R2, E from R1 goes to R0
+        // N from R2 goes to R0, E from R2 goes to R1
+        if (isNorthBoundary) {
           neighborRhombusIdx = (rhombusIdx + 1) % 3;
-        } else if (dir === "E" && rawCol >= length) {
-          // Going east from right edge
-          neighborRhombusIdx = (rhombusIdx + 1) % 3;
-        } else if (dir === "W" && rawCol < 0) {
-          // Going west from left edge
+        } else { // isEastBoundary
           neighborRhombusIdx = (rhombusIdx + 2) % 3;
+        }
+      } else if (isSouthBoundary || isWestBoundary) {
+        // These boundaries connect to an ADJACENT hexagon
+        // The direction depends on which rhombus we're in
+        
+        if (rhombusIdx === 0) {
+          if (isSouthBoundary) {
+            // R0 south goes to hex below
+            neighborHexRow = hexRow + 1;
+            neighborRhombusIdx = 1;
+          } else { // isWestBoundary
+            // R0 west goes to hex to the left
+            neighborHexCol = hexCol - 1;
+            if (hexCol % 2 === 1) {
+              neighborHexRow = hexRow + 1;
+            }
+            neighborRhombusIdx = 2;
+          }
+        } else if (rhombusIdx === 1) {
+          if (isSouthBoundary) {
+            // R1 south goes to hex above-left
+            if (hexCol % 2 === 0) {
+              neighborHexRow = hexRow - 1;
+            }
+            neighborHexCol = hexCol - 1;
+            neighborRhombusIdx = 2;
+          } else { // isWestBoundary
+            // R1 west goes to hex above
+            neighborHexRow = hexRow - 1;
+            neighborRhombusIdx = 0;
+          }
+        } else { // rhombusIdx === 2
+          if (isSouthBoundary) {
+            // R2 south goes to hex to the right
+            neighborHexCol = hexCol + 1;
+            if (hexCol % 2 === 0) {
+              neighborHexRow = hexRow - 1;
+            }
+            neighborRhombusIdx = 0;
+          } else { // isWestBoundary
+            // R2 west goes to hex below-right
+            if (hexCol % 2 === 1) {
+              neighborHexRow = hexRow + 1;
+            }
+            neighborHexCol = hexCol + 1;
+            neighborRhombusIdx = 1;
+          }
         }
       }
       
