@@ -273,7 +273,6 @@ export function P3RhombusRenderer({
               }
               
               const path = getCellRhombusPath(row, col, cellSize);
-              const corners = getCellCorners(row, col, cellSize);
               
               cellElements.push(
                 <path
@@ -314,8 +313,9 @@ export function P3RhombusRenderer({
                 );
               }
               
-              // Root indicator
+              // Root indicator (only compute corners when needed)
               if (isRoot && !isVacant) {
+                const corners = getCellCorners(row, col, cellSize);
                 const cx = (corners.topLeft.x + corners.bottomRight.x) / 2;
                 const cy = (corners.topLeft.y + corners.bottomRight.y) / 2;
                 
