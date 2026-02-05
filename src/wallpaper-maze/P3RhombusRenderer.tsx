@@ -10,8 +10,8 @@
  */
 
 import { useMemo } from "react";
-import type { TiledGraph } from "./TiledGraph";
-import { getRootColor } from "./TiledGraph";
+import type { P3TiledGraph } from "./P3TiledGraph";
+import { getP3RootColor } from "./P3TiledGraph";
 import { getWallpaperGroup } from "./WallpaperGroups";
 import type { Direction } from "./WallpaperGroups";
 
@@ -33,7 +33,7 @@ interface P3RhombusRendererProps {
   rootCol: number;
   vacantCells: Set<string>;
   wallpaperGroupName: string;
-  tiledGraph: TiledGraph | null;
+  p3TiledGraph: P3TiledGraph | null;
   // Neighbor highlighting props
   showNeighbors?: boolean;
   selectedNode?: P3SelectedNode | { copyRow: number; copyCol: number; fundamentalRow: number; fundamentalCol: number; hexRow?: number; hexCol?: number; rhombusIdx?: number } | null;
@@ -199,7 +199,7 @@ export function P3RhombusRenderer({
   rootCol,
   vacantCells,
   wallpaperGroupName: _wallpaperGroupName,
-  tiledGraph,
+  p3TiledGraph,
   showNeighbors = false,
   selectedNode = null,
   onCellClick,
@@ -349,15 +349,21 @@ export function P3RhombusRenderer({
               const nodeKey = `${hexRow},${hexCol},${rhombusIdx},${row},${col}`;
               const isNeighbor = adjacentNeighborKeys.has(nodeKey);
               
-              // Determine color
-              const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
+              // Determine color using arborescence coloring from p3TiledGraph
               let fillColor = "#e0e0e0";
               if (isVacant) {
                 fillColor = "#000";
-              } else if (tiledGraph) {
-                fillColor = getRootColor(rhombusColorIndex);
+              } else if (p3TiledGraph) {
+                // Get rootIndex from the p3TiledGraph node
+                const nodeId = p3TiledGraph.nodeAt.get(nodeKey);
+                if (nodeId !== undefined) {
+                  const node = p3TiledGraph.nodes[nodeId];
+                  fillColor = getP3RootColor(node.rootIndex);
+                }
               } else {
-                fillColor = getRootColor(rhombusColorIndex);
+                // Fallback: color by rhombus index
+                const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
+                fillColor = getP3RootColor(rhombusColorIndex);
               }
               
               const path = getCellRhombusPath(row, col, cellSize);

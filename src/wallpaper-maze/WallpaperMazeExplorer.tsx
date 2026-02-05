@@ -125,17 +125,16 @@ export function WallpaperMazeExplorer() {
   // Build P3-specific tiled graph when solution is for P3
   const p3TiledGraph = useMemo<P3TiledGraph | null>(() => {
     if (!solution || solution.wallpaperGroup !== "P3") return null;
-    const graphCellSize = 30;
     return buildP3TiledGraph(
       length,
       multiplier,
-      graphCellSize,
+      cellSize,
       rootRow,
       rootCol,
       solution.parentOf,
       solution.vacantCells
     );
-  }, [solution, length, multiplier, rootRow, rootCol]);
+  }, [solution, length, multiplier, cellSize, rootRow, rootCol]);
   
   // Get neighbor info for selected cell in fundamental domain (for sketchpad)
   const neighborInfo = useMemo(() => {
@@ -1130,7 +1129,7 @@ export function WallpaperMazeExplorer() {
                   rootCol={rootCol}
                   vacantCells={solution.vacantCells}
                   wallpaperGroupName={solution.wallpaperGroup}
-                  tiledGraph={tiledGraph}
+                  p3TiledGraph={p3TiledGraph}
                   showNeighbors={showSolutionNeighbors}
                   selectedNode={solutionSelectedNode}
                   onCellClick={handleP3CellClick}
