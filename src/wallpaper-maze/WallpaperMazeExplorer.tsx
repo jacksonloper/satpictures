@@ -8,6 +8,8 @@ import {
   findEquivalentNodes,
 } from "./TiledGraph";
 import type { TiledGraph, TiledNode } from "./TiledGraph";
+import { buildP3TiledGraph, getP3RootColor } from "./P3TiledGraph";
+import type { P3TiledGraph, P3TiledNode } from "./P3TiledGraph";
 import { getWallpaperGroup, DIRECTION_DELTA } from "./WallpaperGroups";
 import type { WallpaperGroupName } from "./WallpaperGroups";
 import { P3RhombusRenderer } from "./P3RhombusRenderer";
@@ -71,6 +73,7 @@ export function WallpaperMazeExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [solutionViewMode, setSolutionViewMode] = useState<SolutionViewMode>("maze");
   const [graphSelectedNode, setGraphSelectedNode] = useState<TiledNode | null>(null);
+  const [p3GraphSelectedNode, setP3GraphSelectedNode] = useState<P3TiledNode | null>(null);
   
   // State for solution neighbor viewer - now tracks specific node, not just fundamental cell
   const [solutionSelectedNode, setSolutionSelectedNode] = useState<SolutionSelectedNode | null>(null);
@@ -116,6 +119,21 @@ export function WallpaperMazeExplorer() {
       rootCol,
       solution.parentOf,
       solution.vacantCells // Pass vacant cells to the tiled graph builder
+    );
+  }, [solution, length, multiplier, rootRow, rootCol]);
+  
+  // Build P3-specific tiled graph when solution is for P3
+  const p3TiledGraph = useMemo<P3TiledGraph | null>(() => {
+    if (!solution || solution.wallpaperGroup !== "P3") return null;
+    const graphCellSize = 30;
+    return buildP3TiledGraph(
+      length,
+      multiplier,
+      graphCellSize,
+      rootRow,
+      rootCol,
+      solution.parentOf,
+      solution.vacantCells
     );
   }, [solution, length, multiplier, rootRow, rootCol]);
   
@@ -764,6 +782,125 @@ export function WallpaperMazeExplorer() {
     );
   };
   
+  // Render P3-specific graph view
+  const renderP3GraphView = () => {
+    if (!p3TiledGraph || !solution || solution.wallpaperGroup !== "P3") return null;
+    
+    const dotRadius = 4;
+    const graphPadding = 20;
+    
+    // Calculate bounds (with extra padding for node positions)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const node of p3TiledGraph.nodes) {
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x);
+      maxY = Math.max(maxY, node.y);
+    }
+    
+    const svgWidth = maxX - minX + 2 * graphPadding;
+    const svgHeight = maxY - minY + 2 * graphPadding;
+    const offsetX = -minX + graphPadding;
+    const offsetY = -minY + graphPadding;
+    
+    const dots: React.ReactNode[] = [];
+    const edges: React.ReactNode[] = [];
+    const highlights: React.ReactNode[] = [];
+    
+    // Draw edges (from each node to its parent) - skip edges involving vacant cells
+    for (const edge of p3TiledGraph.edges) {
+      const fromNode = p3TiledGraph.nodes[edge.fromId];
+      const toNode = p3TiledGraph.nodes[edge.toId];
+      
+      const fromKey = `${fromNode.fundamentalRow},${fromNode.fundamentalCol}`;
+      const toKey = `${toNode.fundamentalRow},${toNode.fundamentalCol}`;
+      if (solution.vacantCells.has(fromKey) || solution.vacantCells.has(toKey)) {
+        continue;
+      }
+      
+      const x1 = fromNode.x + offsetX;
+      const y1 = fromNode.y + offsetY;
+      const x2 = toNode.x + offsetX;
+      const y2 = toNode.y + offsetY;
+      
+      edges.push(
+        <line
+          key={`edge-${edge.fromId}-${edge.toId}`}
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          stroke={getP3RootColor(fromNode.rootIndex)}
+          strokeWidth={2}
+        />
+      );
+    }
+    
+    // Draw dots for each node - skip vacant cells
+    for (const node of p3TiledGraph.nodes) {
+      const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
+      if (solution.vacantCells.has(cellKey)) {
+        continue;
+      }
+      
+      const cx = node.x + offsetX;
+      const cy = node.y + offsetY;
+      
+      dots.push(
+        <circle
+          key={`dot-${node.id}`}
+          cx={cx}
+          cy={cy}
+          r={node.isRoot ? dotRadius * 1.5 : dotRadius}
+          fill={getP3RootColor(node.rootIndex)}
+          stroke={node.isRoot ? "#000" : "none"}
+          strokeWidth={node.isRoot ? 2 : 0}
+          style={{ cursor: "pointer" }}
+          onClick={() => {
+            if (p3GraphSelectedNode?.id === node.id) {
+              setP3GraphSelectedNode(null);
+            } else {
+              setP3GraphSelectedNode(node);
+            }
+          }}
+        />
+      );
+    }
+    
+    // Highlight equivalent nodes (same fundamental coordinates)
+    if (p3GraphSelectedNode) {
+      const equivalentNodes = p3TiledGraph.nodes.filter(
+        n => n.fundamentalRow === p3GraphSelectedNode.fundamentalRow &&
+             n.fundamentalCol === p3GraphSelectedNode.fundamentalCol
+      );
+      
+      for (const node of equivalentNodes) {
+        const cx = node.x + offsetX;
+        const cy = node.y + offsetY;
+        
+        highlights.push(
+          <circle
+            key={`highlight-${node.id}`}
+            cx={cx}
+            cy={cy}
+            r={dotRadius * 2}
+            fill="none"
+            stroke="#ff00ff"
+            strokeWidth={2}
+          />
+        );
+      }
+    }
+    
+    return (
+      <svg width={svgWidth} height={svgHeight}>
+        {edges}
+        {dots}
+        {highlights}
+      </svg>
+    );
+  };
+  
   return (
     <div className="wallpaper-maze-explorer">
       <h2>Wallpaper Maze Explorer</h2>
@@ -981,22 +1118,26 @@ export function WallpaperMazeExplorer() {
               </div>
             )}
             
-            {/* Solution view - use P3RhombusRenderer for P3, standard renderers for others */}
+            {/* Solution view - use P3RhombusRenderer for P3 maze view, graph view for both */}
             {solution.wallpaperGroup === "P3" ? (
-              <P3RhombusRenderer
-                length={length}
-                multiplier={multiplier}
-                cellSize={cellSize}
-                parentOf={solution.parentOf}
-                rootRow={rootRow}
-                rootCol={rootCol}
-                vacantCells={solution.vacantCells}
-                wallpaperGroupName={solution.wallpaperGroup}
-                tiledGraph={tiledGraph}
-                showNeighbors={showSolutionNeighbors}
-                selectedNode={solutionSelectedNode}
-                onCellClick={handleP3CellClick}
-              />
+              solutionViewMode === "maze" ? (
+                <P3RhombusRenderer
+                  length={length}
+                  multiplier={multiplier}
+                  cellSize={cellSize}
+                  parentOf={solution.parentOf}
+                  rootRow={rootRow}
+                  rootCol={rootCol}
+                  vacantCells={solution.vacantCells}
+                  wallpaperGroupName={solution.wallpaperGroup}
+                  tiledGraph={tiledGraph}
+                  showNeighbors={showSolutionNeighbors}
+                  selectedNode={solutionSelectedNode}
+                  onCellClick={handleP3CellClick}
+                />
+              ) : (
+                renderP3GraphView()
+              )
             ) : (
               solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()
             )}
@@ -1010,6 +1151,17 @@ export function WallpaperMazeExplorer() {
                   <>Parent direction: {graphSelectedNode.parentDirection}<br/></>
                 )}
                 {graphSelectedNode.isRoot && <span style={{ color: "#ff9800" }}>Root</span>}
+              </div>
+            )}
+            
+            {/* Selected node info for P3 graph view */}
+            {solutionViewMode === "graph" && p3GraphSelectedNode && solution.wallpaperGroup === "P3" && (
+              <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
+                <strong>Selected Cell</strong><br/>
+                Hex: ({p3GraphSelectedNode.hexRow}, {p3GraphSelectedNode.hexCol}), 
+                Rhombus: {p3GraphSelectedNode.rhombusIdx}<br/>
+                Fundamental: ({p3GraphSelectedNode.fundamentalRow}, {p3GraphSelectedNode.fundamentalCol})<br/>
+                {p3GraphSelectedNode.isRoot && <span style={{ color: "#ff9800" }}>Root</span>}
               </div>
             )}
           </div>
