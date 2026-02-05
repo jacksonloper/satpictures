@@ -359,9 +359,13 @@ export function P3RhombusRenderer({
                 if (nodeId !== undefined) {
                   const node = p3TiledGraph.nodes[nodeId];
                   fillColor = getP3RootColor(node.rootIndex);
+                } else {
+                  // Node not found in graph - use gray fallback
+                  // This shouldn't happen if graph is properly synchronized
+                  fillColor = "#d0d0d0";
                 }
               } else {
-                // Fallback: color by rhombus index
+                // No graph available - color by rhombus index as fallback
                 const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
                 fillColor = getP3RootColor(rhombusColorIndex);
               }
