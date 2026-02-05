@@ -286,7 +286,7 @@ function runCorrectedAlgorithmTest(length: number, multiplier: number): { passed
   const directions: Array<"N" | "S" | "E" | "W"> = ["N", "S", "E", "W"];
   let failedCount = 0;
   const details: string[] = [];
-  let showDetails = 5; // Show first N failures
+  let remainingDetailsToShow = 5; // Show first N failures
   
   for (const node of nodes) {
     // Skip nodes at the boundary of the multiplier grid (their neighbors might be outside)
@@ -314,7 +314,7 @@ function runCorrectedAlgorithmTest(length: number, multiplier: number): { passed
     
     if (ratio >= 2) {
       failedCount++;
-      if (showDetails > 0) {
+      if (remainingDetailsToShow > 0) {
         let detail = `\n❌ FAILED: Node at hex(${node.hexRow},${node.hexCol}) rhombus ${node.rhombusIdx} cell(${node.fundamentalRow},${node.fundamentalCol})`;
         detail += `\n   Position: (${node.x.toFixed(2)}, ${node.y.toFixed(2)})`;
         detail += `\n   Neighbor distances:`;
@@ -323,7 +323,7 @@ function runCorrectedAlgorithmTest(length: number, multiplier: number): { passed
         }
         detail += `\n   Ratio: ${ratio.toFixed(2)} (max=${maxDist.toFixed(2)}, min=${minDist.toFixed(2)})`;
         details.push(detail);
-        showDetails--;
+        remainingDetailsToShow--;
       }
     }
   }
@@ -350,5 +350,4 @@ if (result.passed) {
   console.log(`\n❌ FAILED: ${result.failedCount} interior nodes have neighbor distance ratio >= 2`);
   process.exit(1);
 }
-
 
