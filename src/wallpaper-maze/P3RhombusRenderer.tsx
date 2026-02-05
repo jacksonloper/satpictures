@@ -499,7 +499,7 @@ export function P3RhombusRenderer({
     }
     
     return { hexagonElements: hexElements, wallElements: walls };
-  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf, showNeighbors, selectedNode, adjacentNeighborKeys, onCellClick]);
+  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, p3TiledGraph, parentOf, showNeighbors, selectedNode, adjacentNeighborKeys, onCellClick]);
 
   const padding = 60;
 

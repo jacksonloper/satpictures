@@ -786,21 +786,22 @@ export function WallpaperMazeExplorer() {
     if (!p3TiledGraph || !solution || solution.wallpaperGroup !== "P3") return null;
     
     const dotRadius = 4;
-    const graphPadding = 20;
+    // Use the SAME padding as the maze view for consistent positioning
+    const graphPadding = 60;
     
-    // Calculate bounds (with extra padding for node positions)
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const node of p3TiledGraph.nodes) {
-      minX = Math.min(minX, node.x);
-      minY = Math.min(minY, node.y);
-      maxX = Math.max(maxX, node.x);
-      maxY = Math.max(maxY, node.y);
-    }
+    // Use the same dimensions as P3RhombusRenderer
+    const SHEAR_X = 0.5;
+    const SHEAR_Y = Math.sqrt(3) / 2;
+    const rhombusWidth = length * cellSize * (1 + SHEAR_X);
+    const rhombusHeight = length * cellSize * SHEAR_Y;
+    const totalWidth = (multiplier + 1) * rhombusWidth;
+    const totalHeight = (multiplier + 1) * (2 * rhombusHeight);
     
-    const svgWidth = maxX - minX + 2 * graphPadding;
-    const svgHeight = maxY - minY + 2 * graphPadding;
-    const offsetX = -minX + graphPadding;
-    const offsetY = -minY + graphPadding;
+    const svgWidth = totalWidth + graphPadding * 2;
+    const svgHeight = totalHeight + graphPadding * 2;
+    // Use the same offset as the maze (just the padding, no bounds-based offset)
+    const offsetX = graphPadding;
+    const offsetY = graphPadding;
     
     const dots: React.ReactNode[] = [];
     const edges: React.ReactNode[] = [];
