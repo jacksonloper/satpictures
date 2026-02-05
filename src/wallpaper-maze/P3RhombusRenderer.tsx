@@ -15,11 +15,13 @@ import { getRootColor } from "./TiledGraph";
 import { getWallpaperGroup } from "./WallpaperGroups";
 import type { Direction } from "./WallpaperGroups";
 
-interface NeighborInfo {
-  N: { row: number; col: number };
-  S: { row: number; col: number };
-  E: { row: number; col: number };
-  W: { row: number; col: number };
+// Selected node in P3 includes hexagon, rhombus, and cell position
+interface P3SelectedNode {
+  hexRow: number;
+  hexCol: number;
+  rhombusIdx: number;
+  fundamentalRow: number;
+  fundamentalCol: number;
 }
 
 interface P3RhombusRendererProps {
@@ -34,9 +36,8 @@ interface P3RhombusRendererProps {
   tiledGraph: TiledGraph | null;
   // Neighbor highlighting props
   showNeighbors?: boolean;
-  selectedCell?: { row: number; col: number } | null;
-  neighborInfo?: NeighborInfo | null;
-  onCellClick?: (row: number, col: number) => void;
+  selectedNode?: P3SelectedNode | { copyRow: number; copyCol: number; fundamentalRow: number; fundamentalCol: number; hexRow?: number; hexCol?: number; rhombusIdx?: number } | null;
+  onCellClick?: (hexRow: number, hexCol: number, rhombusIdx: number, row: number, col: number) => void;
 }
 
 // Shear constants
@@ -200,21 +201,66 @@ export function P3RhombusRenderer({
   wallpaperGroupName: _wallpaperGroupName,
   tiledGraph,
   showNeighbors = false,
-  selectedCell = null,
-  neighborInfo = null,
+  selectedNode = null,
   onCellClick,
 }: P3RhombusRendererProps) {
   
-  // Compute neighbor cell keys for highlighting
-  const neighborCellKeys = useMemo(() => {
-    if (!showNeighbors || !neighborInfo) return new Set<string>();
-    return new Set([
-      `${neighborInfo.N.row},${neighborInfo.N.col}`,
-      `${neighborInfo.S.row},${neighborInfo.S.col}`,
-      `${neighborInfo.E.row},${neighborInfo.E.col}`,
-      `${neighborInfo.W.row},${neighborInfo.W.col}`,
-    ]);
-  }, [showNeighbors, neighborInfo]);
+  // Compute the 4 adjacent neighbor keys for the selected node
+  // Each neighbor is identified by (hexRow, hexCol, rhombusIdx, fundamentalRow, fundamentalCol)
+  const adjacentNeighborKeys = useMemo(() => {
+    if (!showNeighbors || !selectedNode || selectedNode.hexRow === undefined) return new Set<string>();
+    
+    const { hexRow, hexCol, rhombusIdx, fundamentalRow, fundamentalCol } = selectedNode as P3SelectedNode;
+    const neighbors = new Set<string>();
+    
+    // For each direction, compute the actual adjacent neighbor
+    const directions: Array<"N" | "S" | "E" | "W"> = ["N", "S", "E", "W"];
+    
+    for (const dir of directions) {
+      // Get the fundamental neighbor using wallpaper group wrapping
+      const neighborFund = P3_WALLPAPER_GROUP.getWrappedNeighbor(fundamentalRow, fundamentalCol, dir, length);
+      
+      // Determine if we need to move to a different rhombus/hexagon
+      // This depends on whether we crossed a boundary of the fundamental domain
+      const delta = { N: { row: -1, col: 0 }, S: { row: 1, col: 0 }, E: { row: 0, col: 1 }, W: { row: 0, col: -1 } }[dir];
+      const rawRow = fundamentalRow + delta.row;
+      const rawCol = fundamentalCol + delta.col;
+      
+      let neighborHexRow = hexRow;
+      let neighborHexCol = hexCol;
+      let neighborRhombusIdx = rhombusIdx;
+      
+      // Check if we crossed a boundary and need to adjust hexagon/rhombus
+      // For P3, this is complex because of the 3-fold rotation
+      // For now, we'll use a simplified approach: if we wrap, check if neighbor is in same or adjacent hex
+      if (rawRow < 0 || rawRow >= length || rawCol < 0 || rawCol >= length) {
+        // We wrapped - this means we might be in a different rhombus or hexagon
+        // The neighbor wrapping in P3 creates interesting patterns:
+        // - N boundary: wraps with a transformation that involves a different rhombus
+        // - For simplicity, we'll compute based on the rotation pattern
+        
+        // In P3, the 3 rhombi in a hexagon share boundaries
+        // When you cross a boundary, you enter the adjacent rhombus
+        if (dir === "N" && rawRow < 0) {
+          // Going north from top edge - wraps to a rotated position
+          neighborRhombusIdx = (rhombusIdx + 2) % 3;
+        } else if (dir === "S" && rawRow >= length) {
+          // Going south from bottom edge
+          neighborRhombusIdx = (rhombusIdx + 1) % 3;
+        } else if (dir === "E" && rawCol >= length) {
+          // Going east from right edge
+          neighborRhombusIdx = (rhombusIdx + 1) % 3;
+        } else if (dir === "W" && rawCol < 0) {
+          // Going west from left edge
+          neighborRhombusIdx = (rhombusIdx + 2) % 3;
+        }
+      }
+      
+      neighbors.add(`${neighborHexRow},${neighborHexCol},${neighborRhombusIdx},${neighborFund.row},${neighborFund.col}`);
+    }
+    
+    return neighbors;
+  }, [showNeighbors, selectedNode, length]);
   
   // Pre-compute dimensions
   const dimensions = useMemo(() => {
@@ -257,9 +303,18 @@ export function P3RhombusRenderer({
               const cellKey = `${row},${col}`;
               const isVacant = vacantCells.has(cellKey);
               const isRoot = row === rootRow && col === rootCol;
-              const isSelected = showNeighbors && selectedCell && 
-                row === selectedCell.row && col === selectedCell.col;
-              const isNeighbor = neighborCellKeys.has(cellKey);
+              
+              // Check if this specific node is selected (not all copies)
+              const isSelected = showNeighbors && selectedNode && 
+                selectedNode.hexRow === hexRow && 
+                selectedNode.hexCol === hexCol &&
+                selectedNode.rhombusIdx === rhombusIdx &&
+                selectedNode.fundamentalRow === row && 
+                selectedNode.fundamentalCol === col;
+              
+              // Check if this specific node is one of the 4 adjacent neighbors
+              const nodeKey = `${hexRow},${hexCol},${rhombusIdx},${row},${col}`;
+              const isNeighbor = adjacentNeighborKeys.has(nodeKey);
               
               // Determine color
               const rhombusColorIndex = hexIndex * 3 + rhombusIdx;
@@ -282,7 +337,7 @@ export function P3RhombusRenderer({
                   stroke="#ccc"
                   strokeWidth={0.5}
                   style={{ cursor: showNeighbors ? "pointer" : "default" }}
-                  onClick={() => onCellClick?.(row, col)}
+                  onClick={() => onCellClick?.(hexRow, hexCol, rhombusIdx, row, col)}
                 />
               );
               
@@ -401,7 +456,7 @@ export function P3RhombusRenderer({
     }
     
     return { hexagonElements: hexElements, wallElements: walls };
-  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf, showNeighbors, selectedCell, neighborCellKeys, onCellClick]);
+  }, [length, multiplier, cellSize, rootRow, rootCol, vacantCells, tiledGraph, parentOf, showNeighbors, selectedNode, adjacentNeighborKeys, onCellClick]);
 
   const padding = 60;
 

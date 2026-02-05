@@ -32,6 +32,19 @@ interface GridCell {
   col: number;
 }
 
+// Selected node in solution viewer (includes copy position)
+interface SolutionSelectedNode {
+  // For square grids
+  copyRow: number;
+  copyCol: number;
+  fundamentalRow: number;
+  fundamentalCol: number;
+  // For P3, also need hexagon and rhombus info
+  hexRow?: number;
+  hexCol?: number;
+  rhombusIdx?: number;
+}
+
 interface MazeSolution {
   parentOf: Map<string, GridCell | null>;
   distanceFromRoot: Map<string, number>;
@@ -59,8 +72,8 @@ export function WallpaperMazeExplorer() {
   const [solutionViewMode, setSolutionViewMode] = useState<SolutionViewMode>("maze");
   const [graphSelectedNode, setGraphSelectedNode] = useState<TiledNode | null>(null);
   
-  // State for solution neighbor viewer
-  const [solutionSelectedCell, setSolutionSelectedCell] = useState<GridCell | null>(null);
+  // State for solution neighbor viewer - now tracks specific node, not just fundamental cell
+  const [solutionSelectedNode, setSolutionSelectedNode] = useState<SolutionSelectedNode | null>(null);
   const [showSolutionNeighbors, setShowSolutionNeighbors] = useState(false);
   
   // New state for tools and vacant cells
@@ -118,27 +131,90 @@ export function WallpaperMazeExplorer() {
     };
   }, [selectedCell, length, wallpaperGroup]);
   
-  // Get neighbor info for selected cell in solution viewer
-  const solutionNeighborInfo = useMemo(() => {
-    if (!solutionSelectedCell || !solution) return null;
+  // Compute the actual adjacent neighbors for a selected node in the solution viewer
+  // Returns the specific (copyRow, copyCol, fundamentalRow, fundamentalCol) for each neighbor
+  const solutionAdjacentNeighbors = useMemo(() => {
+    if (!solutionSelectedNode || !solution) return null;
     const wpg = getWallpaperGroup(solution.wallpaperGroup);
-    return {
-      N: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "N", length),
-      S: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "S", length),
-      E: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "E", length),
-      W: wpg.getWrappedNeighbor(solutionSelectedCell.row, solutionSelectedCell.col, "W", length),
+    
+    const { copyRow, copyCol, fundamentalRow, fundamentalCol } = solutionSelectedNode;
+    
+    // For each direction, compute the actual adjacent neighbor position
+    const computeNeighbor = (dir: "N" | "S" | "E" | "W") => {
+      const neighborFund = wpg.getWrappedNeighbor(fundamentalRow, fundamentalCol, dir, length);
+      
+      // Check if we wrapped around the boundary
+      const delta = DIRECTION_DELTA[dir];
+      const rawRow = fundamentalRow + delta.dRow;
+      const rawCol = fundamentalCol + delta.dCol;
+      
+      // If raw position is out of bounds, we wrapped - need to adjust copy coordinates
+      let neighborCopyRow = copyRow;
+      let neighborCopyCol = copyCol;
+      
+      // Check if we need to move to a different copy
+      if (rawRow < 0) neighborCopyRow = copyRow - 1;
+      else if (rawRow >= length) neighborCopyRow = copyRow + 1;
+      
+      if (rawCol < 0) neighborCopyCol = copyCol - 1;
+      else if (rawCol >= length) neighborCopyCol = copyCol + 1;
+      
+      return {
+        copyRow: neighborCopyRow,
+        copyCol: neighborCopyCol,
+        fundamentalRow: neighborFund.row,
+        fundamentalCol: neighborFund.col,
+      };
     };
-  }, [solutionSelectedCell, length, solution]);
+    
+    return {
+      N: computeNeighbor("N"),
+      S: computeNeighbor("S"),
+      E: computeNeighbor("E"),
+      W: computeNeighbor("W"),
+    };
+  }, [solutionSelectedNode, length, solution]);
   
-  // Handle cell click in solution viewer
-  const handleSolutionCellClick = useCallback((row: number, col: number) => {
+  // Handle cell click in solution viewer (for square grids)
+  const handleSolutionCellClick = useCallback((copyRow: number, copyCol: number, fundamentalRow: number, fundamentalCol: number) => {
     if (!showSolutionNeighbors) return;
-    if (solutionSelectedCell?.row === row && solutionSelectedCell?.col === col) {
-      setSolutionSelectedCell(null);
+    
+    // Check if clicking the same node - toggle off
+    if (solutionSelectedNode &&
+        solutionSelectedNode.copyRow === copyRow &&
+        solutionSelectedNode.copyCol === copyCol &&
+        solutionSelectedNode.fundamentalRow === fundamentalRow &&
+        solutionSelectedNode.fundamentalCol === fundamentalCol) {
+      setSolutionSelectedNode(null);
     } else {
-      setSolutionSelectedCell({ row, col });
+      setSolutionSelectedNode({ copyRow, copyCol, fundamentalRow, fundamentalCol });
     }
-  }, [showSolutionNeighbors, solutionSelectedCell]);
+  }, [showSolutionNeighbors, solutionSelectedNode]);
+  
+  // Handle cell click in solution viewer (for P3 hexagons)
+  const handleP3CellClick = useCallback((hexRow: number, hexCol: number, rhombusIdx: number, row: number, col: number) => {
+    if (!showSolutionNeighbors) return;
+    
+    // Check if clicking the same node - toggle off
+    if (solutionSelectedNode &&
+        solutionSelectedNode.hexRow === hexRow &&
+        solutionSelectedNode.hexCol === hexCol &&
+        solutionSelectedNode.rhombusIdx === rhombusIdx &&
+        solutionSelectedNode.fundamentalRow === row &&
+        solutionSelectedNode.fundamentalCol === col) {
+      setSolutionSelectedNode(null);
+    } else {
+      setSolutionSelectedNode({
+        copyRow: 0, // Not used for P3
+        copyCol: 0, // Not used for P3
+        fundamentalRow: row,
+        fundamentalCol: col,
+        hexRow,
+        hexCol,
+        rhombusIdx,
+      });
+    }
+  }, [showSolutionNeighbors, solutionSelectedNode]);
   
   // Handle solve button click
   const handleSolve = useCallback(() => {
@@ -295,13 +371,12 @@ export function WallpaperMazeExplorer() {
     const walls: React.ReactNode[] = [];
     const highlights: React.ReactNode[] = [];
     
-    // Compute which fundamental cells are neighbors of the selected cell
-    const neighborFundamentalCells = new Set<string>();
-    if (showSolutionNeighbors && solutionSelectedCell && solutionNeighborInfo) {
-      neighborFundamentalCells.add(`${solutionNeighborInfo.N.row},${solutionNeighborInfo.N.col}`);
-      neighborFundamentalCells.add(`${solutionNeighborInfo.S.row},${solutionNeighborInfo.S.col}`);
-      neighborFundamentalCells.add(`${solutionNeighborInfo.E.row},${solutionNeighborInfo.E.col}`);
-      neighborFundamentalCells.add(`${solutionNeighborInfo.W.row},${solutionNeighborInfo.W.col}`);
+    // Create a set of neighbor keys for quick lookup (only the 4 specific adjacent neighbors)
+    const neighborNodeKeys = new Set<string>();
+    if (showSolutionNeighbors && solutionSelectedNode && solutionAdjacentNeighbors) {
+      for (const neighbor of Object.values(solutionAdjacentNeighbors)) {
+        neighborNodeKeys.add(`${neighbor.copyRow},${neighbor.copyCol},${neighbor.fundamentalRow},${neighbor.fundamentalCol}`);
+      }
     }
     
     // Render cells from tiled graph
@@ -312,10 +387,17 @@ export function WallpaperMazeExplorer() {
       // Check if this cell was vacant at solve time
       const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
       const isVacant = solution.vacantCells.has(cellKey);
-      const isSelected = showSolutionNeighbors && solutionSelectedCell &&
-        node.fundamentalRow === solutionSelectedCell.row && 
-        node.fundamentalCol === solutionSelectedCell.col;
-      const isNeighbor = neighborFundamentalCells.has(cellKey);
+      
+      // Check if this specific node is selected (not all copies)
+      const isSelected = showSolutionNeighbors && solutionSelectedNode &&
+        node.copyRow === solutionSelectedNode.copyRow && 
+        node.copyCol === solutionSelectedNode.copyCol &&
+        node.fundamentalRow === solutionSelectedNode.fundamentalRow &&
+        node.fundamentalCol === solutionSelectedNode.fundamentalCol;
+      
+      // Check if this specific node is one of the 4 adjacent neighbors
+      const nodeKey = `${node.copyRow},${node.copyCol},${node.fundamentalRow},${node.fundamentalCol}`;
+      const isNeighbor = neighborNodeKeys.has(nodeKey);
       
       // Color: vacant cells are black, others colored by root connection
       const fillColor = isVacant ? "#000" : getRootColor(node.rootIndex);
@@ -330,7 +412,7 @@ export function WallpaperMazeExplorer() {
           fill={fillColor}
           stroke="none"
           style={{ cursor: showSolutionNeighbors ? "pointer" : "default" }}
-          onClick={() => handleSolutionCellClick(node.fundamentalRow, node.fundamentalCol)}
+          onClick={() => handleSolutionCellClick(node.copyRow, node.copyCol, node.fundamentalRow, node.fundamentalCol)}
         />
       );
       
@@ -871,7 +953,7 @@ export function WallpaperMazeExplorer() {
               onClick={() => {
                 setShowSolutionNeighbors(!showSolutionNeighbors);
                 if (!showSolutionNeighbors) {
-                  setSolutionSelectedCell(null);
+                  setSolutionSelectedNode(null);
                 }
               }}
               style={{
@@ -887,12 +969,13 @@ export function WallpaperMazeExplorer() {
               🔍 Show Neighbors
             </button>
             
-            {/* Show selected cell info when in neighbor mode */}
-            {showSolutionNeighbors && solutionSelectedCell && (
+            {/* Show selected node info when in neighbor mode */}
+            {showSolutionNeighbors && solutionSelectedNode && (
               <div style={{ fontSize: "12px", color: "#666" }}>
-                <strong>Selected:</strong> ({solutionSelectedCell.row}, {solutionSelectedCell.col})
+                <strong>Selected:</strong> copy ({solutionSelectedNode.copyRow}, {solutionSelectedNode.copyCol}), 
+                cell ({solutionSelectedNode.fundamentalRow}, {solutionSelectedNode.fundamentalCol})
                 <br />
-                <span style={{ color: "#ff4081" }}>Neighbors highlighted in pink</span>
+                <span style={{ color: "#ff4081" }}>4 neighbors highlighted in pink</span>
               </div>
             )}
             
@@ -909,9 +992,8 @@ export function WallpaperMazeExplorer() {
                 wallpaperGroupName={solution.wallpaperGroup}
                 tiledGraph={tiledGraph}
                 showNeighbors={showSolutionNeighbors}
-                selectedCell={solutionSelectedCell}
-                neighborInfo={solutionNeighborInfo}
-                onCellClick={handleSolutionCellClick}
+                selectedNode={solutionSelectedNode}
+                onCellClick={handleP3CellClick}
               />
             ) : (
               solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()
