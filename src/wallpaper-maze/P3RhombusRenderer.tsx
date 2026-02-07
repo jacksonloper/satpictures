@@ -437,9 +437,51 @@ export function P3RhombusRenderer({
                   const neighborKey = `${neighbor.row},${neighbor.col}`;
                   const neighborIsVacant = vacantCells.has(neighborKey);
                   
-                  // Add wall if neighbor is vacant or no parent-child relationship
-                  const shouldAddWall = neighborIsVacant || 
-                    !hasParentChildRelationship(cellKey, neighborKey, parentOf);
+                  // Check if this direction crosses to a different rhombus
+                  const isNorthBoundary = dir === "N" && row === 0;
+                  const isEastBoundary = dir === "E" && col === length - 1;
+                  const crossesRhombus = isNorthBoundary || isEastBoundary;
+                  
+                  let shouldAddWall: boolean;
+                  
+                  if (neighborIsVacant) {
+                    shouldAddWall = true;
+                  } else if (crossesRhombus && p3TiledGraph) {
+                    // For rhombus-crossing boundaries, check the tiled graph for an edge.
+                    // This is necessary because cells in different rhombi are independent
+                    // copies, even if the fundamental domain suggests a parent-child relationship.
+                    const currentNodeKey = `${hexRow},${hexCol},${rhombusIdx},${row},${col}`;
+                    const nodeId = p3TiledGraph.nodeAt.get(currentNodeKey);
+                    
+                    // Compute the neighbor's rhombus index based on P3 symmetry structure.
+                    // In P3, the 3 rhombi rotate around the hexagon center at 120° intervals.
+                    // North boundary (row=0) connects to the next rhombus (120° CCW): R0→R1→R2→R0
+                    // East boundary (col=length-1) connects to the rhombus 240° CCW: R0→R2→R1→R0
+                    let neighborRhombusIdx = rhombusIdx;
+                    if (isNorthBoundary) {
+                      neighborRhombusIdx = (rhombusIdx + 1) % 3;
+                    } else if (isEastBoundary) {
+                      neighborRhombusIdx = (rhombusIdx + 2) % 3;
+                    }
+                    
+                    const neighborNodeKey = `${hexRow},${hexCol},${neighborRhombusIdx},${neighbor.row},${neighbor.col}`;
+                    const neighborNodeId = p3TiledGraph.nodeAt.get(neighborNodeKey);
+                    
+                    if (nodeId !== undefined && neighborNodeId !== undefined) {
+                      const node = p3TiledGraph.nodes[nodeId];
+                      const neighborNode = p3TiledGraph.nodes[neighborNodeId];
+                      
+                      // Check if either node is the parent of the other in the tiled graph
+                      const hasEdge = node.parentId === neighborNodeId || neighborNode.parentId === nodeId;
+                      shouldAddWall = !hasEdge;
+                    } else {
+                      // If nodes not found, fall back to drawing a wall (conservative)
+                      shouldAddWall = true;
+                    }
+                  } else {
+                    // For non-boundary directions, use fundamental domain check
+                    shouldAddWall = !hasParentChildRelationship(cellKey, neighborKey, parentOf);
+                  }
                   
                   if (shouldAddWall) {
                     const segment = getWallSegment(row, col, dir, cellSize);
