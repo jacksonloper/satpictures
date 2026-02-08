@@ -337,9 +337,9 @@ export function WallpaperMazeExplorer() {
   
   // Handle SVG download
   const handleDownloadSvg = useCallback(() => {
-    if (!mazeSvgRef.current || !solution) return;
+    if (!mazeSvgRef.current || !solution || solutionViewMode !== "maze") return;
     downloadSvg(mazeSvgRef.current, `wallpaper-maze-${solution.wallpaperGroup}-${length}x${length}.svg`);
-  }, [solution, length]);
+  }, [solution, length, solutionViewMode]);
   
   // Handle cell click based on active tool
   const handleCellClick = useCallback((row: number, col: number) => {
