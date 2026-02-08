@@ -38,6 +38,8 @@ interface P3RhombusRendererProps {
   showNeighbors?: boolean;
   selectedNode?: P3SelectedNode | { copyRow: number; copyCol: number; fundamentalRow: number; fundamentalCol: number; hexRow?: number; hexCol?: number; rhombusIdx?: number } | null;
   onCellClick?: (hexRow: number, hexCol: number, rhombusIdx: number, row: number, col: number) => void;
+  // Ref for SVG download
+  svgRef?: React.RefObject<SVGSVGElement | null>;
 }
 
 // Shear constants
@@ -203,6 +205,7 @@ export function P3RhombusRenderer({
   showNeighbors = false,
   selectedNode = null,
   onCellClick,
+  svgRef,
 }: P3RhombusRendererProps) {
   
   // Compute the 4 adjacent neighbor keys for the selected node
@@ -547,6 +550,7 @@ export function P3RhombusRenderer({
 
   return (
     <svg 
+      ref={svgRef}
       width={dimensions.totalWidth + padding * 2} 
       height={dimensions.totalHeight + padding * 2}
       style={{ border: "1px solid #ccc" }}
