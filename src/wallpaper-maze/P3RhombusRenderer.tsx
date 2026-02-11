@@ -380,8 +380,7 @@ export function P3RhombusRenderer({
                   key={`cell-${hexIndex}-${rhombusIdx}-${row}-${col}`}
                   d={path}
                   fill={fillColor}
-                  stroke="#ccc"
-                  strokeWidth={0.5}
+                  stroke="none"
                   style={{ cursor: showNeighbors ? "pointer" : "default" }}
                   onClick={() => onCellClick?.(hexRow, hexCol, rhombusIdx, row, col)}
                 />
