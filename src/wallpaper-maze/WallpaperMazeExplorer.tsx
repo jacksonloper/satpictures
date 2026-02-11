@@ -53,6 +53,8 @@ interface MazeSolution {
   distanceFromRoot: Map<string, number>;
   wallpaperGroup: WallpaperGroupName; // Store the wallpaper group used for this solution
   vacantCells: Set<string>; // Store which cells were vacant at solve time
+  rootRow: number; // Store the root row used for this solution
+  rootCol: number; // Store the root col used for this solution
 }
 
 // View mode type for solution
@@ -102,29 +104,29 @@ export function WallpaperMazeExplorer() {
     };
   }, []);
   
-  // Reset root and vacant cells when grid size changes
+  // Reset root when grid size changes (not when wallpaper group changes)
   useEffect(() => {
     setGraphSelectedNode(null);
-    // Always set root to (0,0) when length or wallpaper group changes
+    // Always set root to (0,0) when length changes
     // This ensures a valid root exists even if previous state was corrupted
     setRootRow(0);
     setRootCol(0);
     setVacantCells(new Set()); // Reset vacant cells when grid size changes
-  }, [length, wallpaperGroup]);
+  }, [length]);
   
-  // Build the tiled graph when solution changes (uses solution's stored wallpaper group)
+  // Build the tiled graph when solution changes (uses solution's stored wallpaper group and root)
   const tiledGraph = useMemo<TiledGraph | null>(() => {
     if (!solution) return null;
     return buildTiledGraph(
       length,
       multiplier,
       solution.wallpaperGroup, // Use the wallpaper group stored in the solution
-      rootRow,
-      rootCol,
+      solution.rootRow, // Use the root stored in the solution
+      solution.rootCol,
       solution.parentOf,
       solution.vacantCells // Pass vacant cells to the tiled graph builder
     );
-  }, [solution, length, multiplier, rootRow, rootCol]);
+  }, [solution, length, multiplier]);
   
   // Build P3-specific tiled graph when solution is for P3
   const p3TiledGraph = useMemo<P3TiledGraph | null>(() => {
@@ -133,12 +135,12 @@ export function WallpaperMazeExplorer() {
       length,
       multiplier,
       cellSize,
-      rootRow,
-      rootCol,
+      solution.rootRow, // Use the root stored in the solution
+      solution.rootCol,
       solution.parentOf,
       solution.vacantCells
     );
-  }, [solution, length, multiplier, cellSize, rootRow, rootCol]);
+  }, [solution, length, multiplier, cellSize]);
   
   // Get neighbor info for selected cell in fundamental domain (for sketchpad)
   const neighborInfo = useMemo(() => {
@@ -298,7 +300,9 @@ export function WallpaperMazeExplorer() {
           parentOf, 
           distanceFromRoot, 
           wallpaperGroup: currentWallpaperGroup,
-          vacantCells: currentVacantCells
+          vacantCells: currentVacantCells,
+          rootRow: safeRootRow,
+          rootCol: safeRootCol
         });
         setErrorMessage(null);
       } else {
@@ -1155,8 +1159,8 @@ export function WallpaperMazeExplorer() {
                   multiplier={multiplier}
                   cellSize={cellSize}
                   parentOf={solution.parentOf}
-                  rootRow={rootRow}
-                  rootCol={rootCol}
+                  rootRow={solution.rootRow}
+                  rootCol={solution.rootCol}
                   vacantCells={solution.vacantCells}
                   wallpaperGroupName={solution.wallpaperGroup}
                   p3TiledGraph={p3TiledGraph}
