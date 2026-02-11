@@ -60,19 +60,20 @@ function getWrappedNeighbors(
     
     return { N, S, E, W };
   } else if (wallpaperGroup === "P4") {
-    // P4: 4-fold rotational symmetry with 90° wrapping
+    // P4: 4-fold rotational symmetry - same neighbor wrapping as P3
+    // (both are topological spheres with 3 punctures)
     let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
     
-    // North of (0, k) wraps to (k, 0)
+    // North of (0, k) wraps to (length-1-k, length-1)
     if (row === 0) {
-      N = { row: col, col: 0 };
+      N = { row: length - 1 - col, col: length - 1 };
     } else {
       N = { row: row - 1, col };
     }
     
-    // South of (length-1, k) wraps to (length-1-k, length-1)
+    // South of (length-1, k) wraps to (length-1-k, 0)
     if (row === length - 1) {
-      S = { row: length - 1 - col, col: length - 1 };
+      S = { row: length - 1 - col, col: 0 };
     } else {
       S = { row: row + 1, col };
     }
@@ -84,7 +85,7 @@ function getWrappedNeighbors(
       W = { row, col: col - 1 };
     }
     
-    // East of (k, length-1) wraps to (0, length-1-k)
+    // East of (row, length-1) wraps to (0, length-1-row)
     if (col === length - 1) {
       E = { row: 0, col: length - 1 - row };
     } else {

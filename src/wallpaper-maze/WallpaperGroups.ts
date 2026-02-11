@@ -505,37 +505,37 @@ export const P4: WallpaperGroup = {
   },
   
   getWrappedNeighbor(row: number, col: number, dir: Direction, length: number): FundamentalCell {
-    // P4 boundary wrapping with 90° rotations:
-    // - North of (0, k) wraps to (k, 0) - coming from the west
-    // - East of (k, length-1) wraps to (0, k) - coming from the north
-    // - South of (length-1, k) wraps to (length-1-k, length-1) - coming from the east
-    // - West of (k, 0) wraps to (length-1, length-1-k) - coming from the south
+    // P4 boundary wrapping - same as P3 (both are topological spheres with 3 punctures):
+    // - North of (0, k) wraps to (length-1-k, length-1)
+    // - South of (length-1, k) wraps to (length-1-k, 0)
+    // - West of (k, 0) wraps to (length-1, length-1-k)
+    // - East of (row, length-1) wraps to (0, length-1-row)
     
     switch (dir) {
       case "N":
         if (row === 0) {
-          // North of (0, k) wraps with 90° rotation
-          return { row: col, col: 0 };
+          // North of (0, k) wraps to (length-1-k, length-1)
+          return { row: length - 1 - col, col: length - 1 };
         }
         return { row: row - 1, col };
       
       case "S":
         if (row === length - 1) {
-          // South of (length-1, k) wraps with 90° rotation
-          return { row: length - 1 - col, col: length - 1 };
+          // South of (length-1, k) wraps to (length-1-k, 0)
+          return { row: length - 1 - col, col: 0 };
         }
         return { row: row + 1, col };
       
       case "W":
         if (col === 0) {
-          // West of (k, 0) wraps with 90° rotation
+          // West of (k, 0) wraps to (length-1, length-1-k)
           return { row: length - 1, col: length - 1 - row };
         }
         return { row, col: col - 1 };
       
       case "E":
         if (col === length - 1) {
-          // East of (k, length-1) wraps with 90° rotation
+          // East of (row, length-1) wraps to (0, length-1-row)
           return { row: 0, col: length - 1 - row };
         }
         return { row, col: col + 1 };
