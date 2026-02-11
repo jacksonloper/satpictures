@@ -451,55 +451,55 @@ export const P4: WallpaperGroup = {
   },
   
   transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
-    // Apply 90° clockwise rotation 'type' times
+    // Apply 90° counter-clockwise rotation 'type' times
     // 0°: (row, col) -> (row, col)
-    // 90° CW: (row, col) -> (col, length-1-row)
+    // 90° CCW: (row, col) -> (length-1-col, row)
     // 180°: (row, col) -> (length-1-row, length-1-col)
-    // 270° CW: (row, col) -> (length-1-col, row)
+    // 270° CCW: (row, col) -> (col, length-1-row)
     switch (type) {
       case 0: // Identity
         return { row, col };
-      case 1: // 90° clockwise
-        return { row: col, col: length - 1 - row };
+      case 1: // 90° counter-clockwise
+        return { row: length - 1 - col, col: row };
       case 2: // 180°
         return { row: length - 1 - row, col: length - 1 - col };
-      case 3: // 270° clockwise
-        return { row: length - 1 - col, col: row };
+      case 3: // 270° counter-clockwise
+        return { row: col, col: length - 1 - row };
       default:
         return { row, col };
     }
   },
   
   inverseTransformPosition(visualRow: number, visualCol: number, length: number, type: number): { row: number; col: number } {
-    // Inverse of 90° CW rotations:
+    // Inverse of 90° CCW rotations:
     // Inverse of 0° is 0°
-    // Inverse of 90° CW is 270° CW (or 90° CCW)
+    // Inverse of 90° CCW is 270° CCW (or 90° CW)
     // Inverse of 180° is 180°
-    // Inverse of 270° CW is 90° CW
+    // Inverse of 270° CCW is 90° CCW
     switch (type) {
       case 0: // Identity
         return { row: visualRow, col: visualCol };
-      case 1: // Inverse of 90° CW is 270° CW
-        return { row: length - 1 - visualCol, col: visualRow };
+      case 1: // Inverse of 90° CCW is 270° CCW
+        return { row: visualCol, col: length - 1 - visualRow };
       case 2: // 180° is its own inverse
         return { row: length - 1 - visualRow, col: length - 1 - visualCol };
-      case 3: // Inverse of 270° CW is 90° CW
-        return { row: visualCol, col: length - 1 - visualRow };
+      case 3: // Inverse of 270° CCW is 90° CCW
+        return { row: length - 1 - visualCol, col: visualRow };
       default:
         return { row: visualRow, col: visualCol };
     }
   },
   
   transformDirection(dir: Direction, type: number): Direction {
-    // Rotate direction by 90° clockwise 'type' times
-    // 90° CW: N->E, E->S, S->W, W->N
-    const rotate90CW: Record<Direction, Direction> = {
-      "N": "E", "E": "S", "S": "W", "W": "N"
+    // Rotate direction by 90° counter-clockwise 'type' times
+    // 90° CCW: N->W, W->S, S->E, E->N
+    const rotate90CCW: Record<Direction, Direction> = {
+      "N": "W", "W": "S", "S": "E", "E": "N"
     };
     
     let result = dir;
     for (let i = 0; i < type; i++) {
-      result = rotate90CW[result];
+      result = rotate90CCW[result];
     }
     return result;
   },
