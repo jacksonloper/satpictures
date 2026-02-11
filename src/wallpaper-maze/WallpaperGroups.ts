@@ -8,7 +8,7 @@
  * - How boundaries wrap in the fundamental domain
  */
 
-export type WallpaperGroupName = "P1" | "P2" | "pgg" | "P3";
+export type WallpaperGroupName = "P1" | "P2" | "pgg" | "P3" | "P4";
 
 // Direction type
 export type Direction = "N" | "S" | "E" | "W";
@@ -418,6 +418,143 @@ export const P3: WallpaperGroup = {
 };
 
 /**
+ * P4 wallpaper group: 4-fold rotational symmetry
+ * 
+ * In P4 on a square lattice, there are 4 types of copies with 0°, 90°, 180°, 270° rotations.
+ * 
+ * Copy type is determined by (copyRow % 2, copyCol % 2):
+ * - (0, 0) → 0 (0° rotation, identity)
+ * - (0, 1) → 1 (90° clockwise rotation)
+ * - (1, 1) → 2 (180° rotation)
+ * - (1, 0) → 3 (270° clockwise rotation)
+ * 
+ * Boundary wrapping follows the 4-fold rotation pattern:
+ * - North edge wraps to West edge (rotated)
+ * - East edge wraps to North edge (rotated)
+ * - South edge wraps to East edge (rotated)
+ * - West edge wraps to South edge (rotated)
+ */
+export const P4: WallpaperGroup = {
+  name: "P4" as WallpaperGroupName,
+  numTypes: 4,
+  
+  getType(copyRow: number, copyCol: number): number {
+    // Type based on (copyRow % 2, copyCol % 2):
+    // a = copyCol % 2, b = copyRow % 2
+    // (0, 0) → 0, (0, 1) → 1, (1, 1) → 2, (1, 0) → 3
+    // Use ((x % 2) + 2) % 2 to handle negative values correctly
+    const a = ((copyCol % 2) + 2) % 2;
+    const b = ((copyRow % 2) + 2) % 2;
+    
+    // Maps (a, b) to type: b * 2 + a gives the correct pattern
+    return b * 2 + a;
+  },
+  
+  transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
+    // Rotation based on type:
+    // Type 0 (row=0, col=0): identity
+    // Type 1 (row=0, col=1): 90° counter-clockwise
+    // Type 2 (row=1, col=0): 90° clockwise (= 270° CCW)
+    // Type 3 (row=1, col=1): 180°
+    switch (type) {
+      case 0: // Identity
+        return { row, col };
+      case 1: // 90° counter-clockwise: (row, col) -> (length-1-col, row)
+        return { row: length - 1 - col, col: row };
+      case 2: // 90° clockwise (= 270° CCW): (row, col) -> (col, length-1-row)
+        return { row: col, col: length - 1 - row };
+      case 3: // 180°: (row, col) -> (length-1-row, length-1-col)
+        return { row: length - 1 - row, col: length - 1 - col };
+      default:
+        return { row, col };
+    }
+  },
+  
+  inverseTransformPosition(visualRow: number, visualCol: number, length: number, type: number): { row: number; col: number } {
+    // Inverse rotations:
+    // Type 0: identity -> identity
+    // Type 1: 90° CCW -> 90° CW (= 270° CCW)
+    // Type 2: 90° CW -> 90° CCW
+    // Type 3: 180° -> 180°
+    switch (type) {
+      case 0: // Identity
+        return { row: visualRow, col: visualCol };
+      case 1: // Inverse of 90° CCW is 90° CW: (row, col) -> (col, length-1-row)
+        return { row: visualCol, col: length - 1 - visualRow };
+      case 2: // Inverse of 90° CW is 90° CCW: (row, col) -> (length-1-col, row)
+        return { row: length - 1 - visualCol, col: visualRow };
+      case 3: // 180° is its own inverse
+        return { row: length - 1 - visualRow, col: length - 1 - visualCol };
+      default:
+        return { row: visualRow, col: visualCol };
+    }
+  },
+  
+  transformDirection(dir: Direction, type: number): Direction {
+    // Rotate direction based on type:
+    // Type 0: identity
+    // Type 1: 90° CCW (N->W, W->S, S->E, E->N)
+    // Type 2: 90° CW (N->E, E->S, S->W, W->N)
+    // Type 3: 180° (N->S, S->N, E->W, W->E)
+    const rotate90CCW: Record<Direction, Direction> = {
+      "N": "W", "W": "S", "S": "E", "E": "N"
+    };
+    const rotate90CW: Record<Direction, Direction> = {
+      "N": "E", "E": "S", "S": "W", "W": "N"
+    };
+    const rotate180: Record<Direction, Direction> = {
+      "N": "S", "S": "N", "E": "W", "W": "E"
+    };
+    
+    switch (type) {
+      case 0: return dir;
+      case 1: return rotate90CCW[dir];
+      case 2: return rotate90CW[dir];
+      case 3: return rotate180[dir];
+      default: return dir;
+    }
+  },
+  
+  getWrappedNeighbor(row: number, col: number, dir: Direction, length: number): FundamentalCell {
+    // P4 boundary wrapping - same as P3 (both are topological spheres with 3 punctures):
+    // - North of (0, k) wraps to (length-1-k, length-1)
+    // - South of (length-1, k) wraps to (length-1-k, 0)
+    // - West of (k, 0) wraps to (length-1, length-1-k)
+    // - East of (row, length-1) wraps to (0, length-1-row)
+    
+    switch (dir) {
+      case "N":
+        if (row === 0) {
+          // North of (0, k) wraps to (length-1-k, length-1)
+          return { row: length - 1 - col, col: length - 1 };
+        }
+        return { row: row - 1, col };
+      
+      case "S":
+        if (row === length - 1) {
+          // South of (length-1, k) wraps to (length-1-k, 0)
+          return { row: length - 1 - col, col: 0 };
+        }
+        return { row: row + 1, col };
+      
+      case "W":
+        if (col === 0) {
+          // West of (k, 0) wraps to (length-1, length-1-k)
+          return { row: length - 1, col: length - 1 - row };
+        }
+        return { row, col: col - 1 };
+      
+      case "E":
+        if (col === length - 1) {
+          // East of (row, length-1) wraps to (0, length-1-row)
+          return { row: 0, col: length - 1 - row };
+        }
+        return { row, col: col + 1 };
+    }
+  },
+};
+
+/**
  * Get wallpaper group by name
  */
 export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
@@ -426,6 +563,7 @@ export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
     case "P2": return P2;
     case "pgg": return pgg;
     case "P3": return P3;
+    case "P4": return P4;
   }
 }
 

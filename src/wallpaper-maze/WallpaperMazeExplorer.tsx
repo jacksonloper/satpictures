@@ -1016,6 +1016,7 @@ export function WallpaperMazeExplorer() {
               <option value="P2">P2 (180° Rotation)</option>
               <option value="pgg">pgg (Glide Reflections)</option>
               <option value="P3">P3 (3-fold Rotation)</option>
+              <option value="P4">P4 (4-fold Rotation)</option>
             </select>
           </label>
           

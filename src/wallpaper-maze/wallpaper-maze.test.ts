@@ -7,7 +7,7 @@
 import { MiniSatSolver } from "../solvers/minisat-solver.js";
 
 // Types for wallpaper maze problems
-type WallpaperGroup = "P1" | "P2" | "pgg";
+type WallpaperGroup = "P1" | "P2" | "pgg" | "P4";
 
 interface GridCell {
   row: number;
@@ -54,6 +54,40 @@ function getWrappedNeighbors(
     
     if (col === length - 1) {
       E = { row: (length - 1 - row), col: length - 1 };
+    } else {
+      E = { row, col: col + 1 };
+    }
+    
+    return { N, S, E, W };
+  } else if (wallpaperGroup === "P4") {
+    // P4: 4-fold rotational symmetry - same neighbor wrapping as P3
+    // (both are topological spheres with 3 punctures)
+    let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
+    
+    // North of (0, k) wraps to (length-1-k, length-1)
+    if (row === 0) {
+      N = { row: length - 1 - col, col: length - 1 };
+    } else {
+      N = { row: row - 1, col };
+    }
+    
+    // South of (length-1, k) wraps to (length-1-k, 0)
+    if (row === length - 1) {
+      S = { row: length - 1 - col, col: 0 };
+    } else {
+      S = { row: row + 1, col };
+    }
+    
+    // West of (k, 0) wraps to (length-1, length-1-k)
+    if (col === 0) {
+      W = { row: length - 1, col: length - 1 - row };
+    } else {
+      W = { row, col: col - 1 };
+    }
+    
+    // East of (row, length-1) wraps to (0, length-1-row)
+    if (col === length - 1) {
+      E = { row: 0, col: length - 1 - row };
     } else {
       E = { row, col: col + 1 };
     }
@@ -316,7 +350,7 @@ function debugNeighbors(length: number, wallpaperGroup: WallpaperGroup): void {
 // Test various configurations
 console.log("=== Wallpaper Maze SAT Tests ===\n");
 
-const wallpaperGroups: WallpaperGroup[] = ["P1", "P2", "pgg"];
+const wallpaperGroups: WallpaperGroup[] = ["P1", "P2", "pgg", "P4"];
 const lengths = [2, 3, 4];
 
 for (const wpg of wallpaperGroups) {
