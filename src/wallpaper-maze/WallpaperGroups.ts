@@ -451,57 +451,68 @@ export const P4: WallpaperGroup = {
   },
   
   transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
-    // Apply 90° counter-clockwise rotation 'type' times
-    // 0°: (row, col) -> (row, col)
-    // 90° CCW: (row, col) -> (length-1-col, row)
-    // 180°: (row, col) -> (length-1-row, length-1-col)
-    // 270° CCW: (row, col) -> (col, length-1-row)
+    // Rotation based on type:
+    // Type 0 (row=0, col=0): identity
+    // Type 1 (row=0, col=1): 90° counter-clockwise
+    // Type 2 (row=1, col=0): 90° clockwise (= 270° CCW)
+    // Type 3 (row=1, col=1): 180°
     switch (type) {
       case 0: // Identity
         return { row, col };
-      case 1: // 90° counter-clockwise
+      case 1: // 90° counter-clockwise: (row, col) -> (length-1-col, row)
         return { row: length - 1 - col, col: row };
-      case 2: // 180°
-        return { row: length - 1 - row, col: length - 1 - col };
-      case 3: // 270° counter-clockwise
+      case 2: // 90° clockwise (= 270° CCW): (row, col) -> (col, length-1-row)
         return { row: col, col: length - 1 - row };
+      case 3: // 180°: (row, col) -> (length-1-row, length-1-col)
+        return { row: length - 1 - row, col: length - 1 - col };
       default:
         return { row, col };
     }
   },
   
   inverseTransformPosition(visualRow: number, visualCol: number, length: number, type: number): { row: number; col: number } {
-    // Inverse of 90° CCW rotations:
-    // Inverse of 0° is 0°
-    // Inverse of 90° CCW is 270° CCW (or 90° CW)
-    // Inverse of 180° is 180°
-    // Inverse of 270° CCW is 90° CCW
+    // Inverse rotations:
+    // Type 0: identity -> identity
+    // Type 1: 90° CCW -> 90° CW (= 270° CCW)
+    // Type 2: 90° CW -> 90° CCW
+    // Type 3: 180° -> 180°
     switch (type) {
       case 0: // Identity
         return { row: visualRow, col: visualCol };
-      case 1: // Inverse of 90° CCW is 270° CCW
+      case 1: // Inverse of 90° CCW is 90° CW: (row, col) -> (col, length-1-row)
         return { row: visualCol, col: length - 1 - visualRow };
-      case 2: // 180° is its own inverse
-        return { row: length - 1 - visualRow, col: length - 1 - visualCol };
-      case 3: // Inverse of 270° CCW is 90° CCW
+      case 2: // Inverse of 90° CW is 90° CCW: (row, col) -> (length-1-col, row)
         return { row: length - 1 - visualCol, col: visualRow };
+      case 3: // 180° is its own inverse
+        return { row: length - 1 - visualRow, col: length - 1 - visualCol };
       default:
         return { row: visualRow, col: visualCol };
     }
   },
   
   transformDirection(dir: Direction, type: number): Direction {
-    // Rotate direction by 90° counter-clockwise 'type' times
-    // 90° CCW: N->W, W->S, S->E, E->N
+    // Rotate direction based on type:
+    // Type 0: identity
+    // Type 1: 90° CCW (N->W, W->S, S->E, E->N)
+    // Type 2: 90° CW (N->E, E->S, S->W, W->N)
+    // Type 3: 180° (N->S, S->N, E->W, W->E)
     const rotate90CCW: Record<Direction, Direction> = {
       "N": "W", "W": "S", "S": "E", "E": "N"
     };
+    const rotate90CW: Record<Direction, Direction> = {
+      "N": "E", "E": "S", "S": "W", "W": "N"
+    };
+    const rotate180: Record<Direction, Direction> = {
+      "N": "S", "S": "N", "E": "W", "W": "E"
+    };
     
-    let result = dir;
-    for (let i = 0; i < type; i++) {
-      result = rotate90CCW[result];
+    switch (type) {
+      case 0: return dir;
+      case 1: return rotate90CCW[dir];
+      case 2: return rotate90CW[dir];
+      case 3: return rotate180[dir];
+      default: return dir;
     }
-    return result;
   },
   
   getWrappedNeighbor(row: number, col: number, dir: Direction, length: number): FundamentalCell {
