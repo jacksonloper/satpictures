@@ -442,13 +442,12 @@ export const P4: WallpaperGroup = {
     // Type based on (copyRow % 2, copyCol % 2):
     // a = copyCol % 2, b = copyRow % 2
     // (0, 0) → 0, (0, 1) → 1, (1, 1) → 2, (1, 0) → 3
+    // Use ((x % 2) + 2) % 2 to handle negative values correctly
     const a = ((copyCol % 2) + 2) % 2;
     const b = ((copyRow % 2) + 2) % 2;
     
-    if (a === 0 && b === 0) return 0;
-    if (a === 0 && b === 1) return 1;
-    if (a === 1 && b === 1) return 2;
-    return 3; // a === 1 && b === 0
+    // Maps (a, b) to type: b * 2 + a gives the correct pattern
+    return b * 2 + a;
   },
   
   transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
