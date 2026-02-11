@@ -13,6 +13,7 @@ import type { P3TiledGraph, P3TiledNode } from "./P3TiledGraph";
 import { getWallpaperGroup, DIRECTION_DELTA } from "./WallpaperGroups";
 import type { WallpaperGroupName } from "./WallpaperGroups";
 import { P3RhombusRenderer } from "./P3RhombusRenderer";
+import { downloadSvg } from "../polyform-explorer/downloadUtils";
 import "../App.css";
 
 /**
@@ -85,6 +86,9 @@ export function WallpaperMazeExplorer() {
   
   // Worker ref for cancel support
   const workerRef = useRef<Worker | null>(null);
+  
+  // Ref for maze SVG download
+  const mazeSvgRef = useRef<SVGSVGElement | null>(null);
   
   const cellSize = CELL_SIZE;
   const padding = GRID_PADDING;
@@ -331,6 +335,12 @@ export function WallpaperMazeExplorer() {
     }
   }, []);
   
+  // Handle SVG download
+  const handleDownloadSvg = useCallback(() => {
+    if (!mazeSvgRef.current || !solution || solutionViewMode !== "maze") return;
+    downloadSvg(mazeSvgRef.current, `wallpaper-maze-${solution.wallpaperGroup}-${length}x${length}.svg`);
+  }, [solution, length, solutionViewMode]);
+  
   // Handle cell click based on active tool
   const handleCellClick = useCallback((row: number, col: number) => {
     const cellKey = `${row},${col}`;
@@ -500,7 +510,7 @@ export function WallpaperMazeExplorer() {
     const totalSize = tiledGraph.totalSize * cellSize + padding * 2;
     
     return (
-      <svg width={totalSize} height={totalSize}>
+      <svg ref={mazeSvgRef} width={totalSize} height={totalSize}>
         {cells}
         {walls}
         {highlights}
@@ -1106,6 +1116,24 @@ export function WallpaperMazeExplorer() {
               🔍 Show Neighbors
             </button>
             
+            {/* Save to SVG button (only in maze view mode) */}
+            {solutionViewMode === "maze" && (
+              <button
+                onClick={handleDownloadSvg}
+                style={{
+                  padding: "5px 15px",
+                  backgroundColor: "#4caf50",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                }}
+                title="Download maze as SVG file"
+              >
+                💾 Save to SVG
+              </button>
+            )}
+            
             {/* Show selected node info when in neighbor mode */}
             {showSolutionNeighbors && solutionSelectedNode && (
               <div style={{ fontSize: "12px", color: "#666" }}>
@@ -1134,6 +1162,7 @@ export function WallpaperMazeExplorer() {
                   showNeighbors={showSolutionNeighbors}
                   selectedNode={solutionSelectedNode}
                   onCellClick={handleP3CellClick}
+                  svgRef={mazeSvgRef}
                 />
               ) : (
                 renderP3GraphView()
