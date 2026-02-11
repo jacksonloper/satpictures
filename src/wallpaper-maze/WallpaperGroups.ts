@@ -8,7 +8,7 @@
  * - How boundaries wrap in the fundamental domain
  */
 
-export type WallpaperGroupName = "P1" | "P2" | "pgg" | "P3";
+export type WallpaperGroupName = "P1" | "P2" | "pgg" | "P3" | "P4";
 
 // Direction type
 export type Direction = "N" | "S" | "E" | "W";
@@ -418,6 +418,133 @@ export const P3: WallpaperGroup = {
 };
 
 /**
+ * P4 wallpaper group: 4-fold rotational symmetry
+ * 
+ * In P4 on a square lattice, there are 4 types of copies with 0°, 90°, 180°, 270° rotations.
+ * 
+ * Copy type is determined by (copyRow % 2, copyCol % 2):
+ * - (0, 0) → 0 (0° rotation, identity)
+ * - (0, 1) → 1 (90° clockwise rotation)
+ * - (1, 1) → 2 (180° rotation)
+ * - (1, 0) → 3 (270° clockwise rotation)
+ * 
+ * Boundary wrapping follows the 4-fold rotation pattern:
+ * - North edge wraps to West edge (rotated)
+ * - East edge wraps to North edge (rotated)
+ * - South edge wraps to East edge (rotated)
+ * - West edge wraps to South edge (rotated)
+ */
+export const P4: WallpaperGroup = {
+  name: "P4" as WallpaperGroupName,
+  numTypes: 4,
+  
+  getType(copyRow: number, copyCol: number): number {
+    // Type based on (copyRow % 2, copyCol % 2):
+    // a = copyCol % 2, b = copyRow % 2
+    // (0, 0) → 0, (0, 1) → 1, (1, 1) → 2, (1, 0) → 3
+    const a = ((copyCol % 2) + 2) % 2;
+    const b = ((copyRow % 2) + 2) % 2;
+    
+    if (a === 0 && b === 0) return 0;
+    if (a === 0 && b === 1) return 1;
+    if (a === 1 && b === 1) return 2;
+    return 3; // a === 1 && b === 0
+  },
+  
+  transformPosition(row: number, col: number, length: number, type: number): { row: number; col: number } {
+    // Apply 90° clockwise rotation 'type' times
+    // 0°: (row, col) -> (row, col)
+    // 90° CW: (row, col) -> (col, length-1-row)
+    // 180°: (row, col) -> (length-1-row, length-1-col)
+    // 270° CW: (row, col) -> (length-1-col, row)
+    switch (type) {
+      case 0: // Identity
+        return { row, col };
+      case 1: // 90° clockwise
+        return { row: col, col: length - 1 - row };
+      case 2: // 180°
+        return { row: length - 1 - row, col: length - 1 - col };
+      case 3: // 270° clockwise
+        return { row: length - 1 - col, col: row };
+      default:
+        return { row, col };
+    }
+  },
+  
+  inverseTransformPosition(visualRow: number, visualCol: number, length: number, type: number): { row: number; col: number } {
+    // Inverse of 90° CW rotations:
+    // Inverse of 0° is 0°
+    // Inverse of 90° CW is 270° CW (or 90° CCW)
+    // Inverse of 180° is 180°
+    // Inverse of 270° CW is 90° CW
+    switch (type) {
+      case 0: // Identity
+        return { row: visualRow, col: visualCol };
+      case 1: // Inverse of 90° CW is 270° CW
+        return { row: length - 1 - visualCol, col: visualRow };
+      case 2: // 180° is its own inverse
+        return { row: length - 1 - visualRow, col: length - 1 - visualCol };
+      case 3: // Inverse of 270° CW is 90° CW
+        return { row: visualCol, col: length - 1 - visualRow };
+      default:
+        return { row: visualRow, col: visualCol };
+    }
+  },
+  
+  transformDirection(dir: Direction, type: number): Direction {
+    // Rotate direction by 90° clockwise 'type' times
+    // 90° CW: N->E, E->S, S->W, W->N
+    const rotate90CW: Record<Direction, Direction> = {
+      "N": "E", "E": "S", "S": "W", "W": "N"
+    };
+    
+    let result = dir;
+    for (let i = 0; i < type; i++) {
+      result = rotate90CW[result];
+    }
+    return result;
+  },
+  
+  getWrappedNeighbor(row: number, col: number, dir: Direction, length: number): FundamentalCell {
+    // P4 boundary wrapping with 90° rotations:
+    // - North of (0, k) wraps to (k, 0) - coming from the west
+    // - East of (k, length-1) wraps to (0, k) - coming from the north
+    // - South of (length-1, k) wraps to (length-1-k, length-1) - coming from the east
+    // - West of (k, 0) wraps to (length-1, length-1-k) - coming from the south
+    
+    switch (dir) {
+      case "N":
+        if (row === 0) {
+          // North of (0, k) wraps with 90° rotation
+          return { row: col, col: 0 };
+        }
+        return { row: row - 1, col };
+      
+      case "S":
+        if (row === length - 1) {
+          // South of (length-1, k) wraps with 90° rotation
+          return { row: length - 1 - col, col: length - 1 };
+        }
+        return { row: row + 1, col };
+      
+      case "W":
+        if (col === 0) {
+          // West of (k, 0) wraps with 90° rotation
+          return { row: length - 1, col: length - 1 - row };
+        }
+        return { row, col: col - 1 };
+      
+      case "E":
+        if (col === length - 1) {
+          // East of (k, length-1) wraps with 90° rotation
+          return { row: 0, col: length - 1 - row };
+        }
+        return { row, col: col + 1 };
+    }
+  },
+};
+
+/**
  * Get wallpaper group by name
  */
 export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
@@ -426,6 +553,7 @@ export function getWallpaperGroup(name: WallpaperGroupName): WallpaperGroup {
     case "P2": return P2;
     case "pgg": return pgg;
     case "P3": return P3;
+    case "P4": return P4;
   }
 }
 

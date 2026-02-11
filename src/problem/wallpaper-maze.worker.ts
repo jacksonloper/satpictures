@@ -11,7 +11,7 @@ import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 // Types for wallpaper maze problems
-export type WallpaperGroup = "P1" | "P2" | "pgg" | "P3";
+export type WallpaperGroup = "P1" | "P2" | "pgg" | "P3" | "P4";
 
 export interface WallpaperMazeRequest {
   length: number;
@@ -287,6 +287,39 @@ function getWrappedNeighbors(
     }
     
     // East of (row, length-1) wraps to (0, length-1-row)
+    if (col === length - 1) {
+      E = { row: 0, col: length - 1 - row };
+    } else {
+      E = { row, col: col + 1 };
+    }
+    
+    return { N, S, E, W };
+  } else if (wallpaperGroup === "P4") {
+    // P4: 4-fold rotational symmetry with 90° wrapping
+    let N: GridCell, S: GridCell, E: GridCell, W: GridCell;
+    
+    // North of (0, k) wraps to (k, 0)
+    if (row === 0) {
+      N = { row: col, col: 0 };
+    } else {
+      N = { row: row - 1, col };
+    }
+    
+    // South of (length-1, k) wraps to (length-1-k, length-1)
+    if (row === length - 1) {
+      S = { row: length - 1 - col, col: length - 1 };
+    } else {
+      S = { row: row + 1, col };
+    }
+    
+    // West of (k, 0) wraps to (length-1, length-1-k)
+    if (col === 0) {
+      W = { row: length - 1, col: length - 1 - row };
+    } else {
+      W = { row, col: col - 1 };
+    }
+    
+    // East of (k, length-1) wraps to (0, length-1-k)
     if (col === length - 1) {
       E = { row: 0, col: length - 1 - row };
     } else {
