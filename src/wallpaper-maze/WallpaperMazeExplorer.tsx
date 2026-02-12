@@ -1010,9 +1010,8 @@ export function WallpaperMazeExplorer() {
       );
     }
     
-    // Draw lifted edges - for each node, draw edges to adjacent neighbors if they're passages in orbifold
-    // This shows the true lifted graph (copies of the orbifold), not just the BFS tree
-    // IMPORTANT: Only draw edges between nodes in the SAME copy
+    // Draw lifted edges - for each node, draw edges to visually adjacent neighbors if they're passages in orbifold
+    // This shows the true lifted graph. At copy boundaries, visual adjacency corresponds to wrapping edges.
     const drawnEdges = new Set<string>();
     
     for (const node of tiledGraph.nodes) {
@@ -1037,16 +1036,11 @@ export function WallpaperMazeExplorer() {
         
         const neighborNode = tiledGraph.nodes[neighborId];
         
-        // Only connect nodes within the same copy
-        // Cross-copy edges would be wrapping edges which don't exist in the lifted graph
-        if (node.copyRow !== neighborNode.copyRow || node.copyCol !== neighborNode.copyCol) {
-          continue;
-        }
-        
         const neighborFundKey = `${neighborNode.fundamentalRow},${neighborNode.fundamentalCol}`;
         if (solution.vacantCells.has(neighborFundKey)) continue;
         
         // Check if this orbifold edge exists (is a passage)
+        // This works for both same-copy and cross-copy (wrapping) edges
         const orbifoldEdgeKey = makeOrbifoldEdgeKey(
           node.fundamentalRow, node.fundamentalCol,
           neighborNode.fundamentalRow, neighborNode.fundamentalCol
