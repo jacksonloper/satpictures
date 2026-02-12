@@ -2,13 +2,16 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import WallpaperMazeWorker from "../problem/wallpaper-maze.worker?worker";
 import type { WallpaperMazeRequest, WallpaperMazeResponse } from "../problem/wallpaper-maze.worker";
 import {
-  buildTiledGraph,
+  buildTiledGraphFromEdgeSet,
   getRootColor,
   computeWallSegments,
   findEquivalentNodes,
   findCrossRootNeighborPairs,
+  parentOfToEdgeSet,
+  edgeSetToParentOf,
+  makeOrbifoldEdgeKey,
 } from "./TiledGraph";
-import type { TiledGraph, TiledNode, CrossRootNeighborPair } from "./TiledGraph";
+import type { TiledGraph, TiledNode, CrossRootNeighborPair, OrbifoldEdgeKey } from "./TiledGraph";
 import { buildP3TiledGraph, getP3RootColor, findP3CrossRootNeighborPairs } from "./P3TiledGraph";
 import type { P3TiledGraph, P3TiledNode, P3CrossRootNeighborPair } from "./P3TiledGraph";
 import { getWallpaperGroup, DIRECTION_DELTA, ALL_DIRECTIONS } from "./WallpaperGroups";
@@ -54,25 +57,24 @@ interface SolutionSelectedNode {
   rhombusIdx?: number;
 }
 
-// Represents an edge that was opened (added to the orbifold)
-interface OpenedEdge {
-  cell1: GridCell;
-  cell2: GridCell;
-  // The cell that became a child when the edge was opened
-  childCell: GridCell;
-  // The original parent of the child cell (null if it was a root)
-  originalParent: GridCell | null;
-}
-
 interface MazeSolution {
-  parentOf: Map<string, GridCell | null>;
+  // The set of undirected edges (passages) in the orbifold
+  // This is the canonical representation that we modify when opening/closing boundaries
+  orbifoldEdgeSet: Set<OrbifoldEdgeKey>;
+  
+  // Original parentOf from SAT solver - kept for reference but not used for rendering
+  originalParentOf: Map<string, GridCell | null>;
+  
   distanceFromRoot: Map<string, number>;
   wallpaperGroup: WallpaperGroupName; // Store the wallpaper group used for this solution
   vacantCells: Set<string>; // Store which cells were vacant at solve time
   rootRow: number; // Store the root row used for this solution
   rootCol: number; // Store the root col used for this solution
   fixedMultiplier: number; // The multiplier at solve time (fixed for open boundary operations)
-  openedEdges: OpenedEdge[]; // Stack of edges that were opened (for close boundary)
+  
+  // History of edge modifications for undo
+  // Each entry is an edge key that was added (for open) or removed (for close)
+  edgeHistory: Array<{ action: 'add' | 'remove'; edgeKey: OrbifoldEdgeKey }>;
 }
 
 // View mode type for solution
@@ -133,32 +135,58 @@ export function WallpaperMazeExplorer() {
   }, [length]);
   
   // Build the tiled graph when solution changes (uses solution's stored wallpaper group, root, and fixed multiplier)
+  // Now uses the orbifold edge set instead of parentOf for proper open/close boundary behavior
   const tiledGraph = useMemo<TiledGraph | null>(() => {
     if (!solution) return null;
-    return buildTiledGraph(
+    return buildTiledGraphFromEdgeSet(
       length,
       solution.fixedMultiplier, // Use the fixed multiplier from the solution
       solution.wallpaperGroup, // Use the wallpaper group stored in the solution
       solution.rootRow, // Use the root stored in the solution
       solution.rootCol,
-      solution.parentOf,
+      solution.orbifoldEdgeSet, // Use the edge set instead of parentOf
       solution.vacantCells // Pass vacant cells to the tiled graph builder
     );
   }, [solution, length]);
   
   // Build P3-specific tiled graph when solution is for P3
+  // Convert edge set to parentOf for backwards compatibility with P3TiledGraph
   const p3TiledGraph = useMemo<P3TiledGraph | null>(() => {
     if (!solution || solution.wallpaperGroup !== "P3") return null;
+    
+    // Convert edge set to parentOf for P3TiledGraph (backwards compatibility)
+    const parentOf = edgeSetToParentOf(
+      length,
+      solution.wallpaperGroup,
+      solution.rootRow,
+      solution.rootCol,
+      solution.orbifoldEdgeSet,
+      solution.vacantCells
+    );
+    
     return buildP3TiledGraph(
       length,
-      solution.fixedMultiplier, // Use the fixed multiplier from the solution
+      solution.fixedMultiplier,
       cellSize,
-      solution.rootRow, // Use the root stored in the solution
+      solution.rootRow,
       solution.rootCol,
-      solution.parentOf,
+      parentOf,
       solution.vacantCells
     );
   }, [solution, length, cellSize]);
+  
+  // Compute parentOf from edge set for P3RhombusRenderer (backwards compatibility)
+  const p3ParentOf = useMemo(() => {
+    if (!solution || solution.wallpaperGroup !== "P3") return null;
+    return edgeSetToParentOf(
+      length,
+      solution.wallpaperGroup,
+      solution.rootRow,
+      solution.rootCol,
+      solution.orbifoldEdgeSet,
+      solution.vacantCells
+    );
+  }, [solution, length]);
   
   // Get neighbor info for selected cell in fundamental domain (for sketchpad)
   const neighborInfo = useMemo(() => {
@@ -315,15 +343,19 @@ export function WallpaperMazeExplorer() {
         const parentOf = new Map<string, GridCell | null>(response.result.parentOf);
         const distanceFromRoot = new Map<string, number>(response.result.distanceFromRoot);
         
+        // Convert the arborescence (parentOf) to an undirected edge set
+        const orbifoldEdgeSet = parentOfToEdgeSet(length, currentWallpaperGroup, parentOf);
+        
         setSolution({ 
-          parentOf, 
+          orbifoldEdgeSet,
+          originalParentOf: parentOf, 
           distanceFromRoot, 
           wallpaperGroup: currentWallpaperGroup,
           vacantCells: currentVacantCells,
           rootRow: safeRootRow,
           rootCol: safeRootCol,
           fixedMultiplier: currentMultiplier,
-          openedEdges: [] // Start with no opened edges
+          edgeHistory: [] // Start with no edge history
         });
         setErrorMessage(null);
       } else {
@@ -429,46 +461,24 @@ export function WallpaperMazeExplorer() {
     const randomIndex = Math.floor(Math.random() * crossRootPairs.length);
     const pair = crossRootPairs[randomIndex];
     
-    // Determine the orbifold edge to add
-    const cell1 = { row: pair.node1.fundamentalRow, col: pair.node1.fundamentalCol };
-    const cell2 = { row: pair.node2.fundamentalRow, col: pair.node2.fundamentalCol };
+    // Create the edge key for this pair
+    const edgeKey = makeOrbifoldEdgeKey(
+      pair.node1.fundamentalRow, pair.node1.fundamentalCol,
+      pair.node2.fundamentalRow, pair.node2.fundamentalCol
+    );
     
-    // Create a new parentOf map with the added edge
-    const newParentOf = new Map(solution.parentOf);
-    const cell1Key = `${cell1.row},${cell1.col}`;
-    const cell2Key = `${cell2.row},${cell2.col}`;
+    // Add the edge to the edge set
+    const newEdgeSet = new Set(solution.orbifoldEdgeSet);
+    newEdgeSet.add(edgeKey);
     
-    // Get the root indices
-    const rootIndex1 = pair.node1.rootIndex;
-    const rootIndex2 = pair.node2.rootIndex;
+    // Track this in history for undo
+    const newHistory = [...solution.edgeHistory, { action: 'add' as const, edgeKey }];
     
-    // The surviving root is the lower index; the absorbed root will be merged into it
-    const absorbedRootIndex = Math.max(rootIndex1, rootIndex2);
-    
-    // Determine which cell becomes the child and store its original parent
-    let childCell: GridCell;
-    let originalParent: GridCell | null;
-    const childKey = rootIndex1 === absorbedRootIndex ? cell1Key : cell2Key;
-    originalParent = solution.parentOf.get(childKey) ?? null;
-    
-    if (rootIndex1 === absorbedRootIndex) {
-      // cell1 is from the absorbed root, make it point to cell2
-      newParentOf.set(cell1Key, cell2);
-      childCell = cell1;
-    } else {
-      // cell2 is from the absorbed root, make it point to cell1
-      newParentOf.set(cell2Key, cell1);
-      childCell = cell2;
-    }
-    
-    // Track this opened edge so we can close it later (including original parent for proper restoration)
-    const openedEdge: OpenedEdge = { cell1, cell2, childCell, originalParent };
-    
-    // Update the solution with the new parentOf map and track the opened edge
+    // Update the solution with the new edge set
     setSolution({
       ...solution,
-      parentOf: newParentOf,
-      openedEdges: [...solution.openedEdges, openedEdge],
+      orbifoldEdgeSet: newEdgeSet,
+      edgeHistory: newHistory,
     });
     
   }, [solution, crossRootPairs]);
@@ -476,27 +486,33 @@ export function WallpaperMazeExplorer() {
   // Handle "Close Boundary" button click
   // This removes the last opened edge, restoring the previous state
   const handleCloseBoundary = useCallback(() => {
-    if (!solution || solution.openedEdges.length === 0) return;
+    if (!solution || solution.edgeHistory.length === 0) return;
     
-    // Get the last opened edge
-    const lastEdge = solution.openedEdges[solution.openedEdges.length - 1];
-    const childKey = `${lastEdge.childCell.row},${lastEdge.childCell.col}`;
+    // Get the last history entry
+    const lastEntry = solution.edgeHistory[solution.edgeHistory.length - 1];
     
-    // Create a new parentOf map with the edge removed
-    // Restore the child cell's original parent (which may be null if it was a root)
-    const newParentOf = new Map(solution.parentOf);
-    newParentOf.set(childKey, lastEdge.originalParent);
+    // Create new edge set by reversing the action
+    const newEdgeSet = new Set(solution.orbifoldEdgeSet);
+    if (lastEntry.action === 'add') {
+      newEdgeSet.delete(lastEntry.edgeKey);
+    } else {
+      newEdgeSet.add(lastEntry.edgeKey);
+    }
+    
+    // Remove the last entry from history
+    const newHistory = solution.edgeHistory.slice(0, -1);
     
     // Update the solution
     setSolution({
       ...solution,
-      parentOf: newParentOf,
-      openedEdges: solution.openedEdges.slice(0, -1),
+      orbifoldEdgeSet: newEdgeSet,
+      edgeHistory: newHistory,
     });
     
   }, [solution]);
   
   // Compute all edges in the orbifold (fundamental domain) for visualization
+  // Now uses the orbifoldEdgeSet instead of parentOf
   const orbifoldEdges = useMemo(() => {
     if (!solution) return [];
     const edges: Array<{ from: { row: number; col: number }; to: { row: number; col: number }; isPassage: boolean }> = [];
@@ -514,18 +530,13 @@ export function WallpaperMazeExplorer() {
           
           if (solution.vacantCells.has(neighborKey)) continue;
           
-          // Create sorted edge key
-          const edgeKey = cellKey < neighborKey ? `${cellKey}-${neighborKey}` : `${neighborKey}-${cellKey}`;
-          if (seenEdges.has(edgeKey)) continue;
-          seenEdges.add(edgeKey);
+          // Create sorted edge key (matching orbifoldEdgeSet format)
+          const orbifoldEdgeKey = makeOrbifoldEdgeKey(row, col, neighbor.row, neighbor.col);
+          if (seenEdges.has(orbifoldEdgeKey)) continue;
+          seenEdges.add(orbifoldEdgeKey);
           
-          // Check if this is a parent-child relationship
-          const cellParent = solution.parentOf.get(cellKey);
-          const neighborParent = solution.parentOf.get(neighborKey);
-          
-          const isParentOfCell = cellParent && cellParent.row === neighbor.row && cellParent.col === neighbor.col;
-          const isChildOfCell = neighborParent && neighborParent.row === row && neighborParent.col === col;
-          const isPassage = !!(isParentOfCell || isChildOfCell);
+          // Check if this edge exists in the orbifold edge set (is a passage)
+          const isPassage = solution.orbifoldEdgeSet.has(orbifoldEdgeKey);
           
           edges.push({
             from: { row, col },
@@ -1434,21 +1445,21 @@ export function WallpaperMazeExplorer() {
             {/* Close Boundary button */}
             <button
               onClick={handleCloseBoundary}
-              disabled={solution.openedEdges.length === 0}
+              disabled={solution.edgeHistory.length === 0}
               style={{
                 padding: "8px 15px",
-                backgroundColor: solution.openedEdges.length > 0 ? "#ff5722" : "#e0e0e0",
-                color: solution.openedEdges.length > 0 ? "white" : "#999",
+                backgroundColor: solution.edgeHistory.length > 0 ? "#ff5722" : "#e0e0e0",
+                color: solution.edgeHistory.length > 0 ? "white" : "#999",
                 border: "none",
                 borderRadius: "4px",
-                cursor: solution.openedEdges.length > 0 ? "pointer" : "not-allowed",
+                cursor: solution.edgeHistory.length > 0 ? "pointer" : "not-allowed",
               }}
-              title={solution.openedEdges.length > 0 
-                ? `Close the last opened boundary (${solution.openedEdges.length} opened)`
-                : "No opened boundaries to close"
+              title={solution.edgeHistory.length > 0 
+                ? `Undo the last boundary change (${solution.edgeHistory.length} changes)`
+                : "No boundary changes to undo"
               }
             >
-              🔒 Close Boundary ({solution.openedEdges.length} opened)
+              🔙 Undo ({solution.edgeHistory.length} changes)
             </button>
             
             {/* View mode toggle */}
@@ -1535,21 +1546,23 @@ export function WallpaperMazeExplorer() {
             {/* Solution view - use P3RhombusRenderer for P3 maze view, graph view for both */}
             {solution.wallpaperGroup === "P3" ? (
               solutionViewMode === "maze" ? (
-                <P3RhombusRenderer
-                  length={length}
-                  multiplier={solution.fixedMultiplier}
-                  cellSize={cellSize}
-                  parentOf={solution.parentOf}
-                  rootRow={solution.rootRow}
-                  rootCol={solution.rootCol}
-                  vacantCells={solution.vacantCells}
-                  wallpaperGroupName={solution.wallpaperGroup}
-                  p3TiledGraph={p3TiledGraph}
-                  showNeighbors={showSolutionNeighbors}
-                  selectedNode={solutionSelectedNode}
-                  onCellClick={handleP3CellClick}
-                  svgRef={mazeSvgRef}
-                />
+                p3ParentOf && (
+                  <P3RhombusRenderer
+                    length={length}
+                    multiplier={solution.fixedMultiplier}
+                    cellSize={cellSize}
+                    parentOf={p3ParentOf}
+                    rootRow={solution.rootRow}
+                    rootCol={solution.rootCol}
+                    vacantCells={solution.vacantCells}
+                    wallpaperGroupName={solution.wallpaperGroup}
+                    p3TiledGraph={p3TiledGraph}
+                    showNeighbors={showSolutionNeighbors}
+                    selectedNode={solutionSelectedNode}
+                    onCellClick={handleP3CellClick}
+                    svgRef={mazeSvgRef}
+                  />
+                )
               ) : (
                 renderP3GraphView()
               )

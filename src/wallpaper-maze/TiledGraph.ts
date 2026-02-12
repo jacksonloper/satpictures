@@ -292,6 +292,293 @@ export function buildTiledGraph(
 }
 
 /**
+ * Edge key type for orbifold (fundamental domain) edges
+ */
+export type OrbifoldEdgeKey = string;
+
+/**
+ * Utility to create a canonical edge key (smaller coords first)
+ */
+export function makeOrbifoldEdgeKey(r1: number, c1: number, r2: number, c2: number): OrbifoldEdgeKey {
+  const key1 = `${r1},${c1}`;
+  const key2 = `${r2},${c2}`;
+  return key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
+}
+
+/**
+ * Parse an edge key back to coordinates
+ */
+export function parseOrbifoldEdgeKey(key: OrbifoldEdgeKey): { r1: number; c1: number; r2: number; c2: number } {
+  const [part1, part2] = key.split('-');
+  const [r1, c1] = part1.split(',').map(Number);
+  const [r2, c2] = part2.split(',').map(Number);
+  return { r1, c1, r2, c2 };
+}
+
+/**
+ * Build the tiled graph from an undirected edge set in the fundamental domain.
+ * 
+ * This is the new preferred method that:
+ * 1. Creates all nodes in the tiled space
+ * 2. Lifts the orbifold edge set to the tiled space
+ * 3. Uses BFS from each root in the lifted graph to compute root indices
+ * 
+ * This allows adding/removing edges without the complications of an arborescence.
+ */
+export function buildTiledGraphFromEdgeSet(
+  length: number,
+  multiplier: number,
+  wallpaperGroupName: WallpaperGroupName,
+  rootRow: number,
+  rootCol: number,
+  orbifoldEdgeSet: Set<OrbifoldEdgeKey>,
+  vacantCells: Set<string> = new Set()
+): TiledGraph {
+  const wpg = getWallpaperGroup(wallpaperGroupName);
+  const totalSize = length * multiplier;
+  
+  const nodes: TiledNode[] = [];
+  const nodeAt = new Map<string, number>();
+  const roots: TiledNode[] = [];
+  
+  // Step 1: Create all nodes
+  for (let copyRow = 0; copyRow < multiplier; copyRow++) {
+    for (let copyCol = 0; copyCol < multiplier; copyCol++) {
+      const type = wpg.getType(copyRow, copyCol);
+      
+      for (let row = 0; row < length; row++) {
+        for (let col = 0; col < length; col++) {
+          // Transform position to visual space
+          const transformed = wpg.transformPosition(row, col, length, type);
+          const absRow = copyRow * length + transformed.row;
+          const absCol = copyCol * length + transformed.col;
+          
+          // Check if this cell is vacant
+          const fundamentalKey = `${row},${col}`;
+          const isVacant = vacantCells.has(fundamentalKey);
+          const isRoot = !isVacant && row === rootRow && col === rootCol;
+          
+          const nodeId = nodes.length;
+          const node: TiledNode = {
+            id: nodeId,
+            absRow,
+            absCol,
+            copyRow,
+            copyCol,
+            type,
+            fundamentalRow: row,
+            fundamentalCol: col,
+            isRoot,
+            parentDirection: null, // Not used in edge-set mode
+            visualParentDirection: null, // Not used in edge-set mode
+            parentId: null, // Will be set during BFS
+            rootIndex: -1, // Will be set during BFS
+          };
+          
+          nodes.push(node);
+          nodeAt.set(posKey(absRow, absCol), nodeId);
+          
+          if (isRoot) {
+            roots.push(node);
+          }
+        }
+      }
+    }
+  }
+  
+  // Step 2: Build adjacency lists in the LIFTED graph based on the orbifold edge set
+  // For each pair of adjacent nodes in the lifted graph, check if the corresponding
+  // orbifold edge exists in the edge set
+  const adjacency = new Map<number, number[]>();
+  
+  for (const node of nodes) {
+    const neighbors: number[] = [];
+    
+    for (const dir of ALL_DIRECTIONS) {
+      const delta = DIRECTION_DELTA[dir];
+      const neighborAbsRow = node.absRow + delta.dRow;
+      const neighborAbsCol = node.absCol + delta.dCol;
+      
+      // Skip if out of bounds
+      if (neighborAbsRow < 0 || neighborAbsRow >= totalSize ||
+          neighborAbsCol < 0 || neighborAbsCol >= totalSize) {
+        continue;
+      }
+      
+      const neighborKey = posKey(neighborAbsRow, neighborAbsCol);
+      const neighborId = nodeAt.get(neighborKey);
+      if (neighborId === undefined) continue;
+      
+      const neighbor = nodes[neighborId];
+      
+      // Check if the orbifold edge exists
+      const orbifoldEdgeKey = makeOrbifoldEdgeKey(
+        node.fundamentalRow, node.fundamentalCol,
+        neighbor.fundamentalRow, neighbor.fundamentalCol
+      );
+      
+      if (orbifoldEdgeSet.has(orbifoldEdgeKey)) {
+        neighbors.push(neighborId);
+      }
+    }
+    
+    adjacency.set(node.id, neighbors);
+  }
+  
+  // Step 3: BFS from each root to compute root indices and parent relationships
+  // Lowest root index wins when there's a tie
+  for (let rootIdx = 0; rootIdx < roots.length; rootIdx++) {
+    const rootNode = roots[rootIdx];
+    
+    // Skip if this root is already claimed by a lower-indexed root
+    if (rootNode.rootIndex >= 0 && rootNode.rootIndex < rootIdx) {
+      continue;
+    }
+    
+    rootNode.rootIndex = rootIdx;
+    
+    const visited = new Set<number>();
+    const queue: number[] = [rootNode.id];
+    let queueIdx = 0;
+    visited.add(rootNode.id);
+    
+    while (queueIdx < queue.length) {
+      const currentId = queue[queueIdx++];
+      
+      const neighbors = adjacency.get(currentId) || [];
+      for (const neighborId of neighbors) {
+        const neighbor = nodes[neighborId];
+        
+        // Skip if already claimed by this or a lower root
+        if (neighbor.rootIndex >= 0 && neighbor.rootIndex <= rootIdx) {
+          continue;
+        }
+        
+        if (!visited.has(neighborId)) {
+          visited.add(neighborId);
+          neighbor.rootIndex = rootIdx;
+          neighbor.parentId = currentId;
+          queue.push(neighborId);
+        }
+      }
+    }
+  }
+  
+  // Step 4: Build edges list for rendering
+  const edges: TiledEdge[] = [];
+  for (const node of nodes) {
+    if (node.parentId !== null) {
+      const parent = nodes[node.parentId];
+      edges.push({
+        fromId: node.id,
+        toId: node.parentId,
+        fromAbsRow: node.absRow,
+        fromAbsCol: node.absCol,
+        toAbsRow: parent.absRow,
+        toAbsCol: parent.absCol,
+        isPassage: true,
+      });
+    }
+  }
+  
+  return {
+    length,
+    multiplier,
+    totalSize,
+    wallpaperGroupName,
+    nodes,
+    edges,
+    nodeAt,
+    roots,
+    rootRow,
+    rootCol,
+  };
+}
+
+/**
+ * Convert a parentOf map (arborescence) to an undirected edge set
+ */
+export function parentOfToEdgeSet(
+  length: number,
+  _wallpaperGroupName: WallpaperGroupName,
+  parentOf: Map<string, { row: number; col: number } | null>
+): Set<OrbifoldEdgeKey> {
+  const edgeSet = new Set<OrbifoldEdgeKey>();
+  
+  for (let row = 0; row < length; row++) {
+    for (let col = 0; col < length; col++) {
+      const key = `${row},${col}`;
+      const parent = parentOf.get(key);
+      
+      if (parent) {
+        const edgeKey = makeOrbifoldEdgeKey(row, col, parent.row, parent.col);
+        edgeSet.add(edgeKey);
+      }
+    }
+  }
+  
+  return edgeSet;
+}
+
+/**
+ * Convert an undirected edge set back to a parentOf map (arborescence) using BFS from root.
+ * This is used for backwards compatibility with P3TiledGraph.
+ */
+export function edgeSetToParentOf(
+  length: number,
+  _wallpaperGroupName: WallpaperGroupName,
+  rootRow: number,
+  rootCol: number,
+  orbifoldEdgeSet: Set<OrbifoldEdgeKey>,
+  vacantCells: Set<string> = new Set()
+): Map<string, { row: number; col: number } | null> {
+  const parentOf = new Map<string, { row: number; col: number } | null>();
+  
+  // Build adjacency list from edge set
+  const adjacency = new Map<string, string[]>();
+  for (let row = 0; row < length; row++) {
+    for (let col = 0; col < length; col++) {
+      const key = `${row},${col}`;
+      adjacency.set(key, []);
+    }
+  }
+  
+  for (const edgeKey of orbifoldEdgeSet) {
+    const { r1, c1, r2, c2 } = parseOrbifoldEdgeKey(edgeKey);
+    const key1 = `${r1},${c1}`;
+    const key2 = `${r2},${c2}`;
+    
+    adjacency.get(key1)?.push(key2);
+    adjacency.get(key2)?.push(key1);
+  }
+  
+  // BFS from root to build parentOf
+  const rootKey = `${rootRow},${rootCol}`;
+  parentOf.set(rootKey, null);
+  
+  const visited = new Set<string>();
+  visited.add(rootKey);
+  const queue = [rootKey];
+  let queueIdx = 0;
+  
+  while (queueIdx < queue.length) {
+    const currentKey = queue[queueIdx++];
+    const [currentRow, currentCol] = currentKey.split(',').map(Number);
+    
+    const neighbors = adjacency.get(currentKey) || [];
+    for (const neighborKey of neighbors) {
+      if (!visited.has(neighborKey) && !vacantCells.has(neighborKey)) {
+        visited.add(neighborKey);
+        parentOf.set(neighborKey, { row: currentRow, col: currentCol });
+        queue.push(neighborKey);
+      }
+    }
+  }
+  
+  return parentOf;
+}
+
+/**
  * Golden ratio for evenly spreading colors
  */
 const GOLDEN_RATIO = 0.618033988749895;
