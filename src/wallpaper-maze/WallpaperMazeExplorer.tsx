@@ -60,6 +60,8 @@ interface OpenedEdge {
   cell2: GridCell;
   // The cell that became a child when the edge was opened
   childCell: GridCell;
+  // The original parent of the child cell (null if it was a root)
+  originalParent: GridCell | null;
 }
 
 interface MazeSolution {
@@ -443,8 +445,12 @@ export function WallpaperMazeExplorer() {
     // The surviving root is the lower index; the absorbed root will be merged into it
     const absorbedRootIndex = Math.max(rootIndex1, rootIndex2);
     
-    // Determine which cell becomes the child
+    // Determine which cell becomes the child and store its original parent
     let childCell: GridCell;
+    let originalParent: GridCell | null;
+    const childKey = rootIndex1 === absorbedRootIndex ? cell1Key : cell2Key;
+    originalParent = solution.parentOf.get(childKey) ?? null;
+    
     if (rootIndex1 === absorbedRootIndex) {
       // cell1 is from the absorbed root, make it point to cell2
       newParentOf.set(cell1Key, cell2);
@@ -455,8 +461,8 @@ export function WallpaperMazeExplorer() {
       childCell = cell2;
     }
     
-    // Track this opened edge so we can close it later
-    const openedEdge: OpenedEdge = { cell1, cell2, childCell };
+    // Track this opened edge so we can close it later (including original parent for proper restoration)
+    const openedEdge: OpenedEdge = { cell1, cell2, childCell, originalParent };
     
     // Update the solution with the new parentOf map and track the opened edge
     setSolution({
@@ -477,13 +483,9 @@ export function WallpaperMazeExplorer() {
     const childKey = `${lastEdge.childCell.row},${lastEdge.childCell.col}`;
     
     // Create a new parentOf map with the edge removed
-    // The child cell that was made to point to a parent should now point back to null
-    // (if it was originally a root) or to its original parent
+    // Restore the child cell's original parent (which may be null if it was a root)
     const newParentOf = new Map(solution.parentOf);
-    
-    // Set the child cell to have no parent (making it a root again)
-    // Note: This is a simplification - the child was originally a root of its own subtree
-    newParentOf.set(childKey, null);
+    newParentOf.set(childKey, lastEdge.originalParent);
     
     // Update the solution
     setSolution({
