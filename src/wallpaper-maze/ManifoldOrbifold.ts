@@ -298,35 +298,25 @@ function getP2Neighbors(row: number, col: number, n: number): {
   E: { row: number; col: number };
   W: { row: number; col: number };
 } {
-  let N, S, E, W;
-  
   // North neighbor
-  if (row === 0) {
-    N = { row: 0, col: n - 1 - col };  // Fold at top boundary
-  } else {
-    N = { row: row - 1, col };
-  }
+  const N = row === 0
+    ? { row: 0, col: n - 1 - col }      // Fold at top boundary
+    : { row: row - 1, col };
   
   // South neighbor
-  if (row === n - 1) {
-    S = { row: n - 1, col: n - 1 - col };  // Fold at bottom boundary
-  } else {
-    S = { row: row + 1, col };
-  }
+  const S = row === n - 1
+    ? { row: n - 1, col: n - 1 - col }  // Fold at bottom boundary
+    : { row: row + 1, col };
   
   // East neighbor
-  if (col === n - 1) {
-    E = { row: n - 1 - row, col: n - 1 };  // Fold at right boundary
-  } else {
-    E = { row, col: col + 1 };
-  }
+  const E = col === n - 1
+    ? { row: n - 1 - row, col: n - 1 }  // Fold at right boundary
+    : { row, col: col + 1 };
   
   // West neighbor
-  if (col === 0) {
-    W = { row: n - 1 - row, col: 0 };  // Fold at left boundary
-  } else {
-    W = { row, col: col - 1 };
-  }
+  const W = col === 0
+    ? { row: n - 1 - row, col: 0 }      // Fold at left boundary
+    : { row, col: col - 1 };
   
   return { N, S, E, W };
 }
@@ -369,7 +359,11 @@ export function buildP2Manifold(n: number): Manifold {
   // For multi-edges (same pair via different directions), we track direction too.
   
   const edges: ManifoldEdge[] = [];
-  const addedEdges = new Set<string>();  // Track "fromIdx-toIdx-direction" to handle multi-edges properly
+  // Track "fromIdx-toIdx-direction" to handle multi-edges properly
+  const directionEdgeKeys = new Set<string>();
+  
+  // Map direction to its reverse
+  const reverseDirection: Record<string, string> = { N: "S", S: "N", E: "W", W: "E" };
   
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
@@ -392,13 +386,12 @@ export function buildP2Manifold(n: number): Manifold {
         if (fromIdx <= toIdx) {
           // Check if we've already added this edge from this direction
           const edgeKey = `${fromIdx}-${toIdx}-${name}`;
-          const reverseDir = name === "N" ? "S" : name === "S" ? "N" : name === "E" ? "W" : "E";
-          const reverseKey = `${toIdx}-${fromIdx}-${reverseDir}`;
+          const reverseKey = `${toIdx}-${fromIdx}-${reverseDirection[name]}`;
           
           // Add edge if we haven't seen it or its reverse
-          if (!addedEdges.has(edgeKey) && !addedEdges.has(reverseKey)) {
+          if (!directionEdgeKeys.has(edgeKey) && !directionEdgeKeys.has(reverseKey)) {
             edges.push({ from: fromIdx, to: toIdx });
-            addedEdges.add(edgeKey);
+            directionEdgeKeys.add(edgeKey);
           }
         }
       }
