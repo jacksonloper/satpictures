@@ -296,9 +296,7 @@ export function ManifoldOrbifoldExplorer() {
         
         for (let edgeIdx = 0; edgeIdx < orbifoldEdges.length; edgeIdx++) {
           const edge = orbifoldEdges[edgeIdx];
-          const isOutgoing = edge.from === selectedNode;
-          const otherNode = isOutgoing ? edge.to : edge.from;
-          const voltage = isOutgoing ? edge.voltage : edge.voltage; // Note: following reverse would use inverse
+          const otherNode = edge.from === selectedNode ? edge.to : edge.from;
           
           // Source position (in identity copy)
           const fromNode = orbifold.nodes[selectedNode];
@@ -308,7 +306,7 @@ export function ManifoldOrbifoldExplorer() {
           
           // Target position (in target copy determined by voltage)
           const toNode = orbifold.nodes[otherNode];
-          const toMatrix = isOutgoing ? voltage : voltage; // Would be inverse for reverse
+          const toMatrix = edge.voltage;
           const toPos = applyMatrix3x3(toMatrix, toNode.col + 0.5, toNode.row + 0.5);
           const toX = toPos.x * scale + offsetX;
           const toY = toPos.y * scale + offsetY;

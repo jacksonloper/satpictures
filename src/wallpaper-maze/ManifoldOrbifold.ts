@@ -77,6 +77,21 @@ export function rotation180_3x3(): Matrix3x3 {
   return [-1, 0, 0, 0, -1, 0, 0, 0, 1];
 }
 
+/**
+ * Create a P2 boundary crossing voltage matrix.
+ * This combines translation with 180° rotation for crossing a P2 boundary.
+ * @param dx - x translation component
+ * @param dy - y translation component
+ * @param n - grid size (used to compute rotation center offset)
+ */
+function createP2BoundaryVoltage(dx: number, dy: number, n: number): Matrix3x3 {
+  // The voltage is: translate by (dx, dy), then rotate 180° around the appropriate center
+  // For a 180° rotation: x' = -x + c, y' = -y + d where (c, d) is the fixed point
+  // Combined: [-1, 0, 2*cx + dx; 0, -1, 2*cy + dy; 0, 0, 1]
+  // For P2, the formula simplifies based on which boundary we're crossing
+  return [-1, 0, dx + n - 1, 0, -1, dy + n - 1, 0, 0, 1];
+}
+
 // ============================================================================
 // 2x2 Matrix utilities (for screen transform)
 // ============================================================================
@@ -411,16 +426,10 @@ export function buildP2Orbifold(n: number): Orbifold {
       const eastRow = col === n - 1 ? n - 1 - row : row;
       const eastIdx = nodeAtMap.get(nodeKey(eastRow, eastCol))!;
       
-      // Voltage for east edge
-      let eastVoltage: Matrix3x3;
-      if (col === n - 1) {
-        // Crossing east boundary: translate right by n, then rotate 180° around (n, n/2)
-        // This is equivalent to: x' = 2n - x, y' = n - 1 - y (then mod n on the new copy)
-        // As a matrix: [-1, 0, 2n-1; 0, -1, n-1; 0, 0, 1]
-        eastVoltage = [-1, 0, 2*n - 1, 0, -1, n - 1, 0, 0, 1];
-      } else {
-        eastVoltage = IDENTITY_3X3;
-      }
+      // Voltage for east edge: identity inside, translate+rotate at boundary
+      const eastVoltage = col === n - 1 
+        ? createP2BoundaryVoltage(n, 0, n)  // East boundary crossing
+        : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: eastIdx, voltage: eastVoltage });
       
       // South edge
@@ -428,22 +437,18 @@ export function buildP2Orbifold(n: number): Orbifold {
       const southCol = row === n - 1 ? n - 1 - col : col;
       const southIdx = nodeAtMap.get(nodeKey(southRow, southCol))!;
       
-      // Voltage for south edge
-      let southVoltage: Matrix3x3;
-      if (row === n - 1) {
-        // Crossing south boundary: translate down by n, then rotate 180°
-        southVoltage = [-1, 0, n - 1, 0, -1, 2*n - 1, 0, 0, 1];
-      } else {
-        southVoltage = IDENTITY_3X3;
-      }
+      // Voltage for south edge: identity inside, translate+rotate at boundary
+      const southVoltage = row === n - 1
+        ? createP2BoundaryVoltage(0, n, n)  // South boundary crossing
+        : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: southIdx, voltage: southVoltage });
       
       // West edge (for boundary)
       if (col === 0) {
         const westRow = n - 1 - row;
         const westIdx = nodeAtMap.get(nodeKey(westRow, 0))!;
-        // Crossing west boundary: translate left by n (negative), then rotate 180°
-        const westVoltage: Matrix3x3 = [-1, 0, -1, 0, -1, n - 1, 0, 0, 1];
+        // West boundary crossing: translate left by n
+        const westVoltage = createP2BoundaryVoltage(-n, 0, n);
         edges.push({ from: fromIdx, to: westIdx, voltage: westVoltage });
       }
       
@@ -451,8 +456,8 @@ export function buildP2Orbifold(n: number): Orbifold {
       if (row === 0) {
         const northCol = n - 1 - col;
         const northIdx = nodeAtMap.get(nodeKey(0, northCol))!;
-        // Crossing north boundary: translate up by n (negative), then rotate 180°
-        const northVoltage: Matrix3x3 = [-1, 0, n - 1, 0, -1, -1, 0, 0, 1];
+        // North boundary crossing: translate up by n
+        const northVoltage = createP2BoundaryVoltage(0, -n, n);
         edges.push({ from: fromIdx, to: northIdx, voltage: northVoltage });
       }
     }
