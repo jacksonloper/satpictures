@@ -388,7 +388,9 @@ export function buildTiledGraphFromEdgeSet(
   
   // Step 2: Build adjacency lists in the LIFTED graph based on the orbifold edge set
   // For each pair of adjacent nodes in the lifted graph, check if the corresponding
-  // orbifold edge exists in the edge set
+  // orbifold edge exists in the edge set.
+  // IMPORTANT: Only connect nodes within the SAME copy. Cross-copy connections are
+  // wrapping edges in the orbifold but should not be direct connections in the lifted graph.
   const adjacency = new Map<number, number[]>();
   
   for (const node of nodes) {
@@ -410,6 +412,12 @@ export function buildTiledGraphFromEdgeSet(
       if (neighborId === undefined) continue;
       
       const neighbor = nodes[neighborId];
+      
+      // Only connect nodes within the same copy
+      // Cross-copy edges would be wrapping edges which don't exist in the lifted graph
+      if (node.copyRow !== neighbor.copyRow || node.copyCol !== neighbor.copyCol) {
+        continue;
+      }
       
       // Check if the orbifold edge exists
       const orbifoldEdgeKey = makeOrbifoldEdgeKey(
