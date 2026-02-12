@@ -3,8 +3,9 @@
  *
  * Displays the sub-manifold with all its edges:
  * - Included edges (spanning tree) shown as solid lines
+ * - Excluded edges shown as dotted lines (only when a node is selected)
  * - Stubs for edges that wrap to distant coordinates
- * - Self-edges displayed appropriately
+ * - Edge labels (1), (2), (3), (4) for N, S, E, W when a node is selected
  */
 
 import { useMemo, useCallback } from "react";
@@ -27,11 +28,22 @@ export interface SubManifoldViewerProps {
   showAllEdges?: boolean;
 }
 
+/** Direction labels for edges */
+const DIRECTION_LABELS: Record<string, string> = {
+  N: "(1)",
+  S: "(2)",
+  E: "(3)",
+  W: "(4)",
+};
+
+/** Direction label order */
+const DIRECTION_ORDER = ["N", "S", "E", "W"] as const;
+
 /**
  * Get color for an edge based on whether it's included
  */
 function getEdgeColor(isIncluded: boolean): string {
-  return isIncluded ? "#2196f3" : "#e0e0e0";
+  return isIncluded ? "#2196f3" : "#999";
 }
 
 /**
@@ -121,12 +133,58 @@ export function SubManifoldViewer({
     return { internalEdges: internal, wrappingEdges: wrapping };
   }, [manifold, subManifold, showAllEdges]);
 
-  // Render edges
+  // Compute selected node's edges with labels when a node is selected
+  const selectedNodeEdges = useMemo(() => {
+    if (!selectedNode) return null;
+    
+    const neighbors = manifold.getNeighbors(selectedNode);
+    const edges: Array<{
+      direction: "N" | "S" | "E" | "W";
+      label: string;
+      neighbor: ManifoldNode;
+      isIncluded: boolean;
+      isWrapping: boolean;
+    }> = [];
+    
+    for (const dir of DIRECTION_ORDER) {
+      const neighbor = neighbors[dir];
+      const edge: ManifoldEdge = { from: selectedNode, to: neighbor };
+      const isIncluded = subManifold.hasEdge(edge);
+      
+      // Determine if this edge wraps (not adjacent)
+      const rowDiff = Math.abs(selectedNode.row - neighbor.row);
+      const colDiff = Math.abs(selectedNode.col - neighbor.col);
+      const isWrapping = !(rowDiff <= 1 && colDiff <= 1 && rowDiff + colDiff === 1);
+      
+      edges.push({
+        direction: dir,
+        label: DIRECTION_LABELS[dir],
+        neighbor,
+        isIncluded,
+        isWrapping,
+      });
+    }
+    
+    return edges;
+  }, [selectedNode, manifold, subManifold]);
+
+  // Render edges - only show non-selected edges normally, selected edges are highlighted separately
   const edgeElements = useMemo(() => {
     const elements: React.ReactNode[] = [];
 
+    // When a node is selected, we'll render its edges separately with labels
+    // So we need to filter them out here
+    const selectedNodeKey = selectedNode ? manifold.nodeKey(selectedNode) : null;
+
     // Internal edges as lines
     for (const { edge, isIncluded } of internalEdges) {
+      // Skip edges connected to selected node (they'll be rendered with labels)
+      const fromKey = manifold.nodeKey(edge.from);
+      const toKey = manifold.nodeKey(edge.to);
+      if (selectedNodeKey && (fromKey === selectedNodeKey || toKey === selectedNodeKey)) {
+        continue;
+      }
+
       const x1 = padding + edge.from.col * cellSize + cellSize / 2;
       const y1 = padding + edge.from.row * cellSize + cellSize / 2;
       const x2 = padding + edge.to.col * cellSize + cellSize / 2;
@@ -142,6 +200,7 @@ export function SubManifoldViewer({
           stroke={getEdgeColor(isIncluded)}
           strokeWidth={isIncluded ? 3 : 1}
           strokeLinecap="round"
+          strokeDasharray={isIncluded ? "none" : "4,2"}
         />
       );
     }
@@ -149,6 +208,13 @@ export function SubManifoldViewer({
     // Wrapping edges as stubs
     const stubLength = cellSize * 0.3;
     for (const { edge, isIncluded, fromDir } of wrappingEdges) {
+      // Skip edges connected to selected node (they'll be rendered with labels)
+      const fromKey = manifold.nodeKey(edge.from);
+      const toKey = manifold.nodeKey(edge.to);
+      if (selectedNodeKey && (fromKey === selectedNodeKey || toKey === selectedNodeKey)) {
+        continue;
+      }
+
       const x = padding + edge.from.col * cellSize + cellSize / 2;
       const y = padding + edge.from.row * cellSize + cellSize / 2;
 
@@ -207,7 +273,90 @@ export function SubManifoldViewer({
     }
 
     return elements;
-  }, [internalEdges, wrappingEdges, manifold, cellSize, padding]);
+  }, [internalEdges, wrappingEdges, manifold, cellSize, padding, selectedNode]);
+
+  // Render selected node's edges with labels
+  const selectedEdgeElements = useMemo(() => {
+    if (!selectedNode || !selectedNodeEdges) return null;
+    
+    const elements: React.ReactNode[] = [];
+    const x = padding + selectedNode.col * cellSize + cellSize / 2;
+    const y = padding + selectedNode.row * cellSize + cellSize / 2;
+    const stubLength = cellSize * 0.35;
+    const labelOffset = cellSize * 0.5;
+    
+    for (const { direction, label, neighbor, isIncluded, isWrapping } of selectedNodeEdges) {
+      // Skip edges to blocked nodes
+      if (blockedNodes.has(manifold.nodeKey(neighbor))) {
+        continue;
+      }
+      
+      let dx = 0, dy = 0;
+      switch (direction) {
+        case "N": dy = -1; break;
+        case "S": dy = 1; break;
+        case "E": dx = 1; break;
+        case "W": dx = -1; break;
+      }
+      
+      const edgeColor = isIncluded ? "#e91e63" : "#999"; // Pink for included, gray for excluded
+      const strokeDash = isIncluded ? "none" : "4,2";
+      
+      if (isWrapping) {
+        // Draw stub for wrapping edge
+        elements.push(
+          <line
+            key={`selected-edge-${direction}`}
+            x1={x}
+            y1={y}
+            x2={x + dx * stubLength}
+            y2={y + dy * stubLength}
+            stroke={edgeColor}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeDasharray={strokeDash}
+          />
+        );
+      } else {
+        // Draw full edge to neighbor
+        const nx = padding + neighbor.col * cellSize + cellSize / 2;
+        const ny = padding + neighbor.row * cellSize + cellSize / 2;
+        elements.push(
+          <line
+            key={`selected-edge-${direction}`}
+            x1={x}
+            y1={y}
+            x2={nx}
+            y2={ny}
+            stroke={edgeColor}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeDasharray={strokeDash}
+          />
+        );
+      }
+      
+      // Draw label
+      const labelX = x + dx * labelOffset;
+      const labelY = y + dy * labelOffset;
+      elements.push(
+        <text
+          key={`label-${direction}`}
+          x={labelX}
+          y={labelY}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize={12}
+          fontWeight="bold"
+          fill="#333"
+        >
+          {label}
+        </text>
+      );
+    }
+    
+    return elements;
+  }, [selectedNode, selectedNodeEdges, manifold, blockedNodes, cellSize, padding]);
 
   // Render nodes
   const nodeElements = useMemo(() => {
@@ -275,8 +424,11 @@ export function SubManifoldViewer({
 
   return (
     <svg width={gridSize} height={gridSize} style={{ border: "1px solid #ccc" }}>
-      {/* Edges first, then nodes on top */}
+      {/* Background edges first */}
       {edgeElements}
+      {/* Selected node edges with labels (on top of regular edges) */}
+      {selectedEdgeElements}
+      {/* Nodes on top of everything */}
       {nodeElements}
     </svg>
   );

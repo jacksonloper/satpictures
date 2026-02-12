@@ -55,25 +55,44 @@ const CELL_SIZE = 40;
 type SketchpadTool = "rootSetter" | "neighborhoodViewer" | "blockSetter";
 
 /**
+ * Frozen solution state - stores all settings at solve time
+ * This is completely disconnected from the sketchpad settings after solve
+ */
+interface FrozenSolution {
+  /** The manifold type used for this solution */
+  manifoldType: ManifoldType;
+  /** The size used for this solution */
+  size: number;
+  /** The multiplier used for this solution */
+  multiplier: number;
+  /** The lift type used for this solution */
+  liftType: string;
+  /** The root node used for this solution */
+  root: ManifoldNode;
+  /** The blocked nodes at solve time */
+  blockedNodes: Set<string>;
+  /** The parent map from the SAT solver */
+  parentMap: Map<string, ManifoldNode | null>;
+}
+
+/**
  * Main explorer component
  */
 export function WallpaperMazeExplorerV2() {
-  // Manifold settings
+  // Sketchpad settings (editable by user)
   const [manifoldType, setManifoldType] = useState<ManifoldType>("P1");
   const [size, setSize] = useState(DEFAULT_LENGTH);
   const [multiplier, setMultiplier] = useState(DEFAULT_MULTIPLIER);
-
-  // Sub-manifold state
   const [blockedNodes, setBlockedNodes] = useState<Set<string>>(new Set());
   const [root, setRoot] = useState<ManifoldNode>({ row: 0, col: 0 });
-  const [parentMap, setParentMap] = useState<Map<string, ManifoldNode | null> | null>(null);
+  const [selectedLiftType, setSelectedLiftType] = useState<string | null>(null);
 
   // Tool state
   const [activeTool, setActiveTool] = useState<SketchpadTool>("rootSetter");
   const [sketchpadSelectedNode, setSketchpadSelectedNode] = useState<ManifoldNode | null>(null);
 
-  // Orbifold lift state
-  const [selectedLiftType, setSelectedLiftType] = useState<string | null>(null);
+  // FROZEN SOLUTION - completely disconnected from sketchpad after solve
+  const [frozenSolution, setFrozenSolution] = useState<FrozenSolution | null>(null);
 
   // Solution viewer state
   const [subManifoldSelectedNode, setSubManifoldSelectedNode] = useState<ManifoldNode | null>(null);
@@ -88,23 +107,26 @@ export function WallpaperMazeExplorerV2() {
   const workerRef = useRef<Worker | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Create manifold
-  const manifold = useMemo<Manifold>(
+  // Create manifold for SKETCHPAD (uses current settings)
+  const sketchpadManifold = useMemo<Manifold>(
     () => createManifold(manifoldType, size),
     [manifoldType, size]
   );
 
-  // Reset when manifold type or size changes
+  // Create manifold for SOLUTION (uses frozen settings if available)
+  const solutionManifold = useMemo<Manifold | null>(() => {
+    if (!frozenSolution) return null;
+    return createManifold(frozenSolution.manifoldType, frozenSolution.size);
+  }, [frozenSolution]);
+
+  // Reset sketchpad when manifold type or size changes
   useEffect(() => {
     setBlockedNodes(new Set());
     setRoot({ row: 0, col: 0 });
-    setParentMap(null);
     setSketchpadSelectedNode(null);
-    setSubManifoldSelectedNode(null);
-    setLiftSelectedNodeId(null);
   }, [manifoldType, size]);
 
-  // Get compatible orbifold lifts
+  // Get compatible orbifold lifts for current sketchpad settings
   const compatibleLifts = useMemo<OrbifoldLift[]>(
     () => getCompatibleLifts(manifoldType),
     [manifoldType]
@@ -117,23 +139,29 @@ export function WallpaperMazeExplorerV2() {
     }
   }, [compatibleLifts, selectedLiftType]);
 
-  // Get selected orbifold lift
-  const selectedLift = useMemo<OrbifoldLift | null>(
-    () => compatibleLifts.find((l) => l.type === selectedLiftType) ?? null,
-    [compatibleLifts, selectedLiftType]
-  );
+  // Get selected orbifold lift for SOLUTION (uses frozen settings)
+  const solutionLift = useMemo<OrbifoldLift | null>(() => {
+    if (!frozenSolution) return null;
+    const lifts = getCompatibleLifts(frozenSolution.manifoldType);
+    return lifts.find((l) => l.type === frozenSolution.liftType) ?? null;
+  }, [frozenSolution]);
 
-  // Create sub-manifold from parent map
+  // Create sub-manifold from FROZEN SOLUTION (completely disconnected from sketchpad)
   const subManifold = useMemo<SubManifoldImpl | null>(() => {
-    if (!parentMap) return null;
-    return SubManifoldImpl.fromParentMap(manifold, parentMap, blockedNodes, root);
-  }, [manifold, parentMap, blockedNodes, root]);
+    if (!frozenSolution || !solutionManifold) return null;
+    return SubManifoldImpl.fromParentMap(
+      solutionManifold,
+      frozenSolution.parentMap,
+      frozenSolution.blockedNodes,
+      frozenSolution.root
+    );
+  }, [frozenSolution, solutionManifold]);
 
-  // Create lifted graph
+  // Create lifted graph from FROZEN SOLUTION
   const liftedGraph = useMemo<OrbifoldLiftGraph | null>(() => {
-    if (!subManifold || !selectedLift) return null;
-    return selectedLift.lift(subManifold, multiplier, CELL_SIZE);
-  }, [subManifold, selectedLift, multiplier]);
+    if (!subManifold || !solutionLift || !frozenSolution) return null;
+    return solutionLift.lift(subManifold, frozenSolution.multiplier, CELL_SIZE);
+  }, [subManifold, solutionLift, frozenSolution]);
 
   // Clean up worker on unmount
   useEffect(() => {
@@ -147,7 +175,7 @@ export function WallpaperMazeExplorerV2() {
   // Handle sketchpad node click
   const handleSketchpadClick = useCallback(
     (node: ManifoldNode) => {
-      const nodeKey = manifold.nodeKey(node);
+      const nodeKey = sketchpadManifold.nodeKey(node);
 
       switch (activeTool) {
         case "rootSetter":
@@ -184,7 +212,7 @@ export function WallpaperMazeExplorerV2() {
           break;
       }
     },
-    [activeTool, manifold, blockedNodes, root, sketchpadSelectedNode]
+    [activeTool, sketchpadManifold, blockedNodes, root, sketchpadSelectedNode]
   );
 
   // Handle sub-manifold node click
@@ -222,19 +250,19 @@ export function WallpaperMazeExplorerV2() {
 
   // Get highlighted nodes in sub-manifold based on lift selection
   const highlightedSubManifoldNodes = useMemo<Set<string>>(() => {
-    if (liftSelectedNodeId === null || !liftedGraph) return new Set();
+    if (liftSelectedNodeId === null || !liftedGraph || !solutionManifold) return new Set();
     const node = liftedGraph.nodeById.get(liftSelectedNodeId);
     if (!node) return new Set();
-    return new Set([manifold.nodeKey(node.originalNode)]);
-  }, [liftSelectedNodeId, liftedGraph, manifold]);
+    return new Set([solutionManifold.nodeKey(node.originalNode)]);
+  }, [liftSelectedNodeId, liftedGraph, solutionManifold]);
 
   // Get highlighted nodes in lift based on sub-manifold selection
   const highlightedLiftNodes = useMemo<Set<string>>(() => {
-    if (!subManifoldSelectedNode) return new Set();
-    return new Set([manifold.nodeKey(subManifoldSelectedNode)]);
-  }, [subManifoldSelectedNode, manifold]);
+    if (!subManifoldSelectedNode || !solutionManifold) return new Set();
+    return new Set([solutionManifold.nodeKey(subManifoldSelectedNode)]);
+  }, [subManifoldSelectedNode, solutionManifold]);
 
-  // Handle solve
+  // Handle solve - creates a FROZEN solution
   const handleSolve = useCallback(() => {
     if (workerRef.current) {
       workerRef.current.terminate();
@@ -242,10 +270,10 @@ export function WallpaperMazeExplorerV2() {
 
     // Ensure root is not blocked
     let safeRoot = root;
-    if (blockedNodes.has(manifold.nodeKey(root))) {
+    if (blockedNodes.has(sketchpadManifold.nodeKey(root))) {
       // Find first non-blocked node
-      for (const node of manifold.getNodes()) {
-        if (!blockedNodes.has(manifold.nodeKey(node))) {
+      for (const node of sketchpadManifold.getNodes()) {
+        if (!blockedNodes.has(sketchpadManifold.nodeKey(node))) {
           safeRoot = node;
           break;
         }
@@ -253,9 +281,26 @@ export function WallpaperMazeExplorerV2() {
       setRoot(safeRoot);
     }
 
+    // Validate that a lift type is selected
+    if (!selectedLiftType) {
+      setErrorMessage("Please select an orbifold lift type");
+      return;
+    }
+
     setSolving(true);
     setErrorMessage(null);
     setSatStats(null);
+    // Clear viewer selections when starting new solve
+    setSubManifoldSelectedNode(null);
+    setLiftSelectedNodeId(null);
+
+    // Capture current settings to freeze with solution
+    const currentManifoldType = manifoldType;
+    const currentSize = size;
+    const currentMultiplier = multiplier;
+    const currentLiftType = selectedLiftType;
+    const currentRoot = safeRoot;
+    const currentBlockedNodes = new Set(blockedNodes);
 
     const worker = new WallpaperMazeWorker();
     workerRef.current = worker;
@@ -276,7 +321,17 @@ export function WallpaperMazeExplorerV2() {
         for (const [key, parent] of response.result.parentOf) {
           newParentMap.set(key, parent);
         }
-        setParentMap(newParentMap);
+        
+        // Create FROZEN solution with all settings captured at solve time
+        setFrozenSolution({
+          manifoldType: currentManifoldType,
+          size: currentSize,
+          multiplier: currentMultiplier,
+          liftType: currentLiftType,
+          root: currentRoot,
+          blockedNodes: currentBlockedNodes,
+          parentMap: newParentMap,
+        });
         setErrorMessage(null);
       } else {
         setErrorMessage(response.error || "Failed to solve maze");
@@ -293,14 +348,14 @@ export function WallpaperMazeExplorerV2() {
     };
 
     const request: WallpaperMazeRequest = {
-      length: size,
+      length: currentSize,
       rootRow: safeRoot.row,
       rootCol: safeRoot.col,
-      wallpaperGroup: manifoldTypeToWallpaperGroup(manifoldType),
-      vacantCells: Array.from(blockedNodes),
+      wallpaperGroup: manifoldTypeToWallpaperGroup(currentManifoldType),
+      vacantCells: Array.from(currentBlockedNodes),
     };
     worker.postMessage(request);
-  }, [manifold, manifoldType, size, root, blockedNodes]);
+  }, [sketchpadManifold, manifoldType, size, multiplier, selectedLiftType, root, blockedNodes]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -366,7 +421,7 @@ export function WallpaperMazeExplorerV2() {
 
           {/* Sketchpad */}
           <Sketchpad
-            manifold={manifold}
+            manifold={sketchpadManifold}
             blockedNodes={blockedNodes}
             root={root}
             selectedNode={sketchpadSelectedNode}
@@ -464,11 +519,14 @@ export function WallpaperMazeExplorerV2() {
         </div>
 
         {/* Middle panel: Sub-manifold Viewer */}
-        {subManifold && (
+        {subManifold && frozenSolution && (
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <h3 style={{ margin: 0 }}>Sub-Manifold Viewer</h3>
+            <p style={{ margin: 0, fontSize: "12px", color: "#666", backgroundColor: "#f0f0f0", padding: "4px 8px", borderRadius: "4px" }}>
+              <strong>{frozenSolution.manifoldType}</strong> • Size: {frozenSolution.size}×{frozenSolution.size} • Root: ({frozenSolution.root.row}, {frozenSolution.root.col})
+            </p>
             <p style={{ margin: 0, fontSize: "12px", color: "#666" }}>
-              Click nodes to highlight in lift graph
+              Click nodes to see edges in both viewers
             </p>
 
             <SubManifoldViewer
@@ -490,11 +548,14 @@ export function WallpaperMazeExplorerV2() {
         )}
 
         {/* Right panel: Orbifold Lift Viewer */}
-        {liftedGraph && subManifold && (
+        {liftedGraph && subManifold && frozenSolution && (
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <h3 style={{ margin: 0 }}>Orbifold Lift ({selectedLiftType})</h3>
+            <h3 style={{ margin: 0 }}>Orbifold Lift ({frozenSolution.liftType})</h3>
+            <p style={{ margin: 0, fontSize: "12px", color: "#666", backgroundColor: "#f0f0f0", padding: "4px 8px", borderRadius: "4px" }}>
+              Multiplier: {frozenSolution.multiplier}×{frozenSolution.multiplier}
+            </p>
             <p style={{ margin: 0, fontSize: "12px", color: "#666" }}>
-              Click nodes to highlight in sub-manifold
+              Click nodes to see edges in both viewers
             </p>
 
             <OrbifoldLiftViewer

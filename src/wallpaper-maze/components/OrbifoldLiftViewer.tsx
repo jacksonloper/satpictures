@@ -3,10 +3,11 @@
  *
  * Displays the lifted graph from an orbifold lift operation.
  * Nodes are colored by their root connection, edges show the spanning tree.
+ * When a node is selected, shows all 4 edges from the original manifold with labels.
  */
 
 import { useMemo, useCallback } from "react";
-import type { OrbifoldLiftGraph, LiftedNode, ManifoldNode } from "../manifold/types";
+import type { OrbifoldLiftGraph, LiftedNode, ManifoldNode, ManifoldEdge } from "../manifold/types";
 import type { SubManifold } from "../manifold/types";
 
 export interface OrbifoldLiftViewerProps {
@@ -27,6 +28,17 @@ export interface OrbifoldLiftViewerProps {
   /** SVG ref for downloading */
   svgRef?: React.RefObject<SVGSVGElement | null>;
 }
+
+/** Direction labels for edges - same as SubManifoldViewer */
+const DIRECTION_LABELS: Record<string, string> = {
+  N: "(1)",
+  S: "(2)",
+  E: "(3)",
+  W: "(4)",
+};
+
+/** Direction order - same as SubManifoldViewer */
+const DIRECTION_ORDER = ["N", "S", "E", "W"] as const;
 
 /**
  * Golden ratio for evenly spreading colors
@@ -151,7 +163,72 @@ export function OrbifoldLiftViewer({
     };
   }, [graph.bounds, padding]);
 
-  // Render edges
+  // Build adjacency list from graph edges for quick lookup
+  const adjacencyByNodeId = useMemo(() => {
+    const adj = new Map<number, Set<number>>();
+    for (const edge of graph.edges) {
+      if (!adj.has(edge.fromId)) adj.set(edge.fromId, new Set());
+      if (!adj.has(edge.toId)) adj.set(edge.toId, new Set());
+      adj.get(edge.fromId)!.add(edge.toId);
+      adj.get(edge.toId)!.add(edge.fromId);
+    }
+    return adj;
+  }, [graph.edges]);
+
+  // Compute selected node's edges with labels
+  // For each direction (N, S, E, W) of the original manifold node,
+  // find the corresponding lifted edge(s) if they exist
+  const selectedNodeEdges = useMemo(() => {
+    if (selectedNodeId === null) return null;
+    
+    const selectedNode = graph.nodeById.get(selectedNodeId);
+    if (!selectedNode) return null;
+    
+    const neighbors = manifold.getNeighbors(selectedNode.originalNode);
+    const edges: Array<{
+      direction: "N" | "S" | "E" | "W";
+      label: string;
+      neighborOriginal: ManifoldNode;
+      // The lifted edge connecting to this neighbor (if exists in graph)
+      liftedEdgeToNeighbor: { neighborNode: LiftedNode; isIncluded: boolean } | null;
+    }> = [];
+    
+    // Get the set of node IDs connected to this node in the lifted graph
+    const connectedNodeIds = adjacencyByNodeId.get(selectedNodeId) || new Set();
+    
+    for (const dir of DIRECTION_ORDER) {
+      const neighborOriginal = neighbors[dir];
+      const neighborOriginalKey = manifold.nodeKey(neighborOriginal);
+      
+      // Find lifted nodes corresponding to this neighbor
+      const neighborLiftedNodes = graph.nodesByOriginal.get(neighborOriginalKey) || [];
+      
+      // Find if any of these lifted neighbors are connected to the selected node
+      let liftedEdgeToNeighbor: { neighborNode: LiftedNode; isIncluded: boolean } | null = null;
+      
+      for (const neighborLifted of neighborLiftedNodes) {
+        if (connectedNodeIds.has(neighborLifted.id)) {
+          // This neighbor is connected via an edge in the lifted graph
+          // Check if the original edge is included in the sub-manifold
+          const originalEdge: ManifoldEdge = { from: selectedNode.originalNode, to: neighborOriginal };
+          const isIncluded = subManifold.hasEdge(originalEdge);
+          liftedEdgeToNeighbor = { neighborNode: neighborLifted, isIncluded };
+          break;
+        }
+      }
+      
+      edges.push({
+        direction: dir,
+        label: DIRECTION_LABELS[dir],
+        neighborOriginal,
+        liftedEdgeToNeighbor,
+      });
+    }
+    
+    return { node: selectedNode, edges };
+  }, [selectedNodeId, graph, manifold, subManifold, adjacencyByNodeId]);
+
+  // Render edges - skip edges connected to selected node (rendered separately with labels)
   const edgeElements = useMemo(() => {
     const elements: React.ReactNode[] = [];
 
@@ -159,6 +236,11 @@ export function OrbifoldLiftViewer({
       const fromNode = graph.nodeById.get(edge.fromId);
       const toNode = graph.nodeById.get(edge.toId);
       if (!fromNode || !toNode) continue;
+
+      // Skip edges connected to selected node
+      if (selectedNodeId !== null && (edge.fromId === selectedNodeId || edge.toId === selectedNodeId)) {
+        continue;
+      }
 
       const x1 = fromNode.x + offsetX;
       const y1 = fromNode.y + offsetY;
@@ -182,7 +264,106 @@ export function OrbifoldLiftViewer({
     }
 
     return elements;
-  }, [graph.edges, graph.nodeById, offsetX, offsetY, rootIndices]);
+  }, [graph.edges, graph.nodeById, offsetX, offsetY, rootIndices, selectedNodeId]);
+
+  // Render selected node's edges with labels
+  const selectedEdgeElements = useMemo(() => {
+    if (!selectedNodeEdges) return null;
+    
+    const { node, edges } = selectedNodeEdges;
+    const elements: React.ReactNode[] = [];
+    const x = node.x + offsetX;
+    const y = node.y + offsetY;
+    const labelOffset = 20; // Distance for label from node center
+    
+    for (const { direction, label, liftedEdgeToNeighbor } of edges) {
+      // Determine direction vector for label positioning
+      let dx = 0, dy = 0;
+      switch (direction) {
+        case "N": dy = -1; break;
+        case "S": dy = 1; break;
+        case "E": dx = 1; break;
+        case "W": dx = -1; break;
+      }
+      
+      if (liftedEdgeToNeighbor) {
+        // Draw edge to the lifted neighbor
+        const { neighborNode, isIncluded } = liftedEdgeToNeighbor;
+        const nx = neighborNode.x + offsetX;
+        const ny = neighborNode.y + offsetY;
+        
+        const edgeColor = isIncluded ? "#e91e63" : "#999";
+        const strokeDash = isIncluded ? "none" : "6,3";
+        
+        elements.push(
+          <line
+            key={`selected-edge-${direction}`}
+            x1={x}
+            y1={y}
+            x2={nx}
+            y2={ny}
+            stroke={edgeColor}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeDasharray={strokeDash}
+          />
+        );
+        
+        // Place label at midpoint of edge
+        const labelX = (x + nx) / 2;
+        const labelY = (y + ny) / 2;
+        elements.push(
+          <text
+            key={`label-${direction}`}
+            x={labelX + dx * 10}
+            y={labelY + dy * 10}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={12}
+            fontWeight="bold"
+            fill="#333"
+          >
+            {label}
+          </text>
+        );
+      } else {
+        // No lifted edge - draw a short stub to indicate the direction
+        // This happens when the neighbor is blocked or not connected in the lift
+        const stubLength = 15;
+        elements.push(
+          <line
+            key={`selected-edge-${direction}`}
+            x1={x}
+            y1={y}
+            x2={x + dx * stubLength}
+            y2={y + dy * stubLength}
+            stroke="#999"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeDasharray="4,2"
+          />
+        );
+        
+        // Place label at end of stub
+        elements.push(
+          <text
+            key={`label-${direction}`}
+            x={x + dx * labelOffset}
+            y={y + dy * labelOffset}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={12}
+            fontWeight="bold"
+            fill="#999"
+          >
+            {label}
+          </text>
+        );
+      }
+    }
+    
+    return elements;
+  }, [selectedNodeEdges, offsetX, offsetY]);
 
   // Render nodes
   const nodeElements = useMemo(() => {
@@ -260,7 +441,11 @@ export function OrbifoldLiftViewer({
         height={height}
         style={{ border: "1px solid #ccc" }}
       >
+        {/* Background edges */}
         {edgeElements}
+        {/* Selected node edges with labels (on top of regular edges) */}
+        {selectedEdgeElements}
+        {/* Nodes on top of everything */}
         {nodeElements}
       </svg>
       {selectedNode && (
