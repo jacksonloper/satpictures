@@ -54,6 +54,14 @@ interface SolutionSelectedNode {
   rhombusIdx?: number;
 }
 
+// Represents an edge that was opened (added to the orbifold)
+interface OpenedEdge {
+  cell1: GridCell;
+  cell2: GridCell;
+  // The cell that became a child when the edge was opened
+  childCell: GridCell;
+}
+
 interface MazeSolution {
   parentOf: Map<string, GridCell | null>;
   distanceFromRoot: Map<string, number>;
@@ -62,6 +70,7 @@ interface MazeSolution {
   rootRow: number; // Store the root row used for this solution
   rootCol: number; // Store the root col used for this solution
   fixedMultiplier: number; // The multiplier at solve time (fixed for open boundary operations)
+  openedEdges: OpenedEdge[]; // Stack of edges that were opened (for close boundary)
 }
 
 // View mode type for solution
@@ -311,7 +320,8 @@ export function WallpaperMazeExplorer() {
           vacantCells: currentVacantCells,
           rootRow: safeRootRow,
           rootCol: safeRootCol,
-          fixedMultiplier: currentMultiplier
+          fixedMultiplier: currentMultiplier,
+          openedEdges: [] // Start with no opened edges
         });
         setErrorMessage(null);
       } else {
@@ -433,23 +443,56 @@ export function WallpaperMazeExplorer() {
     // The surviving root is the lower index; the absorbed root will be merged into it
     const absorbedRootIndex = Math.max(rootIndex1, rootIndex2);
     
-    // Make one cell the parent of the other (the absorbed root's cell becomes a child)
-    // The cell from the absorbed root should point to the cell from the surviving root
+    // Determine which cell becomes the child
+    let childCell: GridCell;
     if (rootIndex1 === absorbedRootIndex) {
       // cell1 is from the absorbed root, make it point to cell2
       newParentOf.set(cell1Key, cell2);
+      childCell = cell1;
     } else {
       // cell2 is from the absorbed root, make it point to cell1
       newParentOf.set(cell2Key, cell1);
+      childCell = cell2;
     }
     
-    // Update the solution with the new parentOf map
+    // Track this opened edge so we can close it later
+    const openedEdge: OpenedEdge = { cell1, cell2, childCell };
+    
+    // Update the solution with the new parentOf map and track the opened edge
     setSolution({
       ...solution,
       parentOf: newParentOf,
+      openedEdges: [...solution.openedEdges, openedEdge],
     });
     
   }, [solution, crossRootPairs]);
+  
+  // Handle "Close Boundary" button click
+  // This removes the last opened edge, restoring the previous state
+  const handleCloseBoundary = useCallback(() => {
+    if (!solution || solution.openedEdges.length === 0) return;
+    
+    // Get the last opened edge
+    const lastEdge = solution.openedEdges[solution.openedEdges.length - 1];
+    const childKey = `${lastEdge.childCell.row},${lastEdge.childCell.col}`;
+    
+    // Create a new parentOf map with the edge removed
+    // The child cell that was made to point to a parent should now point back to null
+    // (if it was originally a root) or to its original parent
+    const newParentOf = new Map(solution.parentOf);
+    
+    // Set the child cell to have no parent (making it a root again)
+    // Note: This is a simplification - the child was originally a root of its own subtree
+    newParentOf.set(childKey, null);
+    
+    // Update the solution
+    setSolution({
+      ...solution,
+      parentOf: newParentOf,
+      openedEdges: solution.openedEdges.slice(0, -1),
+    });
+    
+  }, [solution]);
   
   // Compute all edges in the orbifold (fundamental domain) for visualization
   const orbifoldEdges = useMemo(() => {
@@ -506,6 +549,10 @@ export function WallpaperMazeExplorer() {
     const dots: React.ReactNode[] = [];
     const edges: React.ReactNode[] = [];
     const labels: React.ReactNode[] = [];
+    const stubs: React.ReactNode[] = [];
+    
+    // Length of stub lines for wrapping edges
+    const stubLength = ORBIFOLD_CELL_SIZE * 0.3;
     
     // Draw edges first (below dots)
     for (const edge of orbifoldEdges) {
@@ -519,9 +566,8 @@ export function WallpaperMazeExplorer() {
       const dy = Math.abs(edge.from.row - edge.to.row);
       const isWrappingEdge = dx > 1 || dy > 1;
       
-      // Skip rendering wrapping edges as straight lines (they would cross the grid)
-      // Instead, we just indicate them with the dot colors
       if (!isWrappingEdge) {
+        // Normal edge - draw as a line connecting the two dots
         edges.push(
           <line
             key={`orbifold-edge-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
@@ -531,6 +577,73 @@ export function WallpaperMazeExplorer() {
             y2={y2}
             stroke={edge.isPassage ? "#4caf50" : "#ddd"}
             strokeWidth={edge.isPassage ? 3 : 1}
+            strokeLinecap="round"
+          />
+        );
+      } else {
+        // Wrapping edge - draw as two stubs pointing towards each other
+        // Determine direction from each cell towards the edge
+        const color = edge.isPassage ? "#4caf50" : "#ddd";
+        const strokeWidth = edge.isPassage ? 3 : 1;
+        
+        // For 'from' cell: compute direction towards wrapped neighbor
+        // The neighbor wraps, so we need to figure out which direction it went
+        let fromDirX = 0, fromDirY = 0;
+        if (edge.to.col > edge.from.col && dx > 1) {
+          // Neighbor wrapped from left edge (to.col is large, from.col is small)
+          fromDirX = -1; // Stub points left
+        } else if (edge.to.col < edge.from.col && dx > 1) {
+          // Neighbor wrapped from right edge
+          fromDirX = 1; // Stub points right
+        } else {
+          // No horizontal wrap
+          fromDirX = edge.to.col > edge.from.col ? 1 : (edge.to.col < edge.from.col ? -1 : 0);
+        }
+        
+        if (edge.to.row > edge.from.row && dy > 1) {
+          // Neighbor wrapped from top edge
+          fromDirY = -1; // Stub points up
+        } else if (edge.to.row < edge.from.row && dy > 1) {
+          // Neighbor wrapped from bottom edge
+          fromDirY = 1; // Stub points down
+        } else {
+          // No vertical wrap
+          fromDirY = edge.to.row > edge.from.row ? 1 : (edge.to.row < edge.from.row ? -1 : 0);
+        }
+        
+        // Normalize direction for diagonal cases
+        const fromLen = Math.sqrt(fromDirX * fromDirX + fromDirY * fromDirY) || 1;
+        fromDirX /= fromLen;
+        fromDirY /= fromLen;
+        
+        // Draw stub from 'from' cell
+        stubs.push(
+          <line
+            key={`orbifold-stub-from-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
+            x1={x1}
+            y1={y1}
+            x2={x1 + fromDirX * stubLength}
+            y2={y1 + fromDirY * stubLength}
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+        );
+        
+        // Direction for 'to' cell is opposite
+        const toDirX = -fromDirX;
+        const toDirY = -fromDirY;
+        
+        // Draw stub from 'to' cell
+        stubs.push(
+          <line
+            key={`orbifold-stub-to-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
+            x1={x2}
+            y1={y2}
+            x2={x2 + toDirX * stubLength}
+            y2={y2 + toDirY * stubLength}
+            stroke={color}
+            strokeWidth={strokeWidth}
             strokeLinecap="round"
           />
         );
@@ -594,11 +707,14 @@ export function WallpaperMazeExplorer() {
         <h4 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>Orbifold Graph ({solution.wallpaperGroup})</h4>
         <svg width={svgWidth} height={svgHeight} style={{ border: "1px solid #eee", borderRadius: "4px" }}>
           {edges}
+          {stubs}
           {dots}
           {labels}
         </svg>
         <div style={{ fontSize: "11px", color: "#666", marginTop: "5px" }}>
           <span style={{ color: "#4caf50" }}>●</span> Green = passage (tree edge)
+          <br />
+          Stubs = wrapping edges (connect to opposite side)
         </div>
       </div>
     );
@@ -1311,6 +1427,26 @@ export function WallpaperMazeExplorer() {
               }
             >
               🚪 Open Boundary ({crossRootPairs.length} pairs)
+            </button>
+            
+            {/* Close Boundary button */}
+            <button
+              onClick={handleCloseBoundary}
+              disabled={solution.openedEdges.length === 0}
+              style={{
+                padding: "8px 15px",
+                backgroundColor: solution.openedEdges.length > 0 ? "#ff5722" : "#e0e0e0",
+                color: solution.openedEdges.length > 0 ? "white" : "#999",
+                border: "none",
+                borderRadius: "4px",
+                cursor: solution.openedEdges.length > 0 ? "pointer" : "not-allowed",
+              }}
+              title={solution.openedEdges.length > 0 
+                ? `Close the last opened boundary (${solution.openedEdges.length} opened)`
+                : "No opened boundaries to close"
+              }
+            >
+              🔒 Close Boundary ({solution.openedEdges.length} opened)
             </button>
             
             {/* View mode toggle */}
