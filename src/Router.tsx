@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
-import { WallpaperMazeExplorer } from './wallpaper-maze';
+import { WallpaperMazeExplorer, WallpaperMazeExplorerV2 } from './wallpaper-maze';
 
-type Page = 'main' | 'polyforms' | 'wallpapermazes';
+type Page = 'main' | 'polyforms' | 'wallpapermazes' | 'wallpapermazesv2';
 
 /** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
@@ -12,6 +12,7 @@ export function Router() {
     // Map hash to page
     if (hash === 'polyforms') return 'polyforms';
     if (hash === 'wallpapermazes') return 'wallpapermazes';
+    if (hash === 'wallpapermazesv2') return 'wallpapermazesv2';
     return 'main';
   });
 
@@ -20,6 +21,7 @@ export function Router() {
       const hash = window.location.hash.slice(1);
       if (hash === 'polyforms') setPage('polyforms');
       else if (hash === 'wallpapermazes') setPage('wallpapermazes');
+      else if (hash === 'wallpapermazesv2') setPage('wallpapermazesv2');
       else setPage('main');
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -34,6 +36,7 @@ export function Router() {
         backgroundColor: '#2c3e50',
         display: 'flex',
         gap: '16px',
+        flexWrap: 'wrap',
       }}>
         <a
           href="#"
@@ -68,12 +71,24 @@ export function Router() {
         >
           🧱 Wallpaper Mazes
         </a>
+        <a
+          href="#wallpapermazesv2"
+          style={{
+            color: page === 'wallpapermazesv2' ? '#3498db' : 'white',
+            textDecoration: 'none',
+            fontWeight: page === 'wallpapermazesv2' ? 'bold' : 'normal',
+            fontSize: '16px',
+          }}
+        >
+          🧱 Mazes V2
+        </a>
       </nav>
 
       {/* Page Content */}
       {page === 'main' && <App />}
       {page === 'polyforms' && <PolyformExplorer />}
       {page === 'wallpapermazes' && <WallpaperMazeExplorer />}
+      {page === 'wallpapermazesv2' && <WallpaperMazeExplorerV2 />}
     </>
   );
 }
