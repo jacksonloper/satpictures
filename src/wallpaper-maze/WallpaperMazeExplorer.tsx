@@ -15,7 +15,7 @@ import type { TiledGraph, TiledNode, CrossRootNeighborPair, OrbifoldEdgeKey } fr
 import { buildP3TiledGraph, getP3RootColor, findP3CrossRootNeighborPairs } from "./P3TiledGraph";
 import type { P3TiledGraph, P3TiledNode, P3CrossRootNeighborPair } from "./P3TiledGraph";
 import { getWallpaperGroup, DIRECTION_DELTA, ALL_DIRECTIONS } from "./WallpaperGroups";
-import type { WallpaperGroupName } from "./WallpaperGroups";
+import type { WallpaperGroupName, Direction } from "./WallpaperGroups";
 import { P3RhombusRenderer } from "./P3RhombusRenderer";
 import { downloadSvg } from "../polyform-explorer/downloadUtils";
 import "../App.css";
@@ -513,9 +513,15 @@ export function WallpaperMazeExplorer() {
   
   // Compute all edges in the orbifold (fundamental domain) for visualization
   // Now uses the orbifoldEdgeSet instead of parentOf
+  // Each edge includes the direction from 'from' cell to reach 'to' cell
   const orbifoldEdges = useMemo(() => {
     if (!solution) return [];
-    const edges: Array<{ from: { row: number; col: number }; to: { row: number; col: number }; isPassage: boolean }> = [];
+    const edges: Array<{ 
+      from: { row: number; col: number }; 
+      to: { row: number; col: number }; 
+      isPassage: boolean;
+      fromDir: Direction; // Direction from 'from' cell to reach 'to' cell
+    }> = [];
     const seenEdges = new Set<string>();
     const wpg = getWallpaperGroup(solution.wallpaperGroup);
     
@@ -542,6 +548,7 @@ export function WallpaperMazeExplorer() {
             from: { row, col },
             to: neighbor,
             isPassage,
+            fromDir: dir, // Store the direction used to reach the neighbor
           });
         }
       }
@@ -574,7 +581,8 @@ export function WallpaperMazeExplorer() {
       const x2 = ORBIFOLD_PADDING + edge.to.col * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
       const y2 = ORBIFOLD_PADDING + edge.to.row * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
       
-      // Handle wrapping edges (they will have large distances)
+      // Check if this is a wrapping edge by seeing if the neighbor is not visually adjacent
+      // (i.e., they're more than 1 cell apart in either dimension)
       const dx = Math.abs(edge.from.col - edge.to.col);
       const dy = Math.abs(edge.from.row - edge.to.row);
       const isWrappingEdge = dx > 1 || dy > 1;
@@ -594,42 +602,17 @@ export function WallpaperMazeExplorer() {
           />
         );
       } else {
-        // Wrapping edge - draw as two stubs pointing towards each other
-        // Determine direction from each cell towards the edge
+        // Wrapping edge - draw as a stub from the 'from' cell in the direction it goes
+        // The direction is stored in edge.fromDir (N, S, E, W)
         const color = edge.isPassage ? "#4caf50" : "#ddd";
         const strokeWidth = edge.isPassage ? 3 : 1;
         
-        // For 'from' cell: compute direction towards wrapped neighbor
-        // The neighbor wraps, so we need to figure out which direction it went
-        let fromDirX = 0, fromDirY = 0;
-        if (edge.to.col > edge.from.col && dx > 1) {
-          // Neighbor wrapped from left edge (to.col is large, from.col is small)
-          fromDirX = -1; // Stub points left
-        } else if (edge.to.col < edge.from.col && dx > 1) {
-          // Neighbor wrapped from right edge
-          fromDirX = 1; // Stub points right
-        } else {
-          // No horizontal wrap
-          fromDirX = edge.to.col > edge.from.col ? 1 : (edge.to.col < edge.from.col ? -1 : 0);
-        }
+        // Use the actual direction to draw the stub
+        const delta = DIRECTION_DELTA[edge.fromDir];
+        const fromDirX = delta.dCol; // dCol is the x direction
+        const fromDirY = delta.dRow; // dRow is the y direction
         
-        if (edge.to.row > edge.from.row && dy > 1) {
-          // Neighbor wrapped from top edge
-          fromDirY = -1; // Stub points up
-        } else if (edge.to.row < edge.from.row && dy > 1) {
-          // Neighbor wrapped from bottom edge
-          fromDirY = 1; // Stub points down
-        } else {
-          // No vertical wrap
-          fromDirY = edge.to.row > edge.from.row ? 1 : (edge.to.row < edge.from.row ? -1 : 0);
-        }
-        
-        // Normalize direction for diagonal cases
-        const fromLen = Math.sqrt(fromDirX * fromDirX + fromDirY * fromDirY) || 1;
-        fromDirX /= fromLen;
-        fromDirY /= fromLen;
-        
-        // Draw stub from 'from' cell
+        // Draw stub from 'from' cell in its direction
         stubs.push(
           <line
             key={`orbifold-stub-from-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
@@ -643,23 +626,33 @@ export function WallpaperMazeExplorer() {
           />
         );
         
-        // Direction for 'to' cell is opposite
-        const toDirX = -fromDirX;
-        const toDirY = -fromDirY;
-        
-        // Draw stub from 'to' cell
-        stubs.push(
-          <line
-            key={`orbifold-stub-to-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
-            x1={x2}
-            y1={y2}
-            x2={x2 + toDirX * stubLength}
-            y2={y2 + toDirY * stubLength}
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-          />
-        );
+        // For the 'to' cell, we need to figure out which direction leads back to 'from'
+        // This is done by checking each direction to see which one reaches 'from'
+        const wpg = getWallpaperGroup(solution.wallpaperGroup);
+        for (const dir of ALL_DIRECTIONS) {
+          const neighborFromTo = wpg.getWrappedNeighbor(edge.to.row, edge.to.col, dir, length);
+          if (neighborFromTo.row === edge.from.row && neighborFromTo.col === edge.from.col) {
+            // Found the direction from 'to' to 'from'
+            const toDelta = DIRECTION_DELTA[dir];
+            const toDirX = toDelta.dCol;
+            const toDirY = toDelta.dRow;
+            
+            // Draw stub from 'to' cell
+            stubs.push(
+              <line
+                key={`orbifold-stub-to-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
+                x1={x2}
+                y1={y2}
+                x2={x2 + toDirX * stubLength}
+                y2={y2 + toDirY * stubLength}
+                stroke={color}
+                strokeWidth={strokeWidth}
+                strokeLinecap="round"
+              />
+            );
+            break;
+          }
+        }
       }
     }
     
@@ -727,7 +720,7 @@ export function WallpaperMazeExplorer() {
         <div style={{ fontSize: "11px", color: "#666", marginTop: "5px" }}>
           <span style={{ color: "#4caf50" }}>●</span> Green = passage (tree edge)
           <br />
-          Stubs = wrapping edges (connect to opposite side)
+          Stubs = wrapping edges (boundary connections)
         </div>
       </div>
     );
@@ -1017,34 +1010,64 @@ export function WallpaperMazeExplorer() {
       );
     }
     
-    // Draw edges (from each node to its parent) - skip edges involving vacant cells
-    for (const edge of tiledGraph.edges) {
-      const fromNode = tiledGraph.nodes[edge.fromId];
-      const toNode = tiledGraph.nodes[edge.toId];
+    // Draw lifted edges - for each node, draw edges to adjacent neighbors if they're passages in orbifold
+    // This shows the true lifted graph (copies of the orbifold), not just the BFS tree
+    const drawnEdges = new Set<string>();
+    
+    for (const node of tiledGraph.nodes) {
+      const fromKey = `${node.fundamentalRow},${node.fundamentalCol}`;
+      if (solution.vacantCells.has(fromKey)) continue;
       
-      // Skip edges involving vacant cells
-      const fromKey = `${fromNode.fundamentalRow},${fromNode.fundamentalCol}`;
-      const toKey = `${toNode.fundamentalRow},${toNode.fundamentalCol}`;
-      if (solution.vacantCells.has(fromKey) || solution.vacantCells.has(toKey)) {
-        continue;
+      // Check all 4 directions for adjacent nodes in the tiled graph
+      for (const dir of ALL_DIRECTIONS) {
+        const delta = DIRECTION_DELTA[dir];
+        const neighborAbsRow = node.absRow + delta.dRow;
+        const neighborAbsCol = node.absCol + delta.dCol;
+        
+        // Skip if out of bounds
+        if (neighborAbsRow < 0 || neighborAbsRow >= tiledGraph.totalSize ||
+            neighborAbsCol < 0 || neighborAbsCol >= tiledGraph.totalSize) {
+          continue;
+        }
+        
+        const neighborKey = `${neighborAbsRow},${neighborAbsCol}`;
+        const neighborId = tiledGraph.nodeAt.get(neighborKey);
+        if (neighborId === undefined) continue;
+        
+        const neighborNode = tiledGraph.nodes[neighborId];
+        const neighborFundKey = `${neighborNode.fundamentalRow},${neighborNode.fundamentalCol}`;
+        if (solution.vacantCells.has(neighborFundKey)) continue;
+        
+        // Check if this orbifold edge exists (is a passage)
+        const orbifoldEdgeKey = makeOrbifoldEdgeKey(
+          node.fundamentalRow, node.fundamentalCol,
+          neighborNode.fundamentalRow, neighborNode.fundamentalCol
+        );
+        
+        if (!solution.orbifoldEdgeSet.has(orbifoldEdgeKey)) continue;
+        
+        // Create unique edge key to avoid drawing twice
+        const edgeId = node.id < neighborId ? `${node.id}-${neighborId}` : `${neighborId}-${node.id}`;
+        if (drawnEdges.has(edgeId)) continue;
+        drawnEdges.add(edgeId);
+        
+        const x1 = graphPadding + node.absCol * graphCellSize + graphCellSize / 2;
+        const y1 = graphPadding + node.absRow * graphCellSize + graphCellSize / 2;
+        const x2 = graphPadding + neighborNode.absCol * graphCellSize + graphCellSize / 2;
+        const y2 = graphPadding + neighborNode.absRow * graphCellSize + graphCellSize / 2;
+        
+        edges.push(
+          <line
+            key={`edge-${edgeId}`}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke={getRootColor(node.rootIndex)}
+            strokeWidth={2}
+          />
+        );
       }
-      
-      const x1 = graphPadding + fromNode.absCol * graphCellSize + graphCellSize / 2;
-      const y1 = graphPadding + fromNode.absRow * graphCellSize + graphCellSize / 2;
-      const x2 = graphPadding + toNode.absCol * graphCellSize + graphCellSize / 2;
-      const y2 = graphPadding + toNode.absRow * graphCellSize + graphCellSize / 2;
-      
-      edges.push(
-        <line
-          key={`edge-${edge.fromId}-${edge.toId}`}
-          x1={x1}
-          y1={y1}
-          x2={x2}
-          y2={y2}
-          stroke={getRootColor(fromNode.rootIndex)}
-          strokeWidth={2}
-        />
-      );
     }
     
     // Draw dots for each node - skip vacant cells (they are "empty squares" - no dot)
