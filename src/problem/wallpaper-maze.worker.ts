@@ -364,11 +364,29 @@ function getWrappedNeighbors(
   }
 }
 
+/**
+ * Check if moving in direction 'dir' from (row, col) involves boundary wrapping.
+ * A wrapping edge connects nodes that are not visually adjacent in the grid.
+ */
+function isWrappingEdge(
+  row: number,
+  col: number,
+  dir: "N" | "S" | "E" | "W",
+  length: number
+): boolean {
+  switch (dir) {
+    case "N": return row === 0;
+    case "S": return row === length - 1;
+    case "W": return col === 0;
+    case "E": return col === length - 1;
+  }
+}
+
 function getAllEdges(
   length: number,
   wallpaperGroup: WallpaperGroup
-): Array<{ from: GridCell; to: GridCell; direction: "N" | "S" | "E" | "W" }> {
-  const edges: Array<{ from: GridCell; to: GridCell; direction: "N" | "S" | "E" | "W" }> = [];
+): Array<{ from: GridCell; to: GridCell; direction: "N" | "S" | "E" | "W"; isWrapping: boolean }> {
+  const edges: Array<{ from: GridCell; to: GridCell; direction: "N" | "S" | "E" | "W"; isWrapping: boolean }> = [];
   const seen = new Set<string>();
   
   for (let row = 0; row < length; row++) {
@@ -384,7 +402,8 @@ function getAllEdges(
         
         if (!seen.has(edgeId)) {
           seen.add(edgeId);
-          edges.push({ from: { row, col }, to: neighbor, direction: dir });
+          const wrapping = isWrappingEdge(row, col, dir, length);
+          edges.push({ from: { row, col }, to: neighbor, direction: dir, isWrapping: wrapping });
         }
       }
     }
@@ -443,6 +462,8 @@ function buildMazeSATCNF(
     v(`dist(${cellKey(row, col)})>=${d}`);
   
   // Build adjacency with deduplicated neighbors (important for small grids where multiple directions can point to same cell)
+  // IMPORTANT: Only include NON-WRAPPING neighbors to keep copies disconnected by default.
+  // Wrapping edges will only be "opened" explicitly by the user.
   // Also filter out vacant cells from being neighbors (they cannot be selected as parents)
   const adjacency = new Map<string, GridCell[]>();
   for (let row = 0; row < length; row++) {
@@ -451,14 +472,18 @@ function buildMazeSATCNF(
       if (vacantCells.has(cellKey(row, col))) continue;
       
       const neighbors = getWrappedNeighbors(row, col, length, wallpaperGroup);
-      const allNeighbors = [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
-      // Deduplicate neighbors by their cell key, and filter out vacant cells
+      const directions = ["N", "S", "E", "W"] as const;
+      
+      // Deduplicate neighbors by their cell key, and filter out vacant cells AND wrapping neighbors
       const seen = new Set<string>();
       const uniqueNeighbors: GridCell[] = [];
-      for (const n of allNeighbors) {
+      for (const dir of directions) {
+        const n = neighbors[dir];
         const key = cellKey(n.row, n.col);
         // Skip vacant cells - they cannot be parents
         if (vacantCells.has(key)) continue;
+        // Skip wrapping edges - they should not be in the spanning tree by default
+        if (isWrappingEdge(row, col, dir, length)) continue;
         if (!seen.has(key)) {
           seen.add(key);
           uniqueNeighbors.push(n);
