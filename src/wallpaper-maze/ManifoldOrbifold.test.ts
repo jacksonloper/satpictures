@@ -400,8 +400,45 @@ console.log("\n=== Spanning Tree Tests ===\n");
   }
 }
 
-// Test spanning tree has no cycles (n²-1 edges + all connected = no cycles)
-// This is implicitly tested by the above two tests:
-// A connected graph with n vertices and n-1 edges is necessarily a tree (no cycles)
+// Explicit cycle detection test using DFS
+{
+  for (const type of ["P1", "P2"] as const) {
+    for (const n of [3, 4, 5]) {
+      const manifold = type === "P1" ? buildP1Manifold(n) : buildP2Manifold(n);
+      const tree = generateRandomSpanningTree(manifold);
+      
+      // Build adjacency list from tree edges
+      const adj = new Map<number, number[]>();
+      for (let i = 0; i < manifold.nodes.length; i++) {
+        adj.set(i, []);
+      }
+      for (const edgeIdx of tree) {
+        const edge = manifold.edges[edgeIdx];
+        adj.get(edge.from)!.push(edge.to);
+        adj.get(edge.to)!.push(edge.from);
+      }
+      
+      // DFS to detect cycles: a cycle exists if we visit a node that's not the parent
+      let hasCycle = false;
+      const visited = new Set<number>();
+      
+      function dfs(node: number, parent: number): void {
+        visited.add(node);
+        for (const neighbor of adj.get(node)!) {
+          if (!visited.has(neighbor)) {
+            dfs(neighbor, node);
+          } else if (neighbor !== parent) {
+            hasCycle = true;
+          }
+        }
+      }
+      
+      dfs(0, -1);
+      
+      assert(!hasCycle, `${type} n=${n}: spanning tree should have no cycles`);
+      console.log(`✓ ${type} n=${n}: spanning tree has no cycles (verified by DFS)`);
+    }
+  }
+}
 
 console.log("\n=== All tests passed! ===");

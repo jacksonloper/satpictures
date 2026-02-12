@@ -10,7 +10,7 @@
  * - View copies of the manifold with voltage-based correspondence
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { ReactNode } from "react";
 import {
   buildManifold,
@@ -75,7 +75,7 @@ export function ManifoldOrbifoldExplorer() {
   const orbifold = useMemo(() => buildOrbifold(manifoldType, size), [manifoldType, size]);
   
   // Clear spanning tree when manifold changes
-  useMemo(() => {
+  useEffect(() => {
     setSpanningTree(null);
   }, [manifoldType, size]);
   
