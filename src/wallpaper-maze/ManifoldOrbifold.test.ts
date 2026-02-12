@@ -340,4 +340,68 @@ console.log("\n=== P2 Manifold Tests ===\n");
   console.log(`✓ P2 n=${n}, multiplier=${multiplier}: all ${copies.length} copy matrices are in the generated group`);
 }
 
+// ============================================================================
+// Spanning Tree Tests
+// ============================================================================
+
+import { generateRandomSpanningTree } from "./ManifoldOrbifold.js";
+
+console.log("\n=== Spanning Tree Tests ===\n");
+
+// Test spanning tree has correct number of edges
+{
+  for (const type of ["P1", "P2"] as const) {
+    for (const n of [3, 4, 5]) {
+      const manifold = type === "P1" ? buildP1Manifold(n) : buildP2Manifold(n);
+      const tree = generateRandomSpanningTree(manifold);
+      
+      const expectedEdges = n * n - 1;
+      assert(tree.size === expectedEdges, `${type} n=${n}: spanning tree should have ${expectedEdges} edges, got ${tree.size}`);
+      console.log(`✓ ${type} n=${n}: spanning tree has ${tree.size} edges (correct: n²-1 = ${expectedEdges})`);
+    }
+  }
+}
+
+// Test spanning tree connects all nodes (BFS reachability)
+{
+  for (const type of ["P1", "P2"] as const) {
+    for (const n of [3, 4, 5]) {
+      const manifold = type === "P1" ? buildP1Manifold(n) : buildP2Manifold(n);
+      const tree = generateRandomSpanningTree(manifold);
+      
+      // Build adjacency list from tree edges
+      const adj = new Map<number, number[]>();
+      for (let i = 0; i < manifold.nodes.length; i++) {
+        adj.set(i, []);
+      }
+      for (const edgeIdx of tree) {
+        const edge = manifold.edges[edgeIdx];
+        adj.get(edge.from)!.push(edge.to);
+        adj.get(edge.to)!.push(edge.from);
+      }
+      
+      // BFS from node 0
+      const visited = new Set<number>();
+      const queue = [0];
+      visited.add(0);
+      while (queue.length > 0) {
+        const node = queue.shift()!;
+        for (const neighbor of adj.get(node)!) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      
+      assert(visited.size === manifold.nodes.length, `${type} n=${n}: spanning tree should connect all ${manifold.nodes.length} nodes, but only ${visited.size} are reachable`);
+      console.log(`✓ ${type} n=${n}: spanning tree connects all ${manifold.nodes.length} nodes`);
+    }
+  }
+}
+
+// Test spanning tree has no cycles (n²-1 edges + all connected = no cycles)
+// This is implicitly tested by the above two tests:
+// A connected graph with n vertices and n-1 edges is necessarily a tree (no cycles)
+
 console.log("\n=== All tests passed! ===");

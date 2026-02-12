@@ -627,3 +627,99 @@ export function isStubEdge(
   // If Manhattan distance > 1, it's a wrapped edge (stub)
   return rowDiff > 1 || colDiff > 1;
 }
+
+// ============================================================================
+// Random Spanning Tree
+// ============================================================================
+
+/**
+ * Union-Find (Disjoint Set Union) data structure for Kruskal's algorithm
+ */
+class UnionFind {
+  private parent: number[];
+  private rank: number[];
+  
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+    this.rank = Array(n).fill(0);
+  }
+  
+  find(x: number): number {
+    if (this.parent[x] !== x) {
+      this.parent[x] = this.find(this.parent[x]); // Path compression
+    }
+    return this.parent[x];
+  }
+  
+  union(x: number, y: number): boolean {
+    const rootX = this.find(x);
+    const rootY = this.find(y);
+    
+    if (rootX === rootY) return false; // Already in same set
+    
+    // Union by rank
+    if (this.rank[rootX] < this.rank[rootY]) {
+      this.parent[rootX] = rootY;
+    } else if (this.rank[rootX] > this.rank[rootY]) {
+      this.parent[rootY] = rootX;
+    } else {
+      this.parent[rootY] = rootX;
+      this.rank[rootX]++;
+    }
+    return true;
+  }
+}
+
+/**
+ * Fisher-Yates shuffle algorithm
+ */
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/**
+ * Generate a random spanning tree for a manifold using randomized Kruskal's algorithm.
+ * Returns the set of edge indices that form the spanning tree.
+ * 
+ * A spanning tree:
+ * - Contains exactly (n² - 1) edges (for n × n grid)
+ * - Connects all nodes
+ * - Has no cycles
+ */
+export function generateRandomSpanningTree(manifold: Manifold): Set<number> {
+  const numNodes = manifold.nodes.length;
+  const numEdges = manifold.edges.length;
+  
+  // Create shuffled array of edge indices
+  const edgeIndices = shuffleArray(Array.from({ length: numEdges }, (_, i) => i));
+  
+  const uf = new UnionFind(numNodes);
+  const treeEdges = new Set<number>();
+  
+  // Kruskal's algorithm: add edges that don't create cycles
+  for (const edgeIdx of edgeIndices) {
+    if (treeEdges.size === numNodes - 1) break; // Tree is complete
+    
+    const edge = manifold.edges[edgeIdx];
+    if (uf.union(edge.from, edge.to)) {
+      treeEdges.add(edgeIdx);
+    }
+  }
+  
+  return treeEdges;
+}
+
+/**
+ * Check if an edge (by index) is part of the spanning tree
+ */
+export function isTreeEdge(
+  edgeIdx: number,
+  spanningTreeEdges: Set<number>,
+): boolean {
+  return spanningTreeEdges.has(edgeIdx);
+}

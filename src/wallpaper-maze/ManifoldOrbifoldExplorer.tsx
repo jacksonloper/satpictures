@@ -23,6 +23,7 @@ import {
   matrixKey,
   matmul3x3,
   IDENTITY_3X3,
+  generateRandomSpanningTree,
   type ManifoldType,
   type Matrix3x3,
   type OrbifoldEdge,
@@ -67,16 +68,32 @@ export function ManifoldOrbifoldExplorer() {
   const [multiplier, setMultiplier] = useState(2);
   const [showOrbifold, setShowOrbifold] = useState(false);
   const [showEdgeDetails, setShowEdgeDetails] = useState(false);
+  const [spanningTree, setSpanningTree] = useState<Set<number> | null>(null);
   
   // Build manifold and orbifold
   const manifold = useMemo(() => buildManifold(manifoldType, size), [manifoldType, size]);
   const orbifold = useMemo(() => buildOrbifold(manifoldType, size), [manifoldType, size]);
+  
+  // Clear spanning tree when manifold changes
+  useMemo(() => {
+    setSpanningTree(null);
+  }, [manifoldType, size]);
   
   // Expand copies using BFS
   const copies = useMemo(() => {
     if (!showOrbifold) return [];
     return expandCopies(orbifold, multiplier);
   }, [orbifold, multiplier, showOrbifold]);
+  
+  // Generate random spanning tree
+  const handleGenerateSpanningTree = useCallback(() => {
+    setSpanningTree(generateRandomSpanningTree(manifold));
+  }, [manifold]);
+  
+  // Clear spanning tree
+  const handleClearSpanningTree = useCallback(() => {
+    setSpanningTree(null);
+  }, []);
   
   // Handle node click in fundamental domain (identity copy)
   const handleNodeClick = useCallback((nodeIndex: number) => {
@@ -173,6 +190,39 @@ export function ManifoldOrbifoldExplorer() {
       );
     }
     
+    // Draw spanning tree edges (if present)
+    const treeEdgeElements: ReactNode[] = [];
+    if (spanningTree) {
+      for (const edgeIdx of spanningTree) {
+        const edge = manifold.edges[edgeIdx];
+        const fromNode = manifold.nodes[edge.from];
+        const toNode = manifold.nodes[edge.to];
+        
+        // Skip wrapped edges visually (they would go across the whole grid)
+        const rowDiff = Math.abs(fromNode.row - toNode.row);
+        const colDiff = Math.abs(fromNode.col - toNode.col);
+        if (rowDiff > 1 || colDiff > 1) continue;
+        
+        const x1 = PADDING + fromNode.col * CELL_SIZE + CELL_SIZE / 2;
+        const y1 = PADDING + fromNode.row * CELL_SIZE + CELL_SIZE / 2;
+        const x2 = PADDING + toNode.col * CELL_SIZE + CELL_SIZE / 2;
+        const y2 = PADDING + toNode.row * CELL_SIZE + CELL_SIZE / 2;
+        
+        treeEdgeElements.push(
+          <line
+            key={`tree-${edgeIdx}`}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke="#27ae60"
+            strokeWidth={4}
+            opacity={0.7}
+          />
+        );
+      }
+    }
+    
     // Draw edges for selected node (only non-wrapped edges)
     const edgeElements: ReactNode[] = [];
     const isInFundamentalDomain = selection && matrixKey(selection.copyMatrix) === matrixKey(IDENTITY_3X3);
@@ -246,6 +296,7 @@ export function ManifoldOrbifoldExplorer() {
     return (
       <svg width={width} height={height}>
         {gridLines}
+        {treeEdgeElements}
         {edgeElements}
         {nodeElements}
       </svg>
@@ -280,6 +331,46 @@ export function ManifoldOrbifoldExplorer() {
     copies.forEach((copy, i) => copyIndexMap.set(copy.key, i));
     
     const elements: ReactNode[] = [];
+    
+    // Draw spanning tree edges in lifted graph (if present)
+    if (spanningTree) {
+      for (let copyIdx = 0; copyIdx < copies.length; copyIdx++) {
+        const copy = copies[copyIdx];
+        const copyKey = matrixKey(copy.matrix);
+        
+        // For each tree edge in the manifold, draw it in this copy
+        for (const edgeIdx of spanningTree) {
+          // Get the corresponding orbifold edge
+          const orbEdge = orbifold.edges[edgeIdx];
+          
+          // Source position in this copy
+          const fromNode = orbifold.nodes[orbEdge.from];
+          const fromPos = applyMatrix3x3(copy.matrix, fromNode.col + NODE_CENTER_OFFSET, fromNode.row + NODE_CENTER_OFFSET);
+          const fromX = fromPos.x * scale + offsetX;
+          const fromY = fromPos.y * scale + offsetY;
+          
+          // Target position: use the voltage to determine the target copy
+          const targetCopyMatrix = matmul3x3(copy.matrix, orbEdge.voltage);
+          const toNode = orbifold.nodes[orbEdge.to];
+          const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col + NODE_CENTER_OFFSET, toNode.row + NODE_CENTER_OFFSET);
+          const toX = toPos.x * scale + offsetX;
+          const toY = toPos.y * scale + offsetY;
+          
+          elements.push(
+            <line
+              key={`tree-${copyKey}-${edgeIdx}`}
+              x1={fromX}
+              y1={fromY}
+              x2={toX}
+              y2={toY}
+              stroke="#27ae60"
+              strokeWidth={3}
+              opacity={0.6}
+            />
+          );
+        }
+      }
+    }
     
     // Draw copy outlines and nodes
     for (let copyIdx = 0; copyIdx < copies.length; copyIdx++) {
@@ -497,9 +588,56 @@ export function ManifoldOrbifoldExplorer() {
             {showOrbifold ? "Hide Copies" : "Show Copies"}
           </button>
         </div>
+        
+        {/* Spanning Tree Controls */}
+        <div style={{ 
+          padding: "15px", 
+          backgroundColor: "#f8f9fa", 
+          borderRadius: "8px",
+          minWidth: "200px"
+        }}>
+          <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
+            Spanning Tree:
+          </label>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <button
+              onClick={handleGenerateSpanningTree}
+              style={{ 
+                padding: "8px 16px", 
+                fontSize: "14px",
+                backgroundColor: "#27ae60",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer"
+              }}
+            >
+              🌲 Generate
+            </button>
+            {spanningTree && (
+              <button
+                onClick={handleClearSpanningTree}
+                style={{ 
+                  padding: "8px 16px", 
+                  fontSize: "14px",
+                  backgroundColor: "#e74c3c",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer"
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {spanningTree && (
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "#555" }}>
+              {spanningTree.size} edges in tree
+            </div>
+          )}
+        </div>
       </div>
-      
-      {/* Info Panel */}
       <div style={{ 
         marginBottom: "20px", 
         padding: "15px", 
