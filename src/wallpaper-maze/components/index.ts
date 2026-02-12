@@ -8,7 +8,7 @@ export type { SketchpadProps } from "./Sketchpad";
 export { SubManifoldViewer } from "./SubManifoldViewer";
 export type { SubManifoldViewerProps } from "./SubManifoldViewer";
 
-export { OrbifoldLiftViewer, getOriginalNeighbors } from "./OrbifoldLiftViewer";
+export { OrbifoldLiftViewer } from "./OrbifoldLiftViewer";
 export type { OrbifoldLiftViewerProps } from "./OrbifoldLiftViewer";
 
 export { WallpaperMazeExplorerV2 } from "./WallpaperMazeExplorerV2";

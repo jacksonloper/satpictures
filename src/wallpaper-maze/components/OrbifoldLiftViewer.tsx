@@ -3,11 +3,14 @@
  *
  * Displays the lifted graph from an orbifold lift operation.
  * Nodes are colored by their root connection, edges show the spanning tree.
- * When a node is selected, shows all 4 edges from the original manifold with labels.
+ * 
+ * IMPORTANT: When a node is selected, edges are shown based on the explicitly
+ * stored data in the graph structure (via edge.originalEdge), NOT hardcoded
+ * N/S/E/W directions. Edge labels correspond to manifold edge indices.
  */
 
 import { useMemo, useCallback } from "react";
-import type { OrbifoldLiftGraph, LiftedNode, ManifoldNode, ManifoldEdge } from "../manifold/types";
+import type { OrbifoldLiftGraph, LiftedNode, LiftedEdge } from "../manifold/types";
 import type { SubManifold } from "../manifold/types";
 
 export interface OrbifoldLiftViewerProps {
@@ -28,17 +31,6 @@ export interface OrbifoldLiftViewerProps {
   /** SVG ref for downloading */
   svgRef?: React.RefObject<SVGSVGElement | null>;
 }
-
-/** Direction labels for edges - same as SubManifoldViewer */
-const DIRECTION_LABELS: Record<string, string> = {
-  N: "(1)",
-  S: "(2)",
-  E: "(3)",
-  W: "(4)",
-};
-
-/** Direction order - same as SubManifoldViewer */
-const DIRECTION_ORDER = ["N", "S", "E", "W"] as const;
 
 /**
  * Golden ratio for evenly spreading colors
@@ -163,70 +155,72 @@ export function OrbifoldLiftViewer({
     };
   }, [graph.bounds, padding]);
 
-  // Build adjacency list from graph edges for quick lookup
-  const adjacencyByNodeId = useMemo(() => {
-    const adj = new Map<number, Set<number>>();
-    for (const edge of graph.edges) {
-      if (!adj.has(edge.fromId)) adj.set(edge.fromId, new Set());
-      if (!adj.has(edge.toId)) adj.set(edge.toId, new Set());
-      adj.get(edge.fromId)!.add(edge.toId);
-      adj.get(edge.toId)!.add(edge.fromId);
+  // Build index of manifold edges by edge key for quick lookup of edge index
+  const manifoldEdgeIndex = useMemo(() => {
+    const edgeToIdx = new Map<string, number>();
+    const allEdges = manifold.getEdges();
+    for (let i = 0; i < allEdges.length; i++) {
+      edgeToIdx.set(manifold.edgeKey(allEdges[i]), i);
     }
-    return adj;
+    return edgeToIdx;
+  }, [manifold]);
+
+  // Build index of lifted edges by node ID for quick lookup
+  const edgesByLiftedNodeId = useMemo(() => {
+    const edgeIndex = new Map<number, LiftedEdge[]>();
+    for (const edge of graph.edges) {
+      if (!edgeIndex.has(edge.fromId)) edgeIndex.set(edge.fromId, []);
+      if (!edgeIndex.has(edge.toId)) edgeIndex.set(edge.toId, []);
+      edgeIndex.get(edge.fromId)!.push(edge);
+      edgeIndex.get(edge.toId)!.push(edge);
+    }
+    return edgeIndex;
   }, [graph.edges]);
 
-  // Compute selected node's edges with labels
-  // For each direction (N, S, E, W) of the original manifold node,
-  // find the corresponding lifted edge(s) if they exist
+  // Get edges for the selected node directly from the stored data structure
+  // Uses edge.originalEdge to find the manifold edge index for labeling
   const selectedNodeEdges = useMemo(() => {
     if (selectedNodeId === null) return null;
     
     const selectedNode = graph.nodeById.get(selectedNodeId);
     if (!selectedNode) return null;
     
-    const neighbors = manifold.getNeighbors(selectedNode.originalNode);
+    // Get lifted edges connected to this node
+    const liftedEdges = edgesByLiftedNodeId.get(selectedNodeId) || [];
+    
+    // Build result with edge index labels from the original manifold
     const edges: Array<{
-      direction: "N" | "S" | "E" | "W";
+      edgeIdx: number;
       label: string;
-      neighborOriginal: ManifoldNode;
-      // The lifted edge connecting to this neighbor (if exists in graph)
-      liftedEdgeToNeighbor: { neighborNode: LiftedNode; isIncluded: boolean } | null;
+      liftedEdge: LiftedEdge;
+      neighborNode: LiftedNode;
+      isIncluded: boolean;
     }> = [];
     
-    // Get the set of node IDs connected to this node in the lifted graph
-    const connectedNodeIds = adjacencyByNodeId.get(selectedNodeId) || new Set();
-    
-    for (const dir of DIRECTION_ORDER) {
-      const neighborOriginal = neighbors[dir];
-      const neighborOriginalKey = manifold.nodeKey(neighborOriginal);
+    for (const liftedEdge of liftedEdges) {
+      // Get the neighbor node
+      const neighborId = liftedEdge.fromId === selectedNodeId ? liftedEdge.toId : liftedEdge.fromId;
+      const neighborNode = graph.nodeById.get(neighborId);
+      if (!neighborNode) continue;
       
-      // Find lifted nodes corresponding to this neighbor
-      const neighborLiftedNodes = graph.nodesByOriginal.get(neighborOriginalKey) || [];
+      // Get the original manifold edge index using the stored originalEdge
+      const originalEdgeKey = manifold.edgeKey(liftedEdge.originalEdge);
+      const edgeIdx = manifoldEdgeIndex.get(originalEdgeKey) ?? -1;
       
-      // Find if any of these lifted neighbors are connected to the selected node
-      let liftedEdgeToNeighbor: { neighborNode: LiftedNode; isIncluded: boolean } | null = null;
-      
-      for (const neighborLifted of neighborLiftedNodes) {
-        if (connectedNodeIds.has(neighborLifted.id)) {
-          // This neighbor is connected via an edge in the lifted graph
-          // Check if the original edge is included in the sub-manifold
-          const originalEdge: ManifoldEdge = { from: selectedNode.originalNode, to: neighborOriginal };
-          const isIncluded = subManifold.hasEdge(originalEdge);
-          liftedEdgeToNeighbor = { neighborNode: neighborLifted, isIncluded };
-          break;
-        }
-      }
+      // Check if the original edge is included in the sub-manifold
+      const isIncluded = subManifold.hasEdge(liftedEdge.originalEdge);
       
       edges.push({
-        direction: dir,
-        label: DIRECTION_LABELS[dir],
-        neighborOriginal,
-        liftedEdgeToNeighbor,
+        edgeIdx,
+        label: `(${edgeIdx + 1})`, // 1-indexed label based on manifold edge index
+        liftedEdge,
+        neighborNode,
+        isIncluded,
       });
     }
     
     return { node: selectedNode, edges };
-  }, [selectedNodeId, graph, manifold, subManifold, adjacencyByNodeId]);
+  }, [selectedNodeId, graph, manifold, subManifold, edgesByLiftedNodeId, manifoldEdgeIndex]);
 
   // Render edges - skip edges connected to selected node (rendered separately with labels)
   const edgeElements = useMemo(() => {
@@ -266,7 +260,7 @@ export function OrbifoldLiftViewer({
     return elements;
   }, [graph.edges, graph.nodeById, offsetX, offsetY, rootIndices, selectedNodeId]);
 
-  // Render selected node's edges with labels
+  // Render selected node's edges with labels (using data from stored edges)
   const selectedEdgeElements = useMemo(() => {
     if (!selectedNodeEdges) return null;
     
@@ -274,92 +268,53 @@ export function OrbifoldLiftViewer({
     const elements: React.ReactNode[] = [];
     const x = node.x + offsetX;
     const y = node.y + offsetY;
-    const labelOffset = 20; // Distance for label from node center
     
-    for (const { direction, label, liftedEdgeToNeighbor } of edges) {
-      // Determine direction vector for label positioning
-      let dx = 0, dy = 0;
-      switch (direction) {
-        case "N": dy = -1; break;
-        case "S": dy = 1; break;
-        case "E": dx = 1; break;
-        case "W": dx = -1; break;
-      }
+    for (const { edgeIdx, label, neighborNode, isIncluded } of edges) {
+      // Draw edge to the lifted neighbor
+      const nx = neighborNode.x + offsetX;
+      const ny = neighborNode.y + offsetY;
       
-      if (liftedEdgeToNeighbor) {
-        // Draw edge to the lifted neighbor
-        const { neighborNode, isIncluded } = liftedEdgeToNeighbor;
-        const nx = neighborNode.x + offsetX;
-        const ny = neighborNode.y + offsetY;
-        
-        const edgeColor = isIncluded ? "#e91e63" : "#999";
-        const strokeDash = isIncluded ? undefined : "6,3";
-        
-        elements.push(
-          <line
-            key={`selected-edge-${direction}`}
-            x1={x}
-            y1={y}
-            x2={nx}
-            y2={ny}
-            stroke={edgeColor}
-            strokeWidth={3}
-            strokeLinecap="round"
-            strokeDasharray={strokeDash}
-          />
-        );
-        
-        // Place label at midpoint of edge
-        const labelX = (x + nx) / 2;
-        const labelY = (y + ny) / 2;
-        elements.push(
-          <text
-            key={`label-${direction}`}
-            x={labelX + dx * 10}
-            y={labelY + dy * 10}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={12}
-            fontWeight="bold"
-            fill="#333"
-          >
-            {label}
-          </text>
-        );
-      } else {
-        // No lifted edge - draw a short stub to indicate the direction
-        // This happens when the neighbor is blocked or not connected in the lift
-        const stubLength = 15;
-        elements.push(
-          <line
-            key={`selected-edge-${direction}`}
-            x1={x}
-            y1={y}
-            x2={x + dx * stubLength}
-            y2={y + dy * stubLength}
-            stroke="#999"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeDasharray="4,2"
-          />
-        );
-        
-        // Place label at end of stub
-        elements.push(
-          <text
-            key={`label-${direction}`}
-            x={x + dx * labelOffset}
-            y={y + dy * labelOffset}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={12}
-            fontWeight="bold"
-            fill="#999"
-          >
-            {label}
-          </text>
-        );
-      }
+      const edgeColor = isIncluded ? "#e91e63" : "#999";
+      const strokeDash = isIncluded ? undefined : "6,3";
+      
+      elements.push(
+        <line
+          key={`selected-edge-${edgeIdx}`}
+          x1={x}
+          y1={y}
+          x2={nx}
+          y2={ny}
+          stroke={edgeColor}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeDasharray={strokeDash}
+        />
+      );
+      
+      // Place label at midpoint of edge
+      const labelX = (x + nx) / 2;
+      const labelY = (y + ny) / 2;
+      // Offset label perpendicular to edge direction
+      const edgeDx = nx - x;
+      const edgeDy = ny - y;
+      const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+      const perpDx = edgeLen > 0 ? -edgeDy / edgeLen * 10 : 0;
+      const perpDy = edgeLen > 0 ? edgeDx / edgeLen * 10 : 0;
+      
+      elements.push(
+        <text
+          key={`label-${edgeIdx}`}
+          x={labelX + perpDx}
+          y={labelY + perpDy}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize={12}
+          fontWeight="bold"
+          fill="#333"
+        >
+          {label}
+        </text>
+      );
     }
     
     return elements;
@@ -467,15 +422,4 @@ export function OrbifoldLiftViewer({
       )}
     </div>
   );
-}
-
-/**
- * Find the 4 neighbors of a node in the original manifold
- */
-export function getOriginalNeighbors(
-  node: LiftedNode,
-  manifold: SubManifold["manifold"]
-): ManifoldNode[] {
-  const neighbors = manifold.getNeighbors(node.originalNode);
-  return [neighbors.N, neighbors.S, neighbors.E, neighbors.W];
 }
