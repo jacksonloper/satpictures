@@ -48,6 +48,8 @@ interface OrientedEdge {
 const CELL_SIZE = 50;
 const NODE_RADIUS = 15;
 const PADDING = 40;
+/** Offset to center position within a cell (0.5 = center of 0-1 range) */
+const NODE_CENTER_OFFSET = 0.5;
 
 // Golden ratio for spreading colors
 const GOLDEN_RATIO = 0.618033988749895;
@@ -111,6 +113,7 @@ export function ManifoldOrbifoldExplorer() {
   
   // Get oriented edges from orbifold - only OUTGOING edges from the selected node
   // Each node has exactly 4 outgoing edges (N, S, E, W) in the orbifold
+  // Note: The orbifold builder (buildP2Orbifold) adds edges in N, S, E, W order per node
   const orientedEdges = useMemo((): OrientedEdge[] => {
     if (!selection) return [];
     const nodeIndex = selection.nodeIndex;
@@ -118,19 +121,19 @@ export function ManifoldOrbifoldExplorer() {
     // Only show outgoing edges from this node
     // The orbifold encodes each direction as an outgoing edge
     const result: OrientedEdge[] = [];
-    const directions = ["N", "S", "E", "W"];
+    // Edge order matches buildP2Orbifold/buildP1Orbifold: N, S, E, W (or E, S for P1)
+    const directions = orbifold.type === "P1" ? ["E", "S", "E", "S"] : ["N", "S", "E", "W"];
     let dirIndex = 0;
     
     for (const edge of orbifold.edges) {
       if (edge.from === nodeIndex) {
         // Edge goes FROM selected node - use voltage as-is
-        // For P2: edges are stored in order N, S, E, W per node
         result.push({
           targetNodeIndex: edge.to,
           voltage: edge.voltage,
           isReversed: false,
           originalEdge: edge,
-          direction: directions[dirIndex % 4],
+          direction: directions[dirIndex % directions.length],
         });
         dirIndex++;
       }
@@ -258,7 +261,7 @@ export function ManifoldOrbifoldExplorer() {
     
     for (const copy of copies) {
       for (const node of orbifold.nodes) {
-        const pos = applyMatrix3x3(copy.matrix, node.col + 0.5, node.row + 0.5);
+        const pos = applyMatrix3x3(copy.matrix, node.col + NODE_CENTER_OFFSET, node.row + NODE_CENTER_OFFSET);
         minX = Math.min(minX, pos.x);
         minY = Math.min(minY, pos.y);
         maxX = Math.max(maxX, pos.x);
@@ -287,7 +290,7 @@ export function ManifoldOrbifoldExplorer() {
       
       // Draw nodes in this copy
       for (const node of orbifold.nodes) {
-        const pos = applyMatrix3x3(copy.matrix, node.col + 0.5, node.row + 0.5);
+        const pos = applyMatrix3x3(copy.matrix, node.col + NODE_CENTER_OFFSET, node.row + NODE_CENTER_OFFSET);
         const sx = pos.x * scale + offsetX;
         const sy = pos.y * scale + offsetY;
         
@@ -338,7 +341,7 @@ export function ManifoldOrbifoldExplorer() {
         
         // Source position: selected node in its copy
         const fromNode = orbifold.nodes[selectedNodeIndex];
-        const fromPos = applyMatrix3x3(selectedCopyMatrix, fromNode.col + 0.5, fromNode.row + 0.5);
+        const fromPos = applyMatrix3x3(selectedCopyMatrix, fromNode.col + NODE_CENTER_OFFSET, fromNode.row + NODE_CENTER_OFFSET);
         const fromX = fromPos.x * scale + offsetX;
         const fromY = fromPos.y * scale + offsetY;
         
@@ -346,7 +349,7 @@ export function ManifoldOrbifoldExplorer() {
         // The target copy = selectedCopyMatrix * voltage
         const targetCopyMatrix = matmul3x3(selectedCopyMatrix, orientedEdge.voltage);
         const toNode = orbifold.nodes[orientedEdge.targetNodeIndex];
-        const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col + 0.5, toNode.row + 0.5);
+        const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col + NODE_CENTER_OFFSET, toNode.row + NODE_CENTER_OFFSET);
         const toX = toPos.x * scale + offsetX;
         const toY = toPos.y * scale + offsetY;
         
@@ -586,7 +589,7 @@ export function ManifoldOrbifoldExplorer() {
           
           {showEdgeDetails && (() => {
             const selectedNode = manifold.nodes[selection.nodeIndex];
-            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.col + 0.5, selectedNode.row + 0.5);
+            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.col + NODE_CENTER_OFFSET, selectedNode.row + NODE_CENTER_OFFSET);
             const isNonIdentityCopy = matrixKey(selection.copyMatrix) !== matrixKey(IDENTITY_3X3);
             
             return (
@@ -633,7 +636,7 @@ export function ManifoldOrbifoldExplorer() {
                       // targetCopyMatrix = currentCopyMatrix * voltage
                       // then apply to target node
                       const targetCopyMatrix = matmul3x3(selection.copyMatrix, orientedEdge.voltage);
-                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + 0.5, targetNode.row + 0.5);
+                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + NODE_CENTER_OFFSET, targetNode.row + NODE_CENTER_OFFSET);
                       
                       return (
                         <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
