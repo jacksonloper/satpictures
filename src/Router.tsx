@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
 import { WallpaperMazeExplorer } from './wallpaper-maze';
+import { ManifoldOrbifoldExplorer } from './wallpaper-maze/ManifoldOrbifoldExplorer';
 
-type Page = 'main' | 'polyforms' | 'wallpapermazes';
+type Page = 'main' | 'polyforms' | 'wallpapermazes' | 'manifolds';
 
 /** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
@@ -12,6 +13,7 @@ export function Router() {
     // Map hash to page
     if (hash === 'polyforms') return 'polyforms';
     if (hash === 'wallpapermazes') return 'wallpapermazes';
+    if (hash === 'manifolds') return 'manifolds';
     return 'main';
   });
 
@@ -20,6 +22,7 @@ export function Router() {
       const hash = window.location.hash.slice(1);
       if (hash === 'polyforms') setPage('polyforms');
       else if (hash === 'wallpapermazes') setPage('wallpapermazes');
+      else if (hash === 'manifolds') setPage('manifolds');
       else setPage('main');
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -68,12 +71,24 @@ export function Router() {
         >
           🧱 Wallpaper Mazes
         </a>
+        <a
+          href="#manifolds"
+          style={{
+            color: page === 'manifolds' ? '#3498db' : 'white',
+            textDecoration: 'none',
+            fontWeight: page === 'manifolds' ? 'bold' : 'normal',
+            fontSize: '16px',
+          }}
+        >
+          🔷 Manifolds
+        </a>
       </nav>
 
       {/* Page Content */}
       {page === 'main' && <App />}
       {page === 'polyforms' && <PolyformExplorer />}
       {page === 'wallpapermazes' && <WallpaperMazeExplorer />}
+      {page === 'manifolds' && <ManifoldOrbifoldExplorer />}
     </>
   );
 }
