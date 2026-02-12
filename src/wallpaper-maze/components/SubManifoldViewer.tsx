@@ -200,7 +200,7 @@ export function SubManifoldViewer({
           stroke={getEdgeColor(isIncluded)}
           strokeWidth={isIncluded ? 3 : 1}
           strokeLinecap="round"
-          strokeDasharray={isIncluded ? "none" : "4,2"}
+          strokeDasharray={isIncluded ? undefined : "4,2"}
         />
       );
     }
@@ -300,7 +300,7 @@ export function SubManifoldViewer({
       }
       
       const edgeColor = isIncluded ? "#e91e63" : "#999"; // Pink for included, gray for excluded
-      const strokeDash = isIncluded ? "none" : "4,2";
+      const strokeDash = isIncluded ? undefined : "4,2";
       
       if (isWrapping) {
         // Draw stub for wrapping edge

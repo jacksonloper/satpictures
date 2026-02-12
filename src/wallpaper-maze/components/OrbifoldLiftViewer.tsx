@@ -293,7 +293,7 @@ export function OrbifoldLiftViewer({
         const ny = neighborNode.y + offsetY;
         
         const edgeColor = isIncluded ? "#e91e63" : "#999";
-        const strokeDash = isIncluded ? "none" : "6,3";
+        const strokeDash = isIncluded ? undefined : "6,3";
         
         elements.push(
           <line
