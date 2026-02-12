@@ -30,6 +30,11 @@ const DEFAULT_MULTIPLIER = 2;
 const CELL_SIZE = 40;
 const GRID_PADDING = 20;
 
+// Orbifold graph rendering constants
+const ORBIFOLD_CELL_SIZE = 50;
+const ORBIFOLD_PADDING = 30;
+const ORBIFOLD_DOT_RADIUS = 8;
+
 // Types
 interface GridCell {
   row: number;
@@ -493,14 +498,10 @@ export function WallpaperMazeExplorer() {
   const renderOrbifoldGraph = () => {
     if (!solution) return null;
     
-    const orbifoldCellSize = 50;
-    const orbifoldPadding = 30;
-    const dotRadius = 8;
-    
     // For P3, render as a square even though it becomes a rhombus in the lift
     const gridSize = length;
-    const svgWidth = gridSize * orbifoldCellSize + orbifoldPadding * 2;
-    const svgHeight = gridSize * orbifoldCellSize + orbifoldPadding * 2;
+    const svgWidth = gridSize * ORBIFOLD_CELL_SIZE + ORBIFOLD_PADDING * 2;
+    const svgHeight = gridSize * ORBIFOLD_CELL_SIZE + ORBIFOLD_PADDING * 2;
     
     const dots: React.ReactNode[] = [];
     const edges: React.ReactNode[] = [];
@@ -508,10 +509,10 @@ export function WallpaperMazeExplorer() {
     
     // Draw edges first (below dots)
     for (const edge of orbifoldEdges) {
-      const x1 = orbifoldPadding + edge.from.col * orbifoldCellSize + orbifoldCellSize / 2;
-      const y1 = orbifoldPadding + edge.from.row * orbifoldCellSize + orbifoldCellSize / 2;
-      const x2 = orbifoldPadding + edge.to.col * orbifoldCellSize + orbifoldCellSize / 2;
-      const y2 = orbifoldPadding + edge.to.row * orbifoldCellSize + orbifoldCellSize / 2;
+      const x1 = ORBIFOLD_PADDING + edge.from.col * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
+      const y1 = ORBIFOLD_PADDING + edge.from.row * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
+      const x2 = ORBIFOLD_PADDING + edge.to.col * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
+      const y2 = ORBIFOLD_PADDING + edge.to.row * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
       
       // Handle wrapping edges (they will have large distances)
       const dx = Math.abs(edge.from.col - edge.to.col);
@@ -543,8 +544,8 @@ export function WallpaperMazeExplorer() {
         const isVacant = solution.vacantCells.has(cellKey);
         const isRoot = row === solution.rootRow && col === solution.rootCol;
         
-        const cx = orbifoldPadding + col * orbifoldCellSize + orbifoldCellSize / 2;
-        const cy = orbifoldPadding + row * orbifoldCellSize + orbifoldCellSize / 2;
+        const cx = ORBIFOLD_PADDING + col * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
+        const cy = ORBIFOLD_PADDING + row * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
         
         if (isVacant) {
           // Vacant cells are small black dots
@@ -553,7 +554,7 @@ export function WallpaperMazeExplorer() {
               key={`orbifold-dot-${row}-${col}`}
               cx={cx}
               cy={cy}
-              r={dotRadius / 2}
+              r={ORBIFOLD_DOT_RADIUS / 2}
               fill="#000"
             />
           );
@@ -564,7 +565,7 @@ export function WallpaperMazeExplorer() {
               key={`orbifold-dot-${row}-${col}`}
               cx={cx}
               cy={cy}
-              r={isRoot ? dotRadius * 1.3 : dotRadius}
+              r={isRoot ? ORBIFOLD_DOT_RADIUS * 1.3 : ORBIFOLD_DOT_RADIUS}
               fill={isRoot ? "#ffa726" : "#666"}
               stroke={isRoot ? "#000" : "none"}
               strokeWidth={isRoot ? 2 : 0}
@@ -577,7 +578,7 @@ export function WallpaperMazeExplorer() {
           <text
             key={`orbifold-label-${row}-${col}`}
             x={cx}
-            y={cy + dotRadius + 12}
+            y={cy + ORBIFOLD_DOT_RADIUS + 12}
             textAnchor="middle"
             fontSize="10"
             fill="#999"
