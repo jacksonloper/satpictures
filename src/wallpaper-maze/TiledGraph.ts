@@ -404,3 +404,116 @@ export function findEquivalentNodes(graph: TiledGraph, node: TiledNode): TiledNo
          n.fundamentalCol === node.fundamentalCol
   );
 }
+
+/**
+ * A pair of neighboring nodes from different roots (a "cross-root" edge)
+ */
+export interface CrossRootNeighborPair {
+  /** First node in the pair */
+  node1: TiledNode;
+  /** Second node in the pair */
+  node2: TiledNode;
+  /** The fundamental domain edge key (sorted "r1,c1-r2,c2") */
+  fundamentalEdgeKey: string;
+}
+
+/**
+ * Find all pairs of neighboring coordinates in the lifted graph (tiled space)
+ * where the two nodes belong to *different* roots.
+ * 
+ * This is used for the "open boundary" feature - we can select a pair and
+ * add an edge between them in the orbifold to merge two regions.
+ */
+export function findCrossRootNeighborPairs(graph: TiledGraph): CrossRootNeighborPair[] {
+  const pairs: CrossRootNeighborPair[] = [];
+  const seenEdges = new Set<string>();
+  
+  for (const node of graph.nodes) {
+    // Skip nodes that aren't connected to any root
+    if (node.rootIndex < 0) continue;
+    
+    // Check all 4 directions for neighbors
+    for (const dir of ALL_DIRECTIONS) {
+      const delta = DIRECTION_DELTA[dir];
+      const neighborAbsRow = node.absRow + delta.dRow;
+      const neighborAbsCol = node.absCol + delta.dCol;
+      
+      // Skip if neighbor is out of bounds (we only consider edges within the lifted graph)
+      if (neighborAbsRow < 0 || neighborAbsRow >= graph.totalSize ||
+          neighborAbsCol < 0 || neighborAbsCol >= graph.totalSize) {
+        continue;
+      }
+      
+      // Look up the neighbor
+      const neighborKey = posKey(neighborAbsRow, neighborAbsCol);
+      const neighborId = graph.nodeAt.get(neighborKey);
+      if (neighborId === undefined) continue;
+      
+      const neighbor = graph.nodes[neighborId];
+      
+      // Skip if neighbor isn't connected to any root
+      if (neighbor.rootIndex < 0) continue;
+      
+      // Check if they have DIFFERENT roots
+      if (node.rootIndex === neighbor.rootIndex) continue;
+      
+      // Create a sorted edge key to avoid duplicates
+      const edgeKey = node.id < neighbor.id 
+        ? `${node.id}-${neighbor.id}` 
+        : `${neighbor.id}-${node.id}`;
+      
+      if (seenEdges.has(edgeKey)) continue;
+      seenEdges.add(edgeKey);
+      
+      // Compute the fundamental domain edge key (sorted by coordinates)
+      const fundKey1 = `${node.fundamentalRow},${node.fundamentalCol}`;
+      const fundKey2 = `${neighbor.fundamentalRow},${neighbor.fundamentalCol}`;
+      const fundamentalEdgeKey = fundKey1 < fundKey2 
+        ? `${fundKey1}-${fundKey2}` 
+        : `${fundKey2}-${fundKey1}`;
+      
+      pairs.push({
+        node1: node,
+        node2: neighbor,
+        fundamentalEdgeKey,
+      });
+    }
+  }
+  
+  return pairs;
+}
+
+/**
+ * Represents an edge to add in the fundamental domain to open a boundary
+ */
+export interface OrbifoldEdgeToAdd {
+  /** First cell in the fundamental domain */
+  cell1: { row: number; col: number };
+  /** Second cell in the fundamental domain */
+  cell2: { row: number; col: number };
+  /** The root index that will be kept (other roots connected by this edge will merge into this one) */
+  survivingRootIndex: number;
+  /** The root index that will be absorbed */
+  absorbedRootIndex: number;
+}
+
+/**
+ * Given a cross-root neighbor pair, compute the edge to add in the orbifold (fundamental domain)
+ * and which root should "win" (absorb the other).
+ * 
+ * By convention, the lower root index survives.
+ */
+export function computeOrbifoldEdgeToAdd(pair: CrossRootNeighborPair): OrbifoldEdgeToAdd {
+  const { node1, node2 } = pair;
+  
+  // The lower root index survives
+  const survivingRootIndex = Math.min(node1.rootIndex, node2.rootIndex);
+  const absorbedRootIndex = Math.max(node1.rootIndex, node2.rootIndex);
+  
+  return {
+    cell1: { row: node1.fundamentalRow, col: node1.fundamentalCol },
+    cell2: { row: node2.fundamentalRow, col: node2.fundamentalCol },
+    survivingRootIndex,
+    absorbedRootIndex,
+  };
+}

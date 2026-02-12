@@ -6,11 +6,12 @@ import {
   getRootColor,
   computeWallSegments,
   findEquivalentNodes,
+  findCrossRootNeighborPairs,
 } from "./TiledGraph";
-import type { TiledGraph, TiledNode } from "./TiledGraph";
-import { buildP3TiledGraph, getP3RootColor } from "./P3TiledGraph";
-import type { P3TiledGraph, P3TiledNode } from "./P3TiledGraph";
-import { getWallpaperGroup, DIRECTION_DELTA } from "./WallpaperGroups";
+import type { TiledGraph, TiledNode, CrossRootNeighborPair } from "./TiledGraph";
+import { buildP3TiledGraph, getP3RootColor, findP3CrossRootNeighborPairs } from "./P3TiledGraph";
+import type { P3TiledGraph, P3TiledNode, P3CrossRootNeighborPair } from "./P3TiledGraph";
+import { getWallpaperGroup, DIRECTION_DELTA, ALL_DIRECTIONS } from "./WallpaperGroups";
 import type { WallpaperGroupName } from "./WallpaperGroups";
 import { P3RhombusRenderer } from "./P3RhombusRenderer";
 import { downloadSvg } from "../polyform-explorer/downloadUtils";
@@ -55,6 +56,7 @@ interface MazeSolution {
   vacantCells: Set<string>; // Store which cells were vacant at solve time
   rootRow: number; // Store the root row used for this solution
   rootCol: number; // Store the root col used for this solution
+  fixedMultiplier: number; // The multiplier at solve time (fixed for open boundary operations)
 }
 
 // View mode type for solution
@@ -114,33 +116,33 @@ export function WallpaperMazeExplorer() {
     setVacantCells(new Set()); // Reset vacant cells when grid size changes
   }, [length]);
   
-  // Build the tiled graph when solution changes (uses solution's stored wallpaper group and root)
+  // Build the tiled graph when solution changes (uses solution's stored wallpaper group, root, and fixed multiplier)
   const tiledGraph = useMemo<TiledGraph | null>(() => {
     if (!solution) return null;
     return buildTiledGraph(
       length,
-      multiplier,
+      solution.fixedMultiplier, // Use the fixed multiplier from the solution
       solution.wallpaperGroup, // Use the wallpaper group stored in the solution
       solution.rootRow, // Use the root stored in the solution
       solution.rootCol,
       solution.parentOf,
       solution.vacantCells // Pass vacant cells to the tiled graph builder
     );
-  }, [solution, length, multiplier]);
+  }, [solution, length]);
   
   // Build P3-specific tiled graph when solution is for P3
   const p3TiledGraph = useMemo<P3TiledGraph | null>(() => {
     if (!solution || solution.wallpaperGroup !== "P3") return null;
     return buildP3TiledGraph(
       length,
-      multiplier,
+      solution.fixedMultiplier, // Use the fixed multiplier from the solution
       cellSize,
       solution.rootRow, // Use the root stored in the solution
       solution.rootCol,
       solution.parentOf,
       solution.vacantCells
     );
-  }, [solution, length, multiplier, cellSize]);
+  }, [solution, length, cellSize]);
   
   // Get neighbor info for selected cell in fundamental domain (for sketchpad)
   const neighborInfo = useMemo(() => {
@@ -278,6 +280,7 @@ export function WallpaperMazeExplorer() {
     // Store a snapshot of current settings to be stored with the solution
     const currentWallpaperGroup = wallpaperGroup;
     const currentVacantCells = new Set(vacantCells);
+    const currentMultiplier = multiplier; // Fix the multiplier at solve time
     
     const worker = new WallpaperMazeWorker();
     workerRef.current = worker;
@@ -302,7 +305,8 @@ export function WallpaperMazeExplorer() {
           wallpaperGroup: currentWallpaperGroup,
           vacantCells: currentVacantCells,
           rootRow: safeRootRow,
-          rootCol: safeRootCol
+          rootCol: safeRootCol,
+          fixedMultiplier: currentMultiplier
         });
         setErrorMessage(null);
       } else {
@@ -327,7 +331,7 @@ export function WallpaperMazeExplorer() {
       vacantCells: Array.from(vacantCells),
     };
     worker.postMessage(request);
-  }, [length, rootRow, rootCol, wallpaperGroup, vacantCells]);
+  }, [length, rootRow, rootCol, wallpaperGroup, vacantCells, multiplier]);
   
   // Handle cancel button click
   const handleCancel = useCallback(() => {
@@ -385,6 +389,219 @@ export function WallpaperMazeExplorer() {
         break;
     }
   }, [activeTool, selectedCell, vacantCells, rootRow, rootCol]);
+  
+  // Compute cross-root neighbor pairs from the lifted graph
+  const crossRootPairs = useMemo<CrossRootNeighborPair[] | P3CrossRootNeighborPair[]>(() => {
+    if (!solution) return [];
+    if (solution.wallpaperGroup === "P3") {
+      if (!p3TiledGraph) return [];
+      return findP3CrossRootNeighborPairs(p3TiledGraph);
+    } else {
+      if (!tiledGraph) return [];
+      return findCrossRootNeighborPairs(tiledGraph);
+    }
+  }, [solution, tiledGraph, p3TiledGraph]);
+  
+  // Handle "Open Boundary" button click
+  // This finds a pair of neighboring nodes from different roots, adds an edge between them,
+  // and recomputes the solution (merging the two root regions).
+  const handleOpenBoundary = useCallback(() => {
+    if (!solution || crossRootPairs.length === 0) return;
+    
+    // Pick a random cross-root pair
+    const randomIndex = Math.floor(Math.random() * crossRootPairs.length);
+    const pair = crossRootPairs[randomIndex];
+    
+    // Determine the orbifold edge to add
+    const cell1 = { row: pair.node1.fundamentalRow, col: pair.node1.fundamentalCol };
+    const cell2 = { row: pair.node2.fundamentalRow, col: pair.node2.fundamentalCol };
+    
+    // Create a new parentOf map with the added edge
+    const newParentOf = new Map(solution.parentOf);
+    const cell1Key = `${cell1.row},${cell1.col}`;
+    const cell2Key = `${cell2.row},${cell2.col}`;
+    
+    // Get the root indices
+    const rootIndex1 = pair.node1.rootIndex;
+    const rootIndex2 = pair.node2.rootIndex;
+    
+    // The surviving root is the lower index; the absorbed root will be merged into it
+    const absorbedRootIndex = Math.max(rootIndex1, rootIndex2);
+    
+    // Make one cell the parent of the other (the absorbed root's cell becomes a child)
+    // The cell from the absorbed root should point to the cell from the surviving root
+    if (rootIndex1 === absorbedRootIndex) {
+      // cell1 is from the absorbed root, make it point to cell2
+      newParentOf.set(cell1Key, cell2);
+    } else {
+      // cell2 is from the absorbed root, make it point to cell1
+      newParentOf.set(cell2Key, cell1);
+    }
+    
+    // Update the solution with the new parentOf map
+    setSolution({
+      ...solution,
+      parentOf: newParentOf,
+    });
+    
+  }, [solution, crossRootPairs]);
+  
+  // Compute all edges in the orbifold (fundamental domain) for visualization
+  const orbifoldEdges = useMemo(() => {
+    if (!solution) return [];
+    const edges: Array<{ from: { row: number; col: number }; to: { row: number; col: number }; isPassage: boolean }> = [];
+    const seenEdges = new Set<string>();
+    const wpg = getWallpaperGroup(solution.wallpaperGroup);
+    
+    for (let row = 0; row < length; row++) {
+      for (let col = 0; col < length; col++) {
+        const cellKey = `${row},${col}`;
+        if (solution.vacantCells.has(cellKey)) continue;
+        
+        for (const dir of ALL_DIRECTIONS) {
+          const neighbor = wpg.getWrappedNeighbor(row, col, dir, length);
+          const neighborKey = `${neighbor.row},${neighbor.col}`;
+          
+          if (solution.vacantCells.has(neighborKey)) continue;
+          
+          // Create sorted edge key
+          const edgeKey = cellKey < neighborKey ? `${cellKey}-${neighborKey}` : `${neighborKey}-${cellKey}`;
+          if (seenEdges.has(edgeKey)) continue;
+          seenEdges.add(edgeKey);
+          
+          // Check if this is a parent-child relationship
+          const cellParent = solution.parentOf.get(cellKey);
+          const neighborParent = solution.parentOf.get(neighborKey);
+          
+          const isParentOfCell = cellParent && cellParent.row === neighbor.row && cellParent.col === neighbor.col;
+          const isChildOfCell = neighborParent && neighborParent.row === row && neighborParent.col === col;
+          const isPassage = !!(isParentOfCell || isChildOfCell);
+          
+          edges.push({
+            from: { row, col },
+            to: neighbor,
+            isPassage,
+          });
+        }
+      }
+    }
+    
+    return edges;
+  }, [solution, length]);
+  
+  // Render orbifold graph (fundamental domain as a graph)
+  const renderOrbifoldGraph = () => {
+    if (!solution) return null;
+    
+    const orbifoldCellSize = 50;
+    const orbifoldPadding = 30;
+    const dotRadius = 8;
+    
+    // For P3, render as a square even though it becomes a rhombus in the lift
+    const gridSize = length;
+    const svgWidth = gridSize * orbifoldCellSize + orbifoldPadding * 2;
+    const svgHeight = gridSize * orbifoldCellSize + orbifoldPadding * 2;
+    
+    const dots: React.ReactNode[] = [];
+    const edges: React.ReactNode[] = [];
+    const labels: React.ReactNode[] = [];
+    
+    // Draw edges first (below dots)
+    for (const edge of orbifoldEdges) {
+      const x1 = orbifoldPadding + edge.from.col * orbifoldCellSize + orbifoldCellSize / 2;
+      const y1 = orbifoldPadding + edge.from.row * orbifoldCellSize + orbifoldCellSize / 2;
+      const x2 = orbifoldPadding + edge.to.col * orbifoldCellSize + orbifoldCellSize / 2;
+      const y2 = orbifoldPadding + edge.to.row * orbifoldCellSize + orbifoldCellSize / 2;
+      
+      // Handle wrapping edges (they will have large distances)
+      const dx = Math.abs(edge.from.col - edge.to.col);
+      const dy = Math.abs(edge.from.row - edge.to.row);
+      const isWrappingEdge = dx > 1 || dy > 1;
+      
+      // Skip rendering wrapping edges as straight lines (they would cross the grid)
+      // Instead, we just indicate them with the dot colors
+      if (!isWrappingEdge) {
+        edges.push(
+          <line
+            key={`orbifold-edge-${edge.from.row},${edge.from.col}-${edge.to.row},${edge.to.col}`}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke={edge.isPassage ? "#4caf50" : "#ddd"}
+            strokeWidth={edge.isPassage ? 3 : 1}
+            strokeLinecap="round"
+          />
+        );
+      }
+    }
+    
+    // Draw dots for each cell in fundamental domain
+    for (let row = 0; row < length; row++) {
+      for (let col = 0; col < length; col++) {
+        const cellKey = `${row},${col}`;
+        const isVacant = solution.vacantCells.has(cellKey);
+        const isRoot = row === solution.rootRow && col === solution.rootCol;
+        
+        const cx = orbifoldPadding + col * orbifoldCellSize + orbifoldCellSize / 2;
+        const cy = orbifoldPadding + row * orbifoldCellSize + orbifoldCellSize / 2;
+        
+        if (isVacant) {
+          // Vacant cells are small black dots
+          dots.push(
+            <circle
+              key={`orbifold-dot-${row}-${col}`}
+              cx={cx}
+              cy={cy}
+              r={dotRadius / 2}
+              fill="#000"
+            />
+          );
+        } else {
+          // Non-vacant cells colored by their connectivity (we'll use gray for now)
+          dots.push(
+            <circle
+              key={`orbifold-dot-${row}-${col}`}
+              cx={cx}
+              cy={cy}
+              r={isRoot ? dotRadius * 1.3 : dotRadius}
+              fill={isRoot ? "#ffa726" : "#666"}
+              stroke={isRoot ? "#000" : "none"}
+              strokeWidth={isRoot ? 2 : 0}
+            />
+          );
+        }
+        
+        // Add coordinate labels
+        labels.push(
+          <text
+            key={`orbifold-label-${row}-${col}`}
+            x={cx}
+            y={cy + dotRadius + 12}
+            textAnchor="middle"
+            fontSize="10"
+            fill="#999"
+          >
+            {row},{col}
+          </text>
+        );
+      }
+    }
+    
+    return (
+      <div>
+        <h4 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>Orbifold Graph ({solution.wallpaperGroup})</h4>
+        <svg width={svgWidth} height={svgHeight} style={{ border: "1px solid #eee", borderRadius: "4px" }}>
+          {edges}
+          {dots}
+          {labels}
+        </svg>
+        <div style={{ fontSize: "11px", color: "#666", marginTop: "5px" }}>
+          <span style={{ color: "#4caf50" }}>●</span> Green = passage (tree edge)
+        </div>
+      </div>
+    );
+  };
   
   // Compute wall segments from tiled graph
   const wallSegments = useMemo(() => {
@@ -808,8 +1025,8 @@ export function WallpaperMazeExplorer() {
     const SHEAR_Y = Math.sqrt(3) / 2;
     const rhombusWidth = length * cellSize * (1 + SHEAR_X);
     const rhombusHeight = length * cellSize * SHEAR_Y;
-    const totalWidth = (multiplier + 1) * rhombusWidth;
-    const totalHeight = (multiplier + 1) * (2 * rhombusHeight);
+    const totalWidth = (solution.fixedMultiplier + 1) * rhombusWidth;
+    const totalHeight = (solution.fixedMultiplier + 1) * (2 * rhombusHeight);
     
     const svgWidth = totalWidth + graphPadding * 2;
     const svgHeight = totalHeight + graphPadding * 2;
@@ -1024,6 +1241,21 @@ export function WallpaperMazeExplorer() {
             </select>
           </label>
           
+          <label>
+            Lift Multiplier:
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={multiplier}
+              onChange={(e) => setMultiplier(parseInt(e.target.value))}
+              style={{ marginLeft: "10px", width: "60px" }}
+            />
+            <span style={{ fontSize: "11px", color: "#666", marginLeft: "5px" }}>
+              (fixed at solve time)
+            </span>
+          </label>
+          
           <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
             {!solving ? (
               <button onClick={handleSolve} style={{ padding: "10px 20px" }}>
@@ -1055,20 +1287,30 @@ export function WallpaperMazeExplorer() {
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <h3 style={{ margin: 0 }}>Solution ({solution.wallpaperGroup})</h3>
             
-            {/* Multiplier control (affects solution display) */}
-            <label>
-              Multiplier:
-              <input
-                type="number"
-                min={1}
-                max={5}
-                value={multiplier}
-                onChange={(e) => {
-                  setMultiplier(parseInt(e.target.value));
-                }}
-                style={{ marginLeft: "10px", width: "60px" }}
-              />
-            </label>
+            {/* Fixed multiplier display (cannot be changed after solving) */}
+            <div style={{ fontSize: "12px", color: "#666" }}>
+              Multiplier: {solution.fixedMultiplier} (fixed at solve time)
+            </div>
+            
+            {/* Open Boundary button */}
+            <button
+              onClick={handleOpenBoundary}
+              disabled={crossRootPairs.length === 0}
+              style={{
+                padding: "8px 15px",
+                backgroundColor: crossRootPairs.length > 0 ? "#9c27b0" : "#e0e0e0",
+                color: crossRootPairs.length > 0 ? "white" : "#999",
+                border: "none",
+                borderRadius: "4px",
+                cursor: crossRootPairs.length > 0 ? "pointer" : "not-allowed",
+              }}
+              title={crossRootPairs.length > 0 
+                ? `Open a boundary between regions (${crossRootPairs.length} pairs available)`
+                : "No cross-root pairs available (maze is fully connected)"
+              }
+            >
+              🚪 Open Boundary ({crossRootPairs.length} pairs)
+            </button>
             
             {/* View mode toggle */}
             <div style={{ display: "flex", gap: "10px" }}>
@@ -1156,7 +1398,7 @@ export function WallpaperMazeExplorer() {
               solutionViewMode === "maze" ? (
                 <P3RhombusRenderer
                   length={length}
-                  multiplier={multiplier}
+                  multiplier={solution.fixedMultiplier}
                   cellSize={cellSize}
                   parentOf={solution.parentOf}
                   rootRow={solution.rootRow}
@@ -1198,6 +1440,13 @@ export function WallpaperMazeExplorer() {
                 {p3GraphSelectedNode.isRoot && <span style={{ color: "#ff9800" }}>Root</span>}
               </div>
             )}
+          </div>
+        )}
+        
+        {/* Third panel: Orbifold Graph (shown when solution exists) */}
+        {solution && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {renderOrbifoldGraph()}
           </div>
         )}
       </div>

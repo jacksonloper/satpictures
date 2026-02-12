@@ -460,3 +460,117 @@ export function getP3RootColor(rootIndex: number): string {
   const lightness = 50;
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
+
+/**
+ * A pair of neighboring P3 nodes from different roots (a "cross-root" edge)
+ */
+export interface P3CrossRootNeighborPair {
+  /** First node in the pair */
+  node1: P3TiledNode;
+  /** Second node in the pair */
+  node2: P3TiledNode;
+  /** The fundamental domain edge key (sorted "r1,c1-r2,c2") */
+  fundamentalEdgeKey: string;
+}
+
+/**
+ * Find all pairs of neighboring coordinates in the lifted P3 graph
+ * where the two nodes belong to *different* roots.
+ */
+export function findP3CrossRootNeighborPairs(graph: P3TiledGraph): P3CrossRootNeighborPair[] {
+  const pairs: P3CrossRootNeighborPair[] = [];
+  const seenEdges = new Set<string>();
+  
+  const directions: Direction[] = ["N", "S", "E", "W"];
+  
+  for (const node of graph.nodes) {
+    // Skip nodes that aren't connected to any root
+    if (node.rootIndex < 0) continue;
+    
+    // Check all 4 directions for neighbors
+    for (const dir of directions) {
+      const neighbor = getAdjacentNeighbor(
+        node.hexRow, node.hexCol, node.rhombusIdx,
+        node.fundamentalRow, node.fundamentalCol,
+        dir, graph.length
+      );
+      
+      // Check if neighbor is within bounds
+      if (neighbor.hexRow < 0 || neighbor.hexRow >= graph.multiplier ||
+          neighbor.hexCol < 0 || neighbor.hexCol >= graph.multiplier) {
+        continue;
+      }
+      
+      // Look up the neighbor node
+      const neighborKey = nodeKey(
+        neighbor.hexRow, neighbor.hexCol, neighbor.rhombusIdx,
+        neighbor.fundamentalRow, neighbor.fundamentalCol
+      );
+      const neighborId = graph.nodeAt.get(neighborKey);
+      if (neighborId === undefined) continue;
+      
+      const neighborNode = graph.nodes[neighborId];
+      
+      // Skip if neighbor isn't connected to any root
+      if (neighborNode.rootIndex < 0) continue;
+      
+      // Check if they have DIFFERENT roots
+      if (node.rootIndex === neighborNode.rootIndex) continue;
+      
+      // Create a sorted edge key to avoid duplicates
+      const edgeKey = node.id < neighborNode.id 
+        ? `${node.id}-${neighborNode.id}` 
+        : `${neighborNode.id}-${node.id}`;
+      
+      if (seenEdges.has(edgeKey)) continue;
+      seenEdges.add(edgeKey);
+      
+      // Compute the fundamental domain edge key (sorted by coordinates)
+      const fundKey1 = `${node.fundamentalRow},${node.fundamentalCol}`;
+      const fundKey2 = `${neighborNode.fundamentalRow},${neighborNode.fundamentalCol}`;
+      const fundamentalEdgeKey = fundKey1 < fundKey2 
+        ? `${fundKey1}-${fundKey2}` 
+        : `${fundKey2}-${fundKey1}`;
+      
+      pairs.push({
+        node1: node,
+        node2: neighborNode,
+        fundamentalEdgeKey,
+      });
+    }
+  }
+  
+  return pairs;
+}
+
+/**
+ * Represents an edge to add in the fundamental domain to open a boundary (P3 version)
+ */
+export interface P3OrbifoldEdgeToAdd {
+  /** First cell in the fundamental domain */
+  cell1: { row: number; col: number };
+  /** Second cell in the fundamental domain */
+  cell2: { row: number; col: number };
+  /** The root index that will be kept */
+  survivingRootIndex: number;
+  /** The root index that will be absorbed */
+  absorbedRootIndex: number;
+}
+
+/**
+ * Given a P3 cross-root neighbor pair, compute the edge to add in the orbifold
+ */
+export function computeP3OrbifoldEdgeToAdd(pair: P3CrossRootNeighborPair): P3OrbifoldEdgeToAdd {
+  const { node1, node2 } = pair;
+  
+  // The lower root index survives
+  const survivingRootIndex = Math.min(node1.rootIndex, node2.rootIndex);
+  const absorbedRootIndex = Math.max(node1.rootIndex, node2.rootIndex);
+  
+  return {
+    cell1: { row: node1.fundamentalRow, col: node1.fundamentalCol },
+    cell2: { row: node2.fundamentalRow, col: node2.fundamentalCol },
+    survivingRootIndex,
+    absorbedRootIndex,
+  };
+}
