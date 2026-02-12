@@ -22,7 +22,6 @@ import {
   applyMatrix3x3,
   matrixKey,
   matmul3x3,
-  inverse3x3,
   IDENTITY_3X3,
   type ManifoldType,
   type Matrix3x3,
@@ -42,6 +41,7 @@ interface OrientedEdge {
   voltage: Matrix3x3;     // Voltage going FROM selected node TO target
   isReversed: boolean;    // Was the original edge reversed?
   originalEdge: OrbifoldEdge;
+  direction: string;      // N, S, E, W for P2 edges
 }
 
 // Constants
@@ -109,30 +109,30 @@ export function ManifoldOrbifoldExplorer() {
     return selectedEdges.filter(e => isStubEdge(manifold, e, selection.nodeIndex)).length;
   }, [manifold, selectedEdges, selection]);
   
-  // Get oriented edges from orbifold (with proper voltage direction)
+  // Get oriented edges from orbifold - only OUTGOING edges from the selected node
+  // Each node has exactly 4 outgoing edges (N, S, E, W) in the orbifold
   const orientedEdges = useMemo((): OrientedEdge[] => {
     if (!selection) return [];
     const nodeIndex = selection.nodeIndex;
     
-    // Find all edges that touch this node
+    // Only show outgoing edges from this node
+    // The orbifold encodes each direction as an outgoing edge
     const result: OrientedEdge[] = [];
+    const directions = ["N", "S", "E", "W"];
+    let dirIndex = 0;
+    
     for (const edge of orbifold.edges) {
       if (edge.from === nodeIndex) {
         // Edge goes FROM selected node - use voltage as-is
+        // For P2: edges are stored in order N, S, E, W per node
         result.push({
           targetNodeIndex: edge.to,
           voltage: edge.voltage,
           isReversed: false,
           originalEdge: edge,
+          direction: directions[dirIndex % 4],
         });
-      } else if (edge.to === nodeIndex) {
-        // Edge goes TO selected node - reverse it, invert voltage
-        result.push({
-          targetNodeIndex: edge.from,
-          voltage: inverse3x3(edge.voltage),
-          isReversed: true,
-          originalEdge: edge,
-        });
+        dirIndex++;
       }
     }
     return result;
@@ -580,50 +580,85 @@ export function ManifoldOrbifoldExplorer() {
             </span>
             <h4 style={{ margin: 0 }}>
               Edges from node ({manifold.nodes[selection.nodeIndex].row}, {manifold.nodes[selection.nodeIndex].col})
-              {matrixKey(selection.copyMatrix) !== matrixKey(IDENTITY_3X3) && (
-                <span style={{ fontWeight: "normal", color: "#666" }}> in copy</span>
-              )}
               {" "}— {orientedEdges.length} edges
             </h4>
           </div>
           
-          {showEdgeDetails && (
-            <div style={{ marginTop: "15px" }}>
-              <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "13px" }}>
-                <thead>
-                  <tr style={{ borderBottom: "2px solid #ddd" }}>
-                    <th style={{ textAlign: "left", padding: "8px" }}>Target Node</th>
-                    <th style={{ textAlign: "left", padding: "8px" }}>Direction</th>
-                    <th style={{ textAlign: "left", padding: "8px" }}>Voltage Matrix</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orientedEdges.map((orientedEdge, i) => {
-                    const targetNode = orbifold.nodes[orientedEdge.targetNodeIndex];
-                    return (
-                      <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
-                        <td style={{ padding: "8px" }}>
-                          ({targetNode.row}, {targetNode.col})
-                        </td>
-                        <td style={{ padding: "8px" }}>
-                          {orientedEdge.isReversed ? (
-                            <span style={{ color: "#ff9f43" }}>← (reversed)</span>
-                          ) : (
-                            <span style={{ color: "#27ae60" }}>→ (forward)</span>
-                          )}
-                        </td>
-                        <td style={{ padding: "8px", fontFamily: "monospace", fontSize: "11px" }}>
-                          [{orientedEdge.voltage.slice(0, 3).join(", ")}]<br/>
-                          [{orientedEdge.voltage.slice(3, 6).join(", ")}]<br/>
-                          [{orientedEdge.voltage.slice(6, 9).join(", ")}]
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {showEdgeDetails && (() => {
+            const selectedNode = manifold.nodes[selection.nodeIndex];
+            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.col + 0.5, selectedNode.row + 0.5);
+            const isNonIdentityCopy = matrixKey(selection.copyMatrix) !== matrixKey(IDENTITY_3X3);
+            
+            return (
+              <div style={{ marginTop: "15px" }}>
+                {/* Copy and position info */}
+                <div style={{ 
+                  marginBottom: "15px", 
+                  padding: "10px", 
+                  backgroundColor: "#e8f4f8",
+                  borderRadius: "4px",
+                  fontSize: "13px"
+                }}>
+                  <div style={{ marginBottom: "8px" }}>
+                    <strong>Copy Matrix (Group Element):</strong>
+                    <span style={{ fontFamily: "monospace", marginLeft: "10px" }}>
+                      [{selection.copyMatrix.slice(0, 3).join(", ")}]
+                      [{selection.copyMatrix.slice(3, 6).join(", ")}]
+                      [{selection.copyMatrix.slice(6, 9).join(", ")}]
+                    </span>
+                    {!isNonIdentityCopy && <span style={{ color: "#666" }}> (identity)</span>}
+                  </div>
+                  <div>
+                    <strong>Absolute Position (Lifted Graph):</strong>
+                    <span style={{ fontFamily: "monospace", marginLeft: "10px" }}>
+                      ({liftedPos.x.toFixed(2)}, {liftedPos.y.toFixed(2)})
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Edge table */}
+                <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "13px" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "2px solid #ddd" }}>
+                      <th style={{ textAlign: "left", padding: "8px" }}>Dir</th>
+                      <th style={{ textAlign: "left", padding: "8px" }}>Target Node</th>
+                      <th style={{ textAlign: "left", padding: "8px" }}>Abs. Target</th>
+                      <th style={{ textAlign: "left", padding: "8px" }}>Voltage Matrix</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orientedEdges.map((orientedEdge, i) => {
+                      const targetNode = orbifold.nodes[orientedEdge.targetNodeIndex];
+                      // Compute absolute target position: 
+                      // targetCopyMatrix = currentCopyMatrix * voltage
+                      // then apply to target node
+                      const targetCopyMatrix = matmul3x3(selection.copyMatrix, orientedEdge.voltage);
+                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + 0.5, targetNode.row + 0.5);
+                      
+                      return (
+                        <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
+                          <td style={{ padding: "8px", fontWeight: "bold" }}>
+                            {orientedEdge.direction}
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            ({targetNode.row}, {targetNode.col})
+                          </td>
+                          <td style={{ padding: "8px", fontFamily: "monospace" }}>
+                            ({absTargetPos.x.toFixed(2)}, {absTargetPos.y.toFixed(2)})
+                          </td>
+                          <td style={{ padding: "8px", fontFamily: "monospace", fontSize: "11px" }}>
+                            [{orientedEdge.voltage.slice(0, 3).join(", ")}]<br/>
+                            [{orientedEdge.voltage.slice(3, 6).join(", ")}]<br/>
+                            [{orientedEdge.voltage.slice(6, 9).join(", ")}]
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
