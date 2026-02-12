@@ -1131,8 +1131,20 @@ export function WallpaperMazeExplorer() {
         const neighborFundKey = `${neighborNode.fundamentalRow},${neighborNode.fundamentalCol}`;
         if (solution.vacantCells.has(neighborFundKey)) continue;
         
+        // Check if nodes are in the same copy
+        const sameCopy = node.copyRow === neighborNode.copyRow && node.copyCol === neighborNode.copyCol;
+        
+        // Check if the fundamental coordinates are adjacent (interior edge) vs wrapping edge
+        const fundRowDiff = Math.abs(node.fundamentalRow - neighborNode.fundamentalRow);
+        const fundColDiff = Math.abs(node.fundamentalCol - neighborNode.fundamentalCol);
+        const isInteriorEdge = (fundRowDiff + fundColDiff) === 1;
+        
+        // Interior edges only allowed within same copy
+        if (!sameCopy && isInteriorEdge) {
+          continue;
+        }
+        
         // Check if this orbifold edge exists (is a passage)
-        // This works for both same-copy and cross-copy (wrapping) edges
         const orbifoldEdgeKey = makeOrbifoldEdgeKey(
           node.fundamentalRow, node.fundamentalCol,
           neighborNode.fundamentalRow, neighborNode.fundamentalCol

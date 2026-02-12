@@ -389,7 +389,15 @@ export function buildTiledGraphFromEdgeSet(
   // Step 2: Build adjacency lists in the LIFTED graph based on the orbifold edge set
   // For each pair of visually adjacent nodes in the lifted graph, check if the corresponding
   // orbifold edge exists in the edge set.
-  // At copy boundaries, the visual adjacency corresponds to wrapping edges in the orbifold.
+  // 
+  // IMPORTANT: Due to rotational symmetries, cross-copy visual neighbors may have fundamental
+  // coordinates that form INTERIOR edges (not wrapping edges). For example, in P2:
+  // - Visual (1,3) in copy (0,0) has fundamental (1,3)
+  // - Visual (1,4) in copy (0,1) type=1 has fundamental (2,3)
+  // - (1,3) and (2,3) are adjacent in fundamental domain - an INTERIOR edge!
+  // 
+  // To keep copies disconnected, we must only allow interior edges between nodes in the SAME copy.
+  // Cross-copy edges should only be allowed for wrapping edges (which we've excluded from the tree).
   const adjacency = new Map<number, number[]>();
   
   for (const node of nodes) {
@@ -412,8 +420,21 @@ export function buildTiledGraphFromEdgeSet(
       
       const neighbor = nodes[neighborId];
       
+      // Check if nodes are in the same copy
+      const sameСopy = node.copyRow === neighbor.copyRow && node.copyCol === neighbor.copyCol;
+      
+      // Check if the fundamental coordinates are adjacent (interior edge) vs wrapping edge
+      const fundRowDiff = Math.abs(node.fundamentalRow - neighbor.fundamentalRow);
+      const fundColDiff = Math.abs(node.fundamentalCol - neighbor.fundamentalCol);
+      const isInteriorEdge = (fundRowDiff + fundColDiff) === 1;
+      
+      // Interior edges only allowed within same copy
+      // Wrapping edges (now excluded from tree) would be cross-copy
+      if (!sameСopy && isInteriorEdge) {
+        continue; // Skip interior edges between different copies
+      }
+      
       // Check if the orbifold edge exists between the fundamental coordinates
-      // This works for both same-copy (direct adjacency) and cross-copy (wrapping) cases
       const orbifoldEdgeKey = makeOrbifoldEdgeKey(
         node.fundamentalRow, node.fundamentalCol,
         neighbor.fundamentalRow, neighbor.fundamentalCol
