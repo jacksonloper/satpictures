@@ -174,14 +174,12 @@ console.log("\n=== P2 Manifold Tests ===\n");
     let duplicates = 0;
     
     for (const copy of copies) {
-      const copyType = (Math.round(copy.matrix[2] / n) + Math.round(copy.matrix[5] / n)) % 2;
-      
       for (const node of orbifold.nodes) {
         // Apply copy transformation to get lifted position
         const pos = applyMatrix3x3(copy.matrix, node.col + 0.5, node.row + 0.5);
         // Round to avoid floating point issues
         const key = `${Math.round(pos.x * 1000) / 1000},${Math.round(pos.y * 1000) / 1000}`;
-        const desc = `(${node.row},${node.col}) in copy [${copy.matrix[2]},${copy.matrix[5]}] type ${copyType}`;
+        const desc = `(${node.row},${node.col}) in copy [${copy.matrix[2]},${copy.matrix[5]}]`;
         
         if (positions.has(key)) {
           if (duplicates < 3) {
