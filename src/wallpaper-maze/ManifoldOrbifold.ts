@@ -77,21 +77,6 @@ export function rotation180_3x3(): Matrix3x3 {
   return [-1, 0, 0, 0, -1, 0, 0, 0, 1];
 }
 
-/**
- * Create a P2 boundary crossing voltage matrix.
- * This combines translation with 180° rotation for crossing a P2 boundary.
- * @param dx - x translation component
- * @param dy - y translation component
- * @param n - grid size (used to compute rotation center offset)
- */
-function createP2BoundaryVoltage(dx: number, dy: number, n: number): Matrix3x3 {
-  // The voltage is: translate by (dx, dy), then rotate 180° around the appropriate center
-  // For a 180° rotation: x' = -x + c, y' = -y + d where (c, d) is the fixed point
-  // Combined: [-1, 0, 2*cx + dx; 0, -1, 2*cy + dy; 0, 0, 1]
-  // For P2, the formula simplifies based on which boundary we're crossing
-  return [-1, 0, dx + n - 1, 0, -1, dy + n - 1, 0, 0, 1];
-}
-
 // ============================================================================
 // 2x2 Matrix utilities (for screen transform)
 // ============================================================================
@@ -300,9 +285,62 @@ export function buildP1Orbifold(n: number): Orbifold {
 // ============================================================================
 
 /**
+ * Get P2 neighbors for a node at (row, col) in an n×n grid.
+ * P2 has sphere topology with boundary folding:
+ * - North boundary: (0, col) -> (0, n-1-col)
+ * - South boundary: (n-1, col) -> (n-1, n-1-col)
+ * - East boundary: (row, n-1) -> (n-1-row, n-1)
+ * - West boundary: (row, 0) -> (n-1-row, 0)
+ */
+function getP2Neighbors(row: number, col: number, n: number): {
+  N: { row: number; col: number };
+  S: { row: number; col: number };
+  E: { row: number; col: number };
+  W: { row: number; col: number };
+} {
+  let N, S, E, W;
+  
+  // North neighbor
+  if (row === 0) {
+    N = { row: 0, col: n - 1 - col };  // Fold at top boundary
+  } else {
+    N = { row: row - 1, col };
+  }
+  
+  // South neighbor
+  if (row === n - 1) {
+    S = { row: n - 1, col: n - 1 - col };  // Fold at bottom boundary
+  } else {
+    S = { row: row + 1, col };
+  }
+  
+  // East neighbor
+  if (col === n - 1) {
+    E = { row: n - 1 - row, col: n - 1 };  // Fold at right boundary
+  } else {
+    E = { row, col: col + 1 };
+  }
+  
+  // West neighbor
+  if (col === 0) {
+    W = { row: n - 1 - row, col: 0 };  // Fold at left boundary
+  } else {
+    W = { row, col: col - 1 };
+  }
+  
+  return { N, S, E, W };
+}
+
+/**
  * Build P2 manifold for a grid of size n x n
- * P2 has projective plane topology with 180° rotation at boundaries
- * Multi-edges occur at boundaries where wrapping creates distinct edges
+ * 
+ * P2 has sphere topology where each boundary edge is folded onto itself
+ * with a 180° rotation. This creates:
+ * - Self-loops at edge midpoints (for odd n)
+ * - Multi-edges when N and E (or S and W) point to the same neighbor
+ * 
+ * Every node has exactly 4 edges (counting multi-edges), since it has
+ * 4 cardinal directions that each produce an edge.
  */
 export function buildP2Manifold(n: number): Manifold {
   const nodes: ManifoldNode[] = [];
@@ -317,67 +355,51 @@ export function buildP2Manifold(n: number): Manifold {
     }
   }
   
-  // Create edges
-  // P2 wrapping: edges at boundary connect with 180° rotation
-  // Interior edges are normal E/S connections
-  // Boundary edges wrap with rotation
-  const edges: ManifoldEdge[] = [];
+  // Create edges using the P2 neighbor function
+  // For P2, we need to track edges per-direction, not per-pair, because:
+  // 1. Self-loops are counted once per direction they appear
+  // 2. Multi-edges are allowed (same pair can have multiple edges)
+  //
+  // Strategy: iterate through all nodes, add E and S edges only (to avoid duplicates
+  // from opposite directions). But for boundary nodes, the N/W edges might point to
+  // different copies than what E/S from other nodes would produce.
+  //
+  // Actually, the cleanest approach: for each node, process all 4 directions,
+  // but only add edges where fromIdx <= toIdx to deduplicate within a direction.
+  // For multi-edges (same pair via different directions), we track direction too.
   
-  // For P2, we need to track multi-edges more carefully
-  // Each interior cell contributes E and S edges
-  // Boundary cells contribute wrapped edges that may be multi-edges
+  const edges: ManifoldEdge[] = [];
+  const addedEdges = new Set<string>();  // Track "fromIdx-toIdx-direction" to handle multi-edges properly
   
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const fromIdx = nodeAtMap.get(nodeKey(row, col))!;
+      const neighbors = getP2Neighbors(row, col, n);
       
-      // East edge
-      if (col < n - 1) {
-        // Interior: simple East neighbor
-        const eastIdx = nodeAtMap.get(nodeKey(row, col + 1))!;
-        edges.push({ from: fromIdx, to: eastIdx });
-      } else {
-        // East boundary: wraps to west with 180° rotation
-        // (row, n-1) -> (n-1-row, n-1) via wrap
-        const wrapRow = n - 1 - row;
-        const wrapIdx = nodeAtMap.get(nodeKey(wrapRow, n - 1))!;
-        edges.push({ from: fromIdx, to: wrapIdx });
-      }
+      // Process each direction
+      const directions = [
+        { name: "N", neighbor: neighbors.N },
+        { name: "S", neighbor: neighbors.S },
+        { name: "E", neighbor: neighbors.E },
+        { name: "W", neighbor: neighbors.W },
+      ];
       
-      // South edge
-      if (row < n - 1) {
-        // Interior: simple South neighbor
-        const southIdx = nodeAtMap.get(nodeKey(row + 1, col))!;
-        edges.push({ from: fromIdx, to: southIdx });
-      } else {
-        // South boundary: wraps to south with 180° rotation
-        // (n-1, col) -> (n-1, n-1-col) via wrap
-        const wrapCol = n - 1 - col;
-        const wrapIdx = nodeAtMap.get(nodeKey(n - 1, wrapCol))!;
-        edges.push({ from: fromIdx, to: wrapIdx });
-      }
-      
-      // West edge (only for boundary wrapping - creates multi-edges)
-      if (col === 0) {
-        // West boundary: wraps to west with 180° rotation
-        // (row, 0) -> (n-1-row, 0) via wrap
-        const wrapRow = n - 1 - row;
-        const wrapIdx = nodeAtMap.get(nodeKey(wrapRow, 0))!;
-        // Only add if not a self-loop and distinct from what we'd get from the "to" side
-        if (fromIdx !== wrapIdx) {
-          edges.push({ from: fromIdx, to: wrapIdx });
-        }
-      }
-      
-      // North edge (only for boundary wrapping - creates multi-edges)
-      if (row === 0) {
-        // North boundary: wraps to north with 180° rotation
-        // (0, col) -> (0, n-1-col) via wrap
-        const wrapCol = n - 1 - col;
-        const wrapIdx = nodeAtMap.get(nodeKey(0, wrapCol))!;
-        // Only add if not a self-loop
-        if (fromIdx !== wrapIdx) {
-          edges.push({ from: fromIdx, to: wrapIdx });
+      for (const { name, neighbor } of directions) {
+        const toIdx = nodeAtMap.get(nodeKey(neighbor.row, neighbor.col))!;
+        
+        // For undirected edges, we only add from the "lower" node to avoid duplicates
+        // But we need to track which directions we've processed
+        if (fromIdx <= toIdx) {
+          // Check if we've already added this edge from this direction
+          const edgeKey = `${fromIdx}-${toIdx}-${name}`;
+          const reverseDir = name === "N" ? "S" : name === "S" ? "N" : name === "E" ? "W" : "E";
+          const reverseKey = `${toIdx}-${fromIdx}-${reverseDir}`;
+          
+          // Add edge if we haven't seen it or its reverse
+          if (!addedEdges.has(edgeKey) && !addedEdges.has(reverseKey)) {
+            edges.push({ from: fromIdx, to: toIdx });
+            addedEdges.add(edgeKey);
+          }
         }
       }
     }
@@ -394,7 +416,18 @@ export function buildP2Manifold(n: number): Manifold {
 
 /**
  * Build P2 orbifold for a grid of size n x n
- * P2 orbifold has translation + 180° rotation voltages at boundaries
+ * 
+ * The orbifold has directed edges with voltage matrices.
+ * Each node has 4 outgoing edges (N, S, E, W) matching the 4 neighbors.
+ * Interior edges have identity voltage.
+ * Boundary edges have reflection+translation voltages that ensure
+ * neighbors in the lifted graph are exactly 1 unit away.
+ * 
+ * Voltage formulas (derived to ensure 1-unit neighbor distance):
+ * - North (row=0): V = [-1, 0, n; 0, 1, -1; 0, 0, 1]
+ * - South (row=n-1): V = [-1, 0, n; 0, 1, 1; 0, 0, 1]
+ * - East (col=n-1): V = [1, 0, 1; 0, -1, n; 0, 0, 1]
+ * - West (col=0): V = [1, 0, -1; 0, -1, n; 0, 0, 1]
  */
 export function buildP2Orbifold(n: number): Orbifold {
   const nodes: ManifoldNode[] = [];
@@ -410,67 +443,49 @@ export function buildP2Orbifold(n: number): Orbifold {
   }
   
   // Create directed edges with voltages
+  // Each node has 4 outgoing edges: N, S, E, W
   const edges: OrbifoldEdge[] = [];
-  
-  // 180° rotation around the center of the fundamental domain
-  // For P2, the rotation center is at ((n-1)/2, (n-1)/2)
-  // The voltage for crossing the boundary is: translate + rotate 180°
-  // Combined as a single affine transform: rotate around the appropriate center
   
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const fromIdx = nodeAtMap.get(nodeKey(row, col))!;
+      const neighbors = getP2Neighbors(row, col, n);
       
-      // East edge
-      const eastCol = (col + 1) % n;
-      const eastRow = col === n - 1 ? n - 1 - row : row;
-      const eastIdx = nodeAtMap.get(nodeKey(eastRow, eastCol))!;
-      
-      // Voltage for east edge: identity inside, translate+rotate at boundary
-      const eastVoltage = col === n - 1 
-        ? createP2BoundaryVoltage(n, 0, n)  // East boundary crossing
+      // North edge
+      const northIdx = nodeAtMap.get(nodeKey(neighbors.N.row, neighbors.N.col))!;
+      const northVoltage: Matrix3x3 = row === 0
+        ? [-1, 0, n, 0, 1, -1, 0, 0, 1]  // Reflect x, translate y down by 1
         : IDENTITY_3X3;
-      edges.push({ from: fromIdx, to: eastIdx, voltage: eastVoltage });
+      edges.push({ from: fromIdx, to: northIdx, voltage: northVoltage });
       
       // South edge
-      const southRow = (row + 1) % n;
-      const southCol = row === n - 1 ? n - 1 - col : col;
-      const southIdx = nodeAtMap.get(nodeKey(southRow, southCol))!;
-      
-      // Voltage for south edge: identity inside, translate+rotate at boundary
-      const southVoltage = row === n - 1
-        ? createP2BoundaryVoltage(0, n, n)  // South boundary crossing
+      const southIdx = nodeAtMap.get(nodeKey(neighbors.S.row, neighbors.S.col))!;
+      const southVoltage: Matrix3x3 = row === n - 1
+        ? [-1, 0, n, 0, 1, 1, 0, 0, 1]   // Reflect x, translate y up by 1
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: southIdx, voltage: southVoltage });
       
-      // West edge (for boundary)
-      if (col === 0) {
-        const westRow = n - 1 - row;
-        const westIdx = nodeAtMap.get(nodeKey(westRow, 0))!;
-        // West boundary crossing: translate left by n
-        const westVoltage = createP2BoundaryVoltage(-n, 0, n);
-        edges.push({ from: fromIdx, to: westIdx, voltage: westVoltage });
-      }
+      // East edge
+      const eastIdx = nodeAtMap.get(nodeKey(neighbors.E.row, neighbors.E.col))!;
+      const eastVoltage: Matrix3x3 = col === n - 1
+        ? [1, 0, 1, 0, -1, n, 0, 0, 1]   // Translate x right by 1, reflect y
+        : IDENTITY_3X3;
+      edges.push({ from: fromIdx, to: eastIdx, voltage: eastVoltage });
       
-      // North edge (for boundary)
-      if (row === 0) {
-        const northCol = n - 1 - col;
-        const northIdx = nodeAtMap.get(nodeKey(0, northCol))!;
-        // North boundary crossing: translate up by n
-        const northVoltage = createP2BoundaryVoltage(0, -n, n);
-        edges.push({ from: fromIdx, to: northIdx, voltage: northVoltage });
-      }
+      // West edge
+      const westIdx = nodeAtMap.get(nodeKey(neighbors.W.row, neighbors.W.col))!;
+      const westVoltage: Matrix3x3 = col === 0
+        ? [1, 0, -1, 0, -1, n, 0, 0, 1]  // Translate x left by 1, reflect y
+        : IDENTITY_3X3;
+      edges.push({ from: fromIdx, to: westIdx, voltage: westVoltage });
     }
   }
   
-  // P2 generators: two glide reflections (or translations + rotation)
-  // For P2, generators are typically two independent 2-fold rotation centers
-  // But for simplicity, we use: T_x (translate by n in x), T_y (translate by n in y), R (180° rotation)
-  // Since R² = I and T_x R T_x^(-1) = R, etc., the group is generated by translations + rotation
+  // P2 generators: translations + 180° rotation
   const generators: Matrix3x3[] = [
-    translation3x3(n, 0),    // Translate right by n
-    translation3x3(0, n),    // Translate down by n
-    rotation180_3x3(),       // 180° rotation
+    translation3x3(n, 0),
+    translation3x3(0, n),
+    rotation180_3x3(),
   ];
   
   return {
