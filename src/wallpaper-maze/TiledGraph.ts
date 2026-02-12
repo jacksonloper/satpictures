@@ -421,7 +421,7 @@ export function buildTiledGraphFromEdgeSet(
       const neighbor = nodes[neighborId];
       
       // Check if nodes are in the same copy
-      const sameСopy = node.copyRow === neighbor.copyRow && node.copyCol === neighbor.copyCol;
+      const sameCopy = node.copyRow === neighbor.copyRow && node.copyCol === neighbor.copyCol;
       
       // Check if the fundamental coordinates are adjacent (interior edge) vs wrapping edge
       const fundRowDiff = Math.abs(node.fundamentalRow - neighbor.fundamentalRow);
@@ -430,7 +430,7 @@ export function buildTiledGraphFromEdgeSet(
       
       // Interior edges only allowed within same copy
       // Wrapping edges (now excluded from tree) would be cross-copy
-      if (!sameСopy && isInteriorEdge) {
+      if (!sameCopy && isInteriorEdge) {
         continue; // Skip interior edges between different copies
       }
       
