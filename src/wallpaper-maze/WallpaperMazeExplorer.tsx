@@ -570,9 +570,100 @@ export function WallpaperMazeExplorer() {
     const edges: React.ReactNode[] = [];
     const labels: React.ReactNode[] = [];
     const stubs: React.ReactNode[] = [];
+    const highlights: React.ReactNode[] = [];
     
     // Length of stub lines for wrapping edges
     const stubLength = ORBIFOLD_CELL_SIZE * 0.3;
+    
+    // Direction colors for visualization (must match graph view)
+    const dirColors: Record<Direction, string> = {
+      "N": "#ff0000", // Red for North
+      "S": "#00ff00", // Green for South  
+      "E": "#0000ff", // Blue for East
+      "W": "#ffaa00", // Orange for West
+    };
+    
+    // If a node is selected in the graph view, highlight the corresponding orbifold node and edges
+    if (graphSelectedNode && solution.wallpaperGroup !== "P3") {
+      const wpg = getWallpaperGroup(solution.wallpaperGroup);
+      const fundRow = graphSelectedNode.fundamentalRow;
+      const fundCol = graphSelectedNode.fundamentalCol;
+      const selectedCx = ORBIFOLD_PADDING + fundCol * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
+      const selectedCy = ORBIFOLD_PADDING + fundRow * ORBIFOLD_CELL_SIZE + ORBIFOLD_CELL_SIZE / 2;
+      
+      // Highlight the selected fundamental cell
+      highlights.push(
+        <circle
+          key="orbifold-selected-highlight"
+          cx={selectedCx}
+          cy={selectedCy}
+          r={ORBIFOLD_DOT_RADIUS * 2}
+          fill="none"
+          stroke="#ff00ff"
+          strokeWidth={3}
+        />
+      );
+      
+      // Show the 4 directional edges from this node
+      for (const dir of ALL_DIRECTIONS) {
+        // Get the transformed direction based on copy type
+        const transformedDir = wpg.transformDirection(dir, graphSelectedNode.type);
+        
+        // Get the orbifold neighbor in the transformed direction
+        const orbifoldNeighbor = wpg.getWrappedNeighbor(fundRow, fundCol, transformedDir, length);
+        
+        // Draw the edge/stub for this direction
+        const delta = DIRECTION_DELTA[transformedDir];
+        const edgeEndX = selectedCx + delta.dCol * stubLength * 1.5;
+        const edgeEndY = selectedCy + delta.dRow * stubLength * 1.5;
+        
+        // Label for this direction
+        const labelX = selectedCx + delta.dCol * (stubLength * 2 + 10);
+        const labelY = selectedCy + delta.dRow * (stubLength * 2 + 10);
+        
+        highlights.push(
+          <line
+            key={`orbifold-dir-edge-${dir}`}
+            x1={selectedCx}
+            y1={selectedCy}
+            x2={edgeEndX}
+            y2={edgeEndY}
+            stroke={dirColors[dir]}
+            strokeWidth={4}
+            strokeLinecap="round"
+          />
+        );
+        
+        highlights.push(
+          <text
+            key={`orbifold-dir-label-${dir}`}
+            x={labelX}
+            y={labelY}
+            fontSize="12"
+            fontWeight="bold"
+            fill={dirColors[dir]}
+            textAnchor="middle"
+            dominantBaseline="middle"
+          >
+            {dir}→({orbifoldNeighbor.row},{orbifoldNeighbor.col})
+          </text>
+        );
+      }
+      
+      // Add info about the selected node
+      highlights.push(
+        <text
+          key="orbifold-selected-info"
+          x={svgWidth / 2}
+          y={svgHeight - 10}
+          fontSize="10"
+          fill="#666"
+          textAnchor="middle"
+        >
+          Selected: f({fundRow},{fundCol}), type={graphSelectedNode.type}, copy=({graphSelectedNode.copyRow},{graphSelectedNode.copyCol})
+        </text>
+      );
+    }
     
     // Draw edges first (below dots)
     for (const edge of orbifoldEdges) {
@@ -711,11 +802,12 @@ export function WallpaperMazeExplorer() {
     return (
       <div>
         <h4 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>Orbifold Graph ({solution.wallpaperGroup})</h4>
-        <svg width={svgWidth} height={svgHeight} style={{ border: "1px solid #eee", borderRadius: "4px" }}>
+        <svg width={svgWidth} height={svgHeight + 20} style={{ border: "1px solid #eee", borderRadius: "4px" }}>
           {edges}
           {stubs}
           {dots}
           {labels}
+          {highlights}
         </svg>
         <div style={{ fontSize: "11px", color: "#666", marginTop: "5px" }}>
           <span style={{ color: "#4caf50" }}>●</span> Green = passage (tree edge)
@@ -1140,6 +1232,146 @@ export function WallpaperMazeExplorer() {
               strokeWidth={2}
               markerEnd="url(#arrowhead)"
             />
+          );
+        }
+      }
+      
+      // Highlight the 4 directional neighbors of the first equivalent node (the selected one)
+      const selectedNode = graphSelectedNode;
+      const wpg = getWallpaperGroup(solution.wallpaperGroup);
+      const selectedCx = graphPadding + selectedNode.absCol * graphCellSize + graphCellSize / 2;
+      const selectedCy = graphPadding + selectedNode.absRow * graphCellSize + graphCellSize / 2;
+      
+      // Direction colors for visualization
+      const dirColors: Record<Direction, string> = {
+        "N": "#ff0000", // Red for North
+        "S": "#00ff00", // Green for South  
+        "E": "#0000ff", // Blue for East
+        "W": "#ffaa00", // Orange for West
+      };
+      
+      for (const dir of ALL_DIRECTIONS) {
+        // Calculate the orbifold neighbor for this direction
+        // In the fundamental domain, going direction 'dir' from (fundamentalRow, fundamentalCol)
+        // But first we need to transform the direction based on the copy type
+        const transformedDir = wpg.transformDirection(dir, selectedNode.type);
+        const orbifoldNeighbor = wpg.getWrappedNeighbor(
+          selectedNode.fundamentalRow, 
+          selectedNode.fundamentalCol, 
+          transformedDir, 
+          length
+        );
+        
+        // Now find the lifted graph neighbor
+        // The visual neighbor in direction 'dir' (not transformedDir!)
+        const delta = DIRECTION_DELTA[dir];
+        const neighborAbsRow = selectedNode.absRow + delta.dRow;
+        const neighborAbsCol = selectedNode.absCol + delta.dCol;
+        
+        // Check bounds
+        if (neighborAbsRow < 0 || neighborAbsRow >= tiledGraph.totalSize ||
+            neighborAbsCol < 0 || neighborAbsCol >= tiledGraph.totalSize) {
+          // Out of bounds - draw a stub
+          const stubLen = graphCellSize * 0.4;
+          highlights.push(
+            <line
+              key={`neighbor-stub-${dir}`}
+              x1={selectedCx}
+              y1={selectedCy}
+              x2={selectedCx + delta.dCol * stubLen}
+              y2={selectedCy + delta.dRow * stubLen}
+              stroke={dirColors[dir]}
+              strokeWidth={3}
+              strokeDasharray="4,2"
+            />
+          );
+          highlights.push(
+            <text
+              key={`neighbor-label-oob-${dir}`}
+              x={selectedCx + delta.dCol * (stubLen + 8)}
+              y={selectedCy + delta.dRow * (stubLen + 8)}
+              fontSize="10"
+              fill={dirColors[dir]}
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              {dir} (OOB)
+            </text>
+          );
+          continue;
+        }
+        
+        const neighborKey = `${neighborAbsRow},${neighborAbsCol}`;
+        const neighborId = tiledGraph.nodeAt.get(neighborKey);
+        
+        if (neighborId !== undefined) {
+          const neighborNode = tiledGraph.nodes[neighborId];
+          const neighborCx = graphPadding + neighborNode.absCol * graphCellSize + graphCellSize / 2;
+          const neighborCy = graphPadding + neighborNode.absRow * graphCellSize + graphCellSize / 2;
+          
+          // Draw highlighted circle around neighbor
+          highlights.push(
+            <circle
+              key={`neighbor-highlight-${dir}`}
+              cx={neighborCx}
+              cy={neighborCy}
+              r={dotRadius * 2.5}
+              fill="none"
+              stroke={dirColors[dir]}
+              strokeWidth={3}
+            />
+          );
+          
+          // Draw line from selected to neighbor
+          highlights.push(
+            <line
+              key={`neighbor-line-${dir}`}
+              x1={selectedCx}
+              y1={selectedCy}
+              x2={neighborCx}
+              y2={neighborCy}
+              stroke={dirColors[dir]}
+              strokeWidth={2}
+              strokeDasharray="4,2"
+            />
+          );
+          
+          // Add direction label next to the neighbor
+          const labelOffset = 12;
+          highlights.push(
+            <text
+              key={`neighbor-label-${dir}`}
+              x={neighborCx + delta.dCol * labelOffset}
+              y={neighborCy + delta.dRow * labelOffset}
+              fontSize="12"
+              fontWeight="bold"
+              fill={dirColors[dir]}
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              {dir}
+            </text>
+          );
+          
+          // Compare: expected orbifold neighbor vs actual neighbor's fundamental coords
+          const expectedMatch = 
+            neighborNode.fundamentalRow === orbifoldNeighbor.row &&
+            neighborNode.fundamentalCol === orbifoldNeighbor.col;
+          
+          // Add small text showing the orbifold coords for this neighbor
+          // Show expected vs actual
+          highlights.push(
+            <text
+              key={`neighbor-coords-${dir}`}
+              x={neighborCx}
+              y={neighborCy + dotRadius * 4}
+              fontSize="8"
+              fill={expectedMatch ? "#0a0" : "#f00"}
+              textAnchor="middle"
+            >
+              f({neighborNode.fundamentalRow},{neighborNode.fundamentalCol})
+              {!expectedMatch && ` ≠exp(${orbifoldNeighbor.row},${orbifoldNeighbor.col})`}
+            </text>
           );
         }
       }
