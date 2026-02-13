@@ -633,7 +633,7 @@ export function isStubEdge(
 // ============================================================================
 
 /**
- * Find the orbifold edge that corresponds to a manifold edge going from `from` to `to`.
+ * Find the orbifold edge that corresponds to a manifold edge going from `fromNodeIndex` to `toNodeIndex`.
  * Returns the orbifold edge (with its voltage) or null if not found.
  */
 export function findOrbifoldEdge(
@@ -652,7 +652,7 @@ export function findOrbifoldEdge(
 
 /**
  * Get the orbifold edge for a manifold edge, trying both directions.
- * Returns { edge, reversed } where `reversed` indicates if we had to flip the direction.
+ * Returns { orbifoldEdge, reversed } where `reversed` indicates if we had to flip the direction.
  */
 export function getOrbifoldEdgeForManifoldEdge(
   manifold: Manifold,
