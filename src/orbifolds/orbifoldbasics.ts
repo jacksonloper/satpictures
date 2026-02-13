@@ -354,12 +354,12 @@ export function augmentLiftedGraphUntilInterior(
       if (!half) continue; // shouldn't happen if adjacency was built correctly
 
       // If orbifold has A --(V)--> B, and lifted node is (A, W),
-      // then neighbor lifted node is (B, V*W).
+      // then neighbor lifted node is (B, W*V).
       const V = half.voltage;
       const W = ln.voltage;
-      const VW = matMul(V, W);
+      const WV = matMul(W, V);
 
-      const nbId = getOrCreateLiftedNode(g, half.to, VW);
+      const nbId = getOrCreateLiftedNode(g, half.to, WV);
       addLiftedEdge(g, lid, nbId);
     }
 
