@@ -145,22 +145,26 @@ function getP1Neighbor(
   switch (dir) {
     case "N": {
       const { newCoord, wrapped } = getNeighborCoord(j, "N", n);
-      // N is decreasing j (row), so translation is in -y direction (which is +2n when wrapped)
+      // When wrapping north from j=1 to j=maxOdd, the neighbor in the cover space
+      // is in the adjacent fundamental domain to the north (negative y direction)
       const voltage = wrapped ? translationMatrix(0, -2 * n) : I3;
       return { coord: [i, newCoord] as const, voltage };
     }
     case "S": {
       const { newCoord, wrapped } = getNeighborCoord(j, "S", n);
+      // When wrapping south, neighbor is in the adjacent fundamental domain to the south
       const voltage = wrapped ? translationMatrix(0, 2 * n) : I3;
       return { coord: [i, newCoord] as const, voltage };
     }
     case "E": {
       const { newCoord, wrapped } = getNeighborCoord(i, "E", n);
+      // When wrapping east, neighbor is in the adjacent fundamental domain to the east
       const voltage = wrapped ? translationMatrix(2 * n, 0) : I3;
       return { coord: [newCoord, j] as const, voltage };
     }
     case "W": {
       const { newCoord, wrapped } = getNeighborCoord(i, "W", n);
+      // When wrapping west, neighbor is in the adjacent fundamental domain to the west
       const voltage = wrapped ? translationMatrix(-2 * n, 0) : I3;
       return { coord: [newCoord, j] as const, voltage };
     }
@@ -362,13 +366,6 @@ export function getNodeColor(
   
   const node = grid.nodes.get(id);
   return node?.data?.color ?? "white";
-}
-
-/**
- * Get the n value (grid size) from an orbifold grid.
- */
-export function getGridSize(grid: OrbifoldGrid<ColorData>): Int {
-  return Math.round(Math.sqrt(grid.nodes.size));
 }
 
 /**
