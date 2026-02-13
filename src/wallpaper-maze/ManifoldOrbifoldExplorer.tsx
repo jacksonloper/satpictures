@@ -42,7 +42,7 @@ interface OrientedEdge {
   voltage: Matrix3x3;     // Voltage going FROM selected node TO target
   isReversed: boolean;    // Was the original edge reversed?
   originalEdge: OrbifoldEdge;
-  direction: string;      // N, S, E, W for P2 edges
+  edgeIndex: number;      // Index in the orbifold.edges array (for spanning tree lookup)
 }
 
 // Constants
@@ -138,11 +138,9 @@ export function ManifoldOrbifoldExplorer() {
     // Only show outgoing edges from this node
     // The orbifold encodes each direction as an outgoing edge
     const result: OrientedEdge[] = [];
-    // Edge order matches buildP2Orbifold/buildP1Orbifold: N, S, E, W (or E, S for P1)
-    const directions = orbifold.type === "P1" ? ["E", "S", "E", "S"] : ["N", "S", "E", "W"];
-    let dirIndex = 0;
     
-    for (const edge of orbifold.edges) {
+    for (let edgeIdx = 0; edgeIdx < orbifold.edges.length; edgeIdx++) {
+      const edge = orbifold.edges[edgeIdx];
       if (edge.from === nodeIndex) {
         // Edge goes FROM selected node - use voltage as-is
         result.push({
@@ -150,9 +148,8 @@ export function ManifoldOrbifoldExplorer() {
           voltage: edge.voltage,
           isReversed: false,
           originalEdge: edge,
-          direction: directions[dirIndex % directions.length],
+          edgeIndex: edgeIdx,  // Track original edge index for spanning tree lookup
         });
-        dirIndex++;
       }
     }
     return result;
@@ -761,7 +758,8 @@ export function ManifoldOrbifoldExplorer() {
                 <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "13px" }}>
                   <thead>
                     <tr style={{ borderBottom: "2px solid #ddd" }}>
-                      <th style={{ textAlign: "left", padding: "8px" }}>Dir</th>
+                      <th style={{ textAlign: "left", padding: "8px" }}>#</th>
+                      <th style={{ textAlign: "left", padding: "8px" }}>In Tree</th>
                       <th style={{ textAlign: "left", padding: "8px" }}>Target Node</th>
                       <th style={{ textAlign: "left", padding: "8px" }}>Abs. Target</th>
                       <th style={{ textAlign: "left", padding: "8px" }}>Voltage Matrix</th>
@@ -776,10 +774,19 @@ export function ManifoldOrbifoldExplorer() {
                       const targetCopyMatrix = matmul3x3(selection.copyMatrix, orientedEdge.voltage);
                       const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + NODE_CENTER_OFFSET, targetNode.row + NODE_CENTER_OFFSET);
                       
+                      // Check if this edge is in the spanning tree
+                      const isInTree = spanningTree?.has(orientedEdge.edgeIndex) ?? false;
+                      
                       return (
-                        <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
-                          <td style={{ padding: "8px", fontWeight: "bold" }}>
-                            {orientedEdge.direction}
+                        <tr key={i} style={{ 
+                          borderBottom: "1px solid #eee",
+                          backgroundColor: isInTree ? "rgba(40, 167, 69, 0.1)" : "transparent"
+                        }}>
+                          <td style={{ padding: "8px", color: "#999" }}>
+                            {i + 1}
+                          </td>
+                          <td style={{ padding: "8px", fontWeight: "bold", color: isInTree ? "#28a745" : "#999" }}>
+                            {isInTree ? "✓ Yes" : "No"}
                           </td>
                           <td style={{ padding: "8px" }}>
                             ({targetNode.row}, {targetNode.col})
