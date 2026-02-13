@@ -1,17 +1,19 @@
 /**
- * Orbifold creation routines for P1 and P2 wallpaper groups.
+ * Orbifold creation routines for P1, P2, and P4 wallpaper groups.
  * 
- * For both P1 and P2, for a fixed n, the set of nodes are integer coordinates like (i,j)
+ * For P1, P2, and P4, for a fixed n, the set of nodes are integer coordinates like (i,j)
  * where i and j are *odd* and there are n^2 of them.
  * So for n=3, its (1,1),(1,3),(1,5),(3,1),...,(5,5).
  * 
  * These nodes are in direct correspondence with a nxn area for the user to color in.
  * 
- * Both groups have north, south, east, and west neighbors.
+ * All groups have north, south, east, and west neighbors.
  * Interior edges have identity voltage.
  * Border edges have special voltages:
  * - P1: translation by 2n in the direction of that side
  * - P2: translation by 2n in direction AND a 180° flip
+ * - P4: 90° rotation plus translation (heading north you bump into the east side
+ *       of the next fundamental domain, so voltage is rotate 90° CW + translate NE)
  */
 
 import {
@@ -28,7 +30,7 @@ import {
   matInvUnimodular,
 } from "./orbifoldbasics";
 
-export type WallpaperGroupType = "P1" | "P2";
+export type WallpaperGroupType = "P1" | "P2" | "P4";
 
 export interface ColorData extends ExtraData {
   color: "black" | "white";
@@ -62,6 +64,32 @@ export const ROTATION_180: Matrix3x3 = [
 ] as const;
 
 /**
+ * Create a 90° clockwise rotation matrix around origin.
+ * [ 0, 1, 0]
+ * [−1, 0, 0]
+ * [ 0, 0, 1]
+ * 
+ * Note: In our coordinate system where +y is down, this rotates (1,0) -> (0,1).
+ */
+export const ROTATION_90_CW: Matrix3x3 = [
+  [0, 1, 0],
+  [-1, 0, 0],
+  [0, 0, 1],
+] as const;
+
+/**
+ * Create a 90° counter-clockwise rotation matrix around origin.
+ * [0, −1, 0]
+ * [1,  0, 0]
+ * [0,  0, 1]
+ */
+export const ROTATION_90_CCW: Matrix3x3 = [
+  [0, -1, 0],
+  [1, 0, 0],
+  [0, 0, 1],
+] as const;
+
+/**
  * Multiply translation by rotation: first rotate 180°, then translate.
  * This gives translation + 180° flip for P2 border edges.
  */
@@ -71,6 +99,32 @@ export function translationWith180(dx: Int, dy: Int): Matrix3x3 {
   return [
     [-1, 0, dx],
     [0, -1, dy],
+    [0, 0, 1],
+  ] as const;
+}
+
+/**
+ * Create a combined rotation (90° CW) + translation matrix.
+ * First rotate 90° clockwise around origin, then translate by (dx, dy).
+ * Result: [0, 1, dx], [-1, 0, dy], [0, 0, 1]
+ */
+export function translationWith90CW(dx: Int, dy: Int): Matrix3x3 {
+  return [
+    [0, 1, dx],
+    [-1, 0, dy],
+    [0, 0, 1],
+  ] as const;
+}
+
+/**
+ * Create a combined rotation (90° CCW) + translation matrix.
+ * First rotate 90° counter-clockwise around origin, then translate by (dx, dy).
+ * Result: [0, -1, dx], [1, 0, dy], [0, 0, 1]
+ */
+export function translationWith90CCW(dx: Int, dy: Int): Matrix3x3 {
+  return [
+    [0, -1, dx],
+    [1, 0, dy],
     [0, 0, 1],
   ] as const;
 }
@@ -229,6 +283,80 @@ function getP2Neighbor(
 }
 
 /**
+ * Get the neighbor node for P4 wallpaper group.
+ * P4 has 4-fold (90°) rotational symmetry at boundaries.
+ * 
+ * For border edges, the voltage includes 90° rotation plus translation.
+ * The wrapping pattern follows the WallpaperGroups.ts P4 definition:
+ * - North of (i, 1) wraps to (maxOdd, maxOdd + 1 - i) - heading north bumps into east side
+ * - South of (i, maxOdd) wraps to (1, maxOdd + 1 - i) - heading south bumps into west side
+ * - West of (1, j) wraps to (maxOdd + 1 - j, maxOdd) - heading west bumps into south side
+ * - East of (maxOdd, j) wraps to (maxOdd + 1 - j, 1) - heading east bumps into north side
+ * 
+ * The voltages incorporate 90° rotations plus translations to place the neighbor
+ * in the correct adjacent fundamental domain.
+ */
+function getP4Neighbor(
+  i: Int,
+  j: Int,
+  dir: Direction,
+  n: Int
+): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
+  const maxOdd = 2 * n - 1;
+  
+  switch (dir) {
+    case "N": {
+      if (j === 1) {
+        // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
+        // The target absolute position should be (i, -1), which is 2 units north of (i, 1)
+        // Voltage: 90° CCW + translate(2n, -2n) maps (maxOdd, maxOdd+1-i) to (i, -1)
+        const newI = maxOdd;
+        const newJ = maxOdd + 1 - i;
+        const voltage = translationWith90CCW(2 * n, -2 * n);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i, j - 2] as const, voltage: I3 };
+    }
+    case "S": {
+      if (j === maxOdd) {
+        // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
+        // The target absolute position should be (i, maxOdd + 2), which is 2 units south
+        // Voltage: 90° CCW + translate(2n, 2n) maps (1, maxOdd+1-i) to (i, maxOdd+2)
+        const newI = 1;
+        const newJ = maxOdd + 1 - i;
+        const voltage = translationWith90CCW(2 * n, 2 * n);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i, j + 2] as const, voltage: I3 };
+    }
+    case "E": {
+      if (i === maxOdd) {
+        // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
+        // The target absolute position should be (maxOdd + 2, j), which is 2 units east
+        // Voltage: 90° CW + translate(2n, 2n) maps (maxOdd+1-j, 1) to (maxOdd+2, j)
+        const newI = maxOdd + 1 - j;
+        const newJ = 1;
+        const voltage = translationWith90CW(2 * n, 2 * n);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i + 2, j] as const, voltage: I3 };
+    }
+    case "W": {
+      if (i === 1) {
+        // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
+        // The target absolute position should be (-1, j), which is 2 units west
+        // Voltage: 90° CW + translate(-2n, 2n) maps (maxOdd+1-j, maxOdd) to (-1, j)
+        const newI = maxOdd + 1 - j;
+        const newJ = maxOdd;
+        const voltage = translationWith90CW(-2 * n, 2 * n);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i - 2, j] as const, voltage: I3 };
+    }
+  }
+}
+
+/**
  * Create an edge ID from two node IDs.
  * Edge ID is the sorted concatenation to ensure uniqueness.
  */
@@ -240,7 +368,7 @@ function createEdgeId(node1: OrbifoldNodeId, node2: OrbifoldNodeId, dirType: str
 /**
  * Create an orbifold grid for the given wallpaper group and size.
  * 
- * @param groupType - "P1" or "P2"
+ * @param groupType - "P1", "P2", or "P4"
  * @param n - Grid size (results in n×n nodes)
  * @param initialColors - Optional initial colors for each cell (row-major, n×n array)
  */
@@ -280,7 +408,12 @@ export function createOrbifoldGrid(
   // (S is N's reverse, W is E's reverse)
   const processedEdges = new Set<string>();
   
-  const getNeighbor = groupType === "P1" ? getP1Neighbor : getP2Neighbor;
+  // Select the appropriate neighbor function based on group type
+  const getNeighbor = groupType === "P1" 
+    ? getP1Neighbor 
+    : groupType === "P2" 
+      ? getP2Neighbor 
+      : getP4Neighbor;
   
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {

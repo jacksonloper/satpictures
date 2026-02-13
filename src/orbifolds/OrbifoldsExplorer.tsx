@@ -2,11 +2,12 @@
  * Orbifolds Explorer Page
  * 
  * Allows a user to:
- * - Select a wallpaper group (P1 or P2)
+ * - Select a wallpaper group (P1, P2, or P4)
  * - Set a size n (creating an n×n coloring grid)
  * - Set an expansion count m (how many times to expand the lifted graph)
- * - Color in the grid cells (black/white)
- * - See the generated lifted graph
+ * - Color in the grid cells (black/white) using "color" tool
+ * - Inspect nodes to see coordinates, edges, and voltages using "inspect" tool
+ * - See the generated lifted graph with highlighting for inspected nodes
  */
 
 import { useState, useCallback, useMemo, useEffect } from "react";
@@ -20,11 +21,16 @@ import {
 import {
   constructLiftedGraphFromOrbifold,
   processAllNonInteriorOnce,
+  buildAdjacency,
+  nodeIdFromCoord,
   type LiftedGraph,
   type OrbifoldGrid,
+  type OrbifoldNodeId,
   type Matrix3x3,
 } from "./orbifoldbasics";
 import "../App.css";
+
+type ToolType = "color" | "inspect";
 
 // Constants
 const DEFAULT_SIZE = 3;
@@ -113,20 +119,58 @@ function ValidatedInput({
 }
 
 /**
- * Coloring grid component for the orbifold.
+ * Edge info for inspection display.
  */
-function ColoringGrid({
+interface EdgeInfo {
+  targetNodeId: OrbifoldNodeId;
+  targetCoord: readonly [number, number];
+  voltage: Matrix3x3;
+}
+
+/**
+ * Information about an inspected node.
+ */
+interface InspectionInfo {
+  nodeId: OrbifoldNodeId;
+  coord: readonly [number, number];
+  edges: EdgeInfo[];
+}
+
+/**
+ * Format a voltage matrix for display as multiple lines.
+ */
+function formatVoltageRows(v: Matrix3x3): string[] {
+  return [
+    `[${v[0].join(", ")}]`,
+    `[${v[1].join(", ")}]`,
+    `[${v[2].join(", ")}]`,
+  ];
+}
+
+/**
+ * Orbifold Grid Tools component - supports both color and inspect tools.
+ */
+function OrbifoldGridTools({
   n,
   grid,
-  onCellClick,
+  tool,
+  onColorToggle,
+  onInspect,
+  inspectedNodeId,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData>;
-  onCellClick: (row: number, col: number) => void;
+  tool: ToolType;
+  onColorToggle: (row: number, col: number) => void;
+  onInspect: (info: InspectionInfo | null) => void;
+  inspectedNodeId: OrbifoldNodeId | null;
 }) {
   const cellSize = CELL_SIZE;
   const width = n * cellSize + 2 * GRID_PADDING;
   const height = n * cellSize + 2 * GRID_PADDING;
+
+  // Get odd coord from grid index
+  const getOddCoord = (index: number): number => 2 * index + 1;
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
@@ -138,7 +182,41 @@ function ColoringGrid({
     const row = Math.floor(y / cellSize);
     
     if (row >= 0 && row < n && col >= 0 && col < n) {
-      onCellClick(row, col);
+      if (tool === "color") {
+        onColorToggle(row, col);
+      } else {
+        // Inspect tool
+        const i = getOddCoord(col);
+        const j = getOddCoord(row);
+        const nodeId = nodeIdFromCoord([i, j]);
+        
+        // Get edges for this node (adjacency is built during grid creation)
+        const edgeIds = grid.adjacency?.get(nodeId) ?? [];
+        const edges: EdgeInfo[] = [];
+        
+        for (const edgeId of edgeIds) {
+          const edge = grid.edges.get(edgeId);
+          if (!edge) continue;
+          
+          const halfEdge = edge.halfEdges.get(nodeId);
+          if (!halfEdge) continue;
+          
+          const targetNode = grid.nodes.get(halfEdge.to);
+          if (!targetNode) continue;
+          
+          edges.push({
+            targetNodeId: halfEdge.to,
+            targetCoord: targetNode.coord,
+            voltage: halfEdge.voltage,
+          });
+        }
+        
+        onInspect({
+          nodeId,
+          coord: [i, j],
+          edges,
+        });
+      }
     }
   };
 
@@ -146,7 +224,11 @@ function ColoringGrid({
     <svg
       width={width}
       height={height}
-      style={{ border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer" }}
+      style={{ 
+        border: "1px solid #ccc", 
+        borderRadius: "4px", 
+        cursor: tool === "color" ? "pointer" : "crosshair" 
+      }}
       onClick={handleSvgClick}
     >
       {/* Grid cells */}
@@ -155,18 +237,37 @@ function ColoringGrid({
           const color = getNodeColor(grid, row, col);
           const x = GRID_PADDING + col * cellSize;
           const y = GRID_PADDING + row * cellSize;
+          const i = getOddCoord(col);
+          const j = getOddCoord(row);
+          const nodeId = nodeIdFromCoord([i, j]);
+          const isInspected = nodeId === inspectedNodeId;
           
           return (
-            <rect
-              key={`${row}-${col}`}
-              x={x}
-              y={y}
-              width={cellSize}
-              height={cellSize}
-              fill={color === "black" ? "#2c3e50" : "white"}
-              stroke="#7f8c8d"
-              strokeWidth={1}
-            />
+            <g key={`${row}-${col}`}>
+              <rect
+                x={x}
+                y={y}
+                width={cellSize}
+                height={cellSize}
+                fill={color === "black" ? "#2c3e50" : "white"}
+                stroke={isInspected ? "#3498db" : "#7f8c8d"}
+                strokeWidth={isInspected ? 3 : 1}
+              />
+              {/* Show coordinates when in inspect mode */}
+              {tool === "inspect" && (
+                <text
+                  x={x + cellSize / 2}
+                  y={y + cellSize / 2}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill={color === "black" ? "#ecf0f1" : "#2c3e50"}
+                  fontFamily="monospace"
+                >
+                  {i},{j}
+                </text>
+              )}
+            </g>
           );
         })
       )}
@@ -189,19 +290,22 @@ function applyMatrix(matrix: Matrix3x3, x: number, y: number): { x: number; y: n
  * Lifted graph renderer.
  * Positions each lifted node using: voltage × orbifold node coordinates.
  * Colors each node using the ExtraData color from the orbifold node.
+ * Highlights nodes whose orbifold node matches the inspected node.
  */
 function LiftedGraphRenderer({
   liftedGraph,
   orbifoldGrid,
+  highlightOrbifoldNodeId,
 }: {
   liftedGraph: LiftedGraph<ColorData>;
   orbifoldGrid: OrbifoldGrid<ColorData>;
+  highlightOrbifoldNodeId?: OrbifoldNodeId | null;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
   // Compute positions and bounds
   const nodePositions = useMemo(() => {
-    const positions = new Map<string, { x: number; y: number; color: "black" | "white" }>();
+    const positions = new Map<string, { x: number; y: number; color: "black" | "white"; orbifoldNodeId: OrbifoldNodeId }>();
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     
     for (const [id, node] of liftedGraph.nodes) {
@@ -218,7 +322,7 @@ function LiftedGraphRenderer({
       maxY = Math.max(maxY, pos.y);
       
       const color = orbNode.data?.color ?? "white";
-      positions.set(id, { x: pos.x, y: pos.y, color });
+      positions.set(id, { x: pos.x, y: pos.y, color, orbifoldNodeId: node.orbifoldNode });
     }
     
     return { positions, minX, maxX, minY, maxY };
@@ -267,16 +371,17 @@ function LiftedGraphRenderer({
       {Array.from(positions.entries()).map(([id, pos]) => {
         const node = liftedGraph.nodes.get(id);
         const isInterior = node?.interior ?? false;
+        const isHighlighted = highlightOrbifoldNodeId && pos.orbifoldNodeId === highlightOrbifoldNodeId;
         
         return (
           <circle
             key={id}
             cx={toSvgX(pos.x)}
             cy={toSvgY(pos.y)}
-            r={cellSize / 3}
+            r={isHighlighted ? cellSize / 2 : cellSize / 3}
             fill={pos.color === "black" ? "#2c3e50" : "white"}
-            stroke={isInterior ? "#27ae60" : "#e74c3c"}
-            strokeWidth={isInterior ? 1 : 2}
+            stroke={isHighlighted ? "#3498db" : (isInterior ? "#27ae60" : "#e74c3c")}
+            strokeWidth={isHighlighted ? 3 : (isInterior ? 1 : 2)}
           />
         );
       })}
@@ -291,19 +396,26 @@ export function OrbifoldsExplorer() {
   const [wallpaperGroup, setWallpaperGroup] = useState<WallpaperGroupType>("P1");
   const [size, setSize] = useState(DEFAULT_SIZE);
   const [expansion, setExpansion] = useState(DEFAULT_EXPANSION);
+  const [tool, setTool] = useState<ToolType>("color");
+  const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
   
-  // Initialize orbifold grid
-  const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData>>(() =>
-    createOrbifoldGrid(wallpaperGroup, size)
-  );
+  // Initialize orbifold grid with adjacency built
+  const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData>>(() => {
+    const grid = createOrbifoldGrid(wallpaperGroup, size);
+    buildAdjacency(grid);
+    return grid;
+  });
 
   // Recreate grid when wallpaper group or size changes
   useEffect(() => {
-    setOrbifoldGrid(createOrbifoldGrid(wallpaperGroup, size));
+    const grid = createOrbifoldGrid(wallpaperGroup, size);
+    buildAdjacency(grid);
+    setOrbifoldGrid(grid);
+    setInspectionInfo(null); // Clear inspection when grid changes
   }, [wallpaperGroup, size]);
 
-  // Handle cell click to toggle color
-  const handleCellClick = useCallback((row: number, col: number) => {
+  // Handle cell color toggle
+  const handleColorToggle = useCallback((row: number, col: number) => {
     setOrbifoldGrid((prev) => {
       // Create a shallow copy of the grid
       const newGrid: OrbifoldGrid<ColorData> = {
@@ -319,6 +431,11 @@ export function OrbifoldsExplorer() {
       
       return newGrid;
     });
+  }, []);
+
+  // Handle inspection
+  const handleInspect = useCallback((info: InspectionInfo | null) => {
+    setInspectionInfo(info);
   }, []);
 
   // Build the lifted graph
@@ -361,6 +478,7 @@ export function OrbifoldsExplorer() {
           >
             <option value="P1">P1 (Torus)</option>
             <option value="P2">P2 (180° rotation)</option>
+            <option value="P4">P4 (90° rotation)</option>
           </select>
         </div>
         
@@ -385,16 +503,57 @@ export function OrbifoldsExplorer() {
       
       {/* Main content area */}
       <div style={{ display: "flex", gap: "40px", flexWrap: "wrap" }}>
-        {/* Coloring Grid */}
+        {/* Orbifold Grid Section */}
         <div>
-          <h3 style={{ marginBottom: "10px" }}>Coloring Grid ({size}×{size})</h3>
+          <h3 style={{ marginBottom: "10px" }}>Orbifold Grid ({size}×{size})</h3>
+          
+          {/* Tool selector */}
+          <div style={{ 
+            display: "flex", 
+            gap: "8px", 
+            marginBottom: "10px",
+          }}>
+            <button
+              onClick={() => setTool("color")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: tool === "color" ? "2px solid #3498db" : "1px solid #ccc",
+                backgroundColor: tool === "color" ? "#ebf5fb" : "white",
+                cursor: "pointer",
+                fontWeight: tool === "color" ? "bold" : "normal",
+              }}
+            >
+              🎨 Color
+            </button>
+            <button
+              onClick={() => setTool("inspect")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: tool === "inspect" ? "2px solid #3498db" : "1px solid #ccc",
+                backgroundColor: tool === "inspect" ? "#ebf5fb" : "white",
+                cursor: "pointer",
+                fontWeight: tool === "inspect" ? "bold" : "normal",
+              }}
+            >
+              🔍 Inspect
+            </button>
+          </div>
+          
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
-            Click cells to toggle black/white
+            {tool === "color" 
+              ? "Click cells to toggle black/white" 
+              : "Click cells to inspect node info and voltages"}
           </p>
-          <ColoringGrid
+          
+          <OrbifoldGridTools
             n={size}
             grid={orbifoldGrid}
-            onCellClick={handleCellClick}
+            tool={tool}
+            onColorToggle={handleColorToggle}
+            onInspect={handleInspect}
+            inspectedNodeId={inspectionInfo?.nodeId ?? null}
           />
           
           {/* Stats */}
@@ -402,6 +561,55 @@ export function OrbifoldsExplorer() {
             <p>Orbifold nodes: {orbifoldGrid.nodes.size}</p>
             <p>Orbifold edges: {orbifoldGrid.edges.size}</p>
           </div>
+          
+          {/* Inspection Info Panel */}
+          {inspectionInfo && (
+            <div style={{ 
+              marginTop: "16px", 
+              padding: "12px", 
+              backgroundColor: "#ebf5fb",
+              borderRadius: "8px",
+              border: "1px solid #3498db",
+              maxWidth: "400px",
+            }}>
+              <h4 style={{ marginBottom: "8px", color: "#2980b9" }}>
+                🔍 Node Inspection
+              </h4>
+              <p style={{ fontSize: "13px", marginBottom: "8px" }}>
+                <strong>Node ID:</strong> <code style={{ backgroundColor: "#fff", padding: "2px 4px" }}>{inspectionInfo.nodeId}</code>
+              </p>
+              <p style={{ fontSize: "13px", marginBottom: "8px" }}>
+                <strong>Coordinates:</strong> ({inspectionInfo.coord[0]}, {inspectionInfo.coord[1]})
+              </p>
+              <p style={{ fontSize: "13px", marginBottom: "4px" }}>
+                <strong>Edges ({inspectionInfo.edges.length}):</strong>
+              </p>
+              <div style={{ 
+                maxHeight: "200px", 
+                overflowY: "auto",
+                fontSize: "12px",
+                fontFamily: "monospace",
+              }}>
+                {inspectionInfo.edges.map((edge, idx) => (
+                  <div 
+                    key={idx} 
+                    style={{ 
+                      marginBottom: "8px", 
+                      padding: "6px",
+                      backgroundColor: "white",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    <div><strong>→ Target:</strong> {edge.targetNodeId} ({edge.targetCoord[0]},{edge.targetCoord[1]})</div>
+                    <div><strong>Voltage:</strong></div>
+                    {formatVoltageRows(edge.voltage).map((row, rowIdx) => (
+                      <div key={rowIdx} style={{ marginLeft: "10px" }}>{row}</div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         
         {/* Lifted Graph */}
@@ -409,10 +617,16 @@ export function OrbifoldsExplorer() {
           <h3 style={{ marginBottom: "10px" }}>Lifted Graph</h3>
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
+            {inspectionInfo && (
+              <span style={{ color: "#3498db", marginLeft: "8px" }}>
+                (highlighted: {inspectionInfo.nodeId})
+              </span>
+            )}
           </p>
           <LiftedGraphRenderer
             liftedGraph={liftedGraph}
             orbifoldGrid={orbifoldGrid}
+            highlightOrbifoldNodeId={inspectionInfo?.nodeId}
           />
           
           {/* Legend */}
@@ -420,6 +634,11 @@ export function OrbifoldsExplorer() {
             <p>
               <span style={{ color: "#27ae60" }}>●</span> Interior nodes
               <span style={{ marginLeft: "16px", color: "#e74c3c" }}>○</span> Exterior nodes
+              {inspectionInfo && (
+                <>
+                  <span style={{ marginLeft: "16px", color: "#3498db" }}>◉</span> Highlighted
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -441,9 +660,10 @@ export function OrbifoldsExplorer() {
         <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>
           <li><strong>P1:</strong> Simple torus wrapping (translations only)</li>
           <li><strong>P2:</strong> Includes 180° rotations at boundaries</li>
+          <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
         </ul>
         <p style={{ marginTop: "8px" }}>
-          Increase <strong>expansion (m)</strong> to see more of the lifted graph unfold.
+          Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
         </p>
       </div>
     </div>

@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npx tsx src/polyform-explorer/grids/unifiedTiling.test.ts && npx tsx src/problem/polyhex-tiling.test.ts && npx tsx src/wallpaper-maze/p3-neighbor-distance.test.ts && npx tsx src/wallpaper-maze/wallpaper-maze.test.ts"
+    "test": "npx tsx src/polyform-explorer/grids/unifiedTiling.test.ts && npx tsx src/problem/polyhex-tiling.test.ts && npx tsx src/wallpaper-maze/p3-neighbor-distance.test.ts && npx tsx src/wallpaper-maze/wallpaper-maze.test.ts && npx tsx src/orbifolds/p4-edge-distance.test.ts"
   },
   "dependencies": {
     "@babel/parser": "^7.28.6",
