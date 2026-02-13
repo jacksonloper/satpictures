@@ -10,7 +10,7 @@
  * - View copies of the manifold with voltage-based correspondence
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import {
   buildManifold,
@@ -25,10 +25,12 @@ import {
   inverse3x3,
   IDENTITY_3X3,
   generateRandomSpanningTree,
-  getOrbifoldEdgeForManifoldEdge,
+  findOrbifoldEdge,
   type ManifoldType,
+  type Manifold,
+  type Orbifold,
   type Matrix3x3,
-  type OrbifoldEdge,
+  type ManifoldEdge,
 } from "./ManifoldOrbifold";
 
 /** Selection state: a node in a specific copy */
@@ -40,19 +42,16 @@ interface NodeSelection {
 
 /** An edge from the perspective of a selected node, with properly oriented voltage */
 interface OrientedEdge {
+  manifoldEdgeIndex: number;  // Index in manifold.edges (for spanning tree lookup)
   targetNodeIndex: number;
   voltage: Matrix3x3;     // Voltage going FROM selected node TO target
-  isReversed: boolean;    // Was the original edge reversed?
-  originalEdge: OrbifoldEdge;
-  edgeIndex: number;      // Index in the orbifold.edges array (for spanning tree lookup)
+  isReversed: boolean;    // Was the edge direction reversed to make it outgoing from selected node?
 }
 
 // Constants
 const CELL_SIZE = 50;
 const NODE_RADIUS = 15;
 const PADDING = 40;
-/** Offset to center position within a cell (0.5 = center of 0-1 range) */
-const NODE_CENTER_OFFSET = 0.5;
 
 // Golden ratio for spreading colors
 const GOLDEN_RATIO = 0.618033988749895;
@@ -62,30 +61,137 @@ function getCopyColor(index: number): string {
   return `hsl(${hue}, 70%, 60%)`;
 }
 
+/**
+ * Get oriented edges from a node's perspective using manifold edges and orbifold voltages.
+ * Each manifold edge has one corresponding orbifold edge (with a voltage).
+ * We orient the edge to go FROM the selected node, inverting the voltage if needed.
+ */
+function getOrientedEdgesForNode(
+  manifold: Manifold,
+  orbifold: Orbifold,
+  nodeIndex: number,
+): OrientedEdge[] {
+  const result: OrientedEdge[] = [];
+  const nodeEdges = getNodeEdges(manifold, nodeIndex);
+  
+  for (let i = 0; i < nodeEdges.length; i++) {
+    const manifoldEdge = nodeEdges[i];
+    const manifoldEdgeIndex = manifold.edges.indexOf(manifoldEdge);
+    const targetNodeIndex = getOtherNode(manifoldEdge, nodeIndex);
+    
+    // The manifold edge is undirected. The orbifold has the same edges but directed.
+    // Find the corresponding orbifold edge (try both directions)
+    let voltage: Matrix3x3;
+    let isReversed: boolean;
+    
+    // Try from -> to direction first (where from = nodeIndex)
+    const forwardEdge = findOrbifoldEdge(orbifold, manifoldEdge.from, manifoldEdge.to);
+    if (forwardEdge) {
+      // If nodeIndex is the "from" of the manifold edge, use voltage as-is
+      // If nodeIndex is the "to" of the manifold edge, use inverse voltage
+      if (nodeIndex === manifoldEdge.from) {
+        voltage = forwardEdge.voltage;
+        isReversed = false;
+      } else {
+        voltage = inverse3x3(forwardEdge.voltage);
+        isReversed = true;
+      }
+    } else {
+      // Try reverse direction
+      const reverseEdge = findOrbifoldEdge(orbifold, manifoldEdge.to, manifoldEdge.from);
+      if (reverseEdge) {
+        if (nodeIndex === manifoldEdge.to) {
+          voltage = reverseEdge.voltage;
+          isReversed = false;
+        } else {
+          voltage = inverse3x3(reverseEdge.voltage);
+          isReversed = true;
+        }
+      } else {
+        // No matching orbifold edge found - this shouldn't happen
+        console.warn(`No orbifold edge found for manifold edge ${manifoldEdgeIndex}`);
+        voltage = IDENTITY_3X3;
+        isReversed = false;
+      }
+    }
+    
+    result.push({
+      manifoldEdgeIndex,
+      targetNodeIndex,
+      voltage,
+      isReversed,
+    });
+  }
+  
+  return result;
+}
+
+/** Custom hook for validated numeric input */
+function useValidatedInput(initialValue: number, min: number, max: number, onChange: (v: number) => void) {
+  const [inputValue, setInputValue] = useState(String(initialValue));
+  const [isValid, setIsValid] = useState(true);
+  const lastValidValue = useRef(initialValue);
+  
+  // Sync with external value changes
+  useEffect(() => {
+    setInputValue(String(initialValue));
+    lastValidValue.current = initialValue;
+    setIsValid(true);
+  }, [initialValue]);
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setInputValue(newValue);
+    
+    // Check validity
+    const parsed = parseInt(newValue, 10);
+    const valid = !isNaN(parsed) && parsed >= min && parsed <= max;
+    setIsValid(valid);
+    
+    if (valid) {
+      lastValidValue.current = parsed;
+      onChange(parsed);
+    }
+  };
+  
+  const handleBlur = () => {
+    if (!isValid) {
+      // Reset to last valid value
+      setInputValue(String(lastValidValue.current));
+      setIsValid(true);
+    }
+  };
+  
+  return { inputValue, isValid, handleChange, handleBlur };
+}
+
 export function ManifoldOrbifoldExplorer() {
   // State
   const [manifoldType, setManifoldType] = useState<ManifoldType>("P1");
   const [size, setSize] = useState(3);
   const [selection, setSelection] = useState<NodeSelection | null>(null);
   const [multiplier, setMultiplier] = useState(2);
-  const [showOrbifold, setShowOrbifold] = useState(false);
   const [showEdgeDetails, setShowEdgeDetails] = useState(false);
   const [spanningTree, setSpanningTree] = useState<Set<number> | null>(null);
+  
+  // Validated inputs
+  const sizeInput = useValidatedInput(size, 2, 8, setSize);
+  const multiplierInput = useValidatedInput(multiplier, 1, 5, setMultiplier);
   
   // Build manifold and orbifold
   const manifold = useMemo(() => buildManifold(manifoldType, size), [manifoldType, size]);
   const orbifold = useMemo(() => buildOrbifold(manifoldType, size), [manifoldType, size]);
   
-  // Clear spanning tree when manifold changes
+  // Clear spanning tree and selection when manifold changes
   useEffect(() => {
     setSpanningTree(null);
+    setSelection(null);
   }, [manifoldType, size]);
   
-  // Expand copies using BFS
+  // Always expand copies (no toggle)
   const copies = useMemo(() => {
-    if (!showOrbifold) return [];
     return expandCopies(orbifold, multiplier);
-  }, [orbifold, multiplier, showOrbifold]);
+  }, [orbifold, multiplier]);
   
   // Generate random spanning tree
   const handleGenerateSpanningTree = useCallback(() => {
@@ -130,32 +236,11 @@ export function ManifoldOrbifoldExplorer() {
     return selectedEdges.filter(e => isStubEdge(manifold, e, selection.nodeIndex)).length;
   }, [manifold, selectedEdges, selection]);
   
-  // Get oriented edges from orbifold - only OUTGOING edges from the selected node
-  // Each node has exactly 4 outgoing edges (N, S, E, W) in the orbifold
-  // Note: The orbifold builder (buildP2Orbifold) adds edges in N, S, E, W order per node
+  // Get oriented edges using the new helper function
   const orientedEdges = useMemo((): OrientedEdge[] => {
     if (!selection) return [];
-    const nodeIndex = selection.nodeIndex;
-    
-    // Only show outgoing edges from this node
-    // The orbifold encodes each direction as an outgoing edge
-    const result: OrientedEdge[] = [];
-    
-    for (let edgeIdx = 0; edgeIdx < orbifold.edges.length; edgeIdx++) {
-      const edge = orbifold.edges[edgeIdx];
-      if (edge.from === nodeIndex) {
-        // Edge goes FROM selected node - use voltage as-is
-        result.push({
-          targetNodeIndex: edge.to,
-          voltage: edge.voltage,
-          isReversed: false,
-          originalEdge: edge,
-          edgeIndex: edgeIdx,  // Track original edge index for spanning tree lookup
-        });
-      }
-    }
-    return result;
-  }, [orbifold, selection]);
+    return getOrientedEdgesForNode(manifold, orbifold, selection.nodeIndex);
+  }, [manifold, orbifold, selection]);
   
   // Render the manifold view (single fundamental domain)
   const renderManifold = () => {
@@ -222,10 +307,13 @@ export function ManifoldOrbifoldExplorer() {
       }
     }
     
-    // Draw edges for selected node (only non-wrapped edges)
-    const edgeElements: ReactNode[] = [];
     const isInFundamentalDomain = selection && matrixKey(selection.copyMatrix) === matrixKey(IDENTITY_3X3);
-    if (selection && isInFundamentalDomain) {
+    // Also highlight if selected in a copy
+    const highlightNodeInFundamental = selection ? selection.nodeIndex : null;
+    
+    // Draw edges for selected node (only non-wrapped edges, as dotted lines on top)
+    const edgeElements: ReactNode[] = [];
+    if (selection) {
       const thisNode = manifold.nodes[selection.nodeIndex];
       const cx = PADDING + thisNode.col * CELL_SIZE + CELL_SIZE / 2;
       const cy = PADDING + thisNode.row * CELL_SIZE + CELL_SIZE / 2;
@@ -243,7 +331,7 @@ export function ManifoldOrbifoldExplorer() {
         const ox = PADDING + otherNode.col * CELL_SIZE + CELL_SIZE / 2;
         const oy = PADDING + otherNode.row * CELL_SIZE + CELL_SIZE / 2;
         
-        // Draw as full line to neighbor
+        // Draw as dotted line (on top of tree edges)
         edgeElements.push(
           <line
             key={`edge-${i}`}
@@ -251,8 +339,9 @@ export function ManifoldOrbifoldExplorer() {
             y1={cy}
             x2={ox}
             y2={oy}
-            stroke="#4ecdc4"
-            strokeWidth={3}
+            stroke="#666"
+            strokeWidth={2}
+            strokeDasharray="4,3"
           />
         );
       }
@@ -263,7 +352,23 @@ export function ManifoldOrbifoldExplorer() {
     for (const node of manifold.nodes) {
       const cx = PADDING + node.col * CELL_SIZE + CELL_SIZE / 2;
       const cy = PADDING + node.row * CELL_SIZE + CELL_SIZE / 2;
-      const isSelected = selection && isInFundamentalDomain && node.index === selection.nodeIndex;
+      const isSelected = isInFundamentalDomain && node.index === selection?.nodeIndex;
+      const isHighlighted = highlightNodeInFundamental === node.index;
+      
+      // Yellow highlight circle for selected node (including when selected from a copy)
+      if (isHighlighted) {
+        nodeElements.push(
+          <circle
+            key={`highlight-${node.index}`}
+            cx={cx}
+            cy={cy}
+            r={NODE_RADIUS + 4}
+            fill="none"
+            stroke="#ffd93d"
+            strokeWidth={3}
+          />
+        );
+      }
       
       nodeElements.push(
         <g key={`node-${node.index}`}>
@@ -304,14 +409,14 @@ export function ManifoldOrbifoldExplorer() {
   
   // Render the orbifold viewer (multiple copies)
   const renderOrbifoldViewer = () => {
-    if (!showOrbifold || copies.length === 0) return null;
+    if (copies.length === 0) return null;
     
-    // Find bounds
+    // Find bounds - use integer coordinates (no offset)
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     
     for (const copy of copies) {
       for (const node of orbifold.nodes) {
-        const pos = applyMatrix3x3(copy.matrix, node.col + NODE_CENTER_OFFSET, node.row + NODE_CENTER_OFFSET);
+        const pos = applyMatrix3x3(copy.matrix, node.col, node.row);
         minX = Math.min(minX, pos.x);
         minY = Math.min(minY, pos.y);
         maxX = Math.max(maxX, pos.x);
@@ -320,14 +425,10 @@ export function ManifoldOrbifoldExplorer() {
     }
     
     const scale = CELL_SIZE;
-    const offsetX = -minX * scale + PADDING;
-    const offsetY = -minY * scale + PADDING;
-    const width = (maxX - minX) * scale + PADDING * 2;
-    const height = (maxY - minY) * scale + PADDING * 2;
-    
-    // Create a map from copy key to index for coloring
-    const copyIndexMap = new Map<string, number>();
-    copies.forEach((copy, i) => copyIndexMap.set(copy.key, i));
+    const offsetX = -minX * scale + PADDING + CELL_SIZE / 2;
+    const offsetY = -minY * scale + PADDING + CELL_SIZE / 2;
+    const width = (maxX - minX) * scale + PADDING * 2 + CELL_SIZE;
+    const height = (maxY - minY) * scale + PADDING * 2 + CELL_SIZE;
     
     const elements: ReactNode[] = [];
     
@@ -339,28 +440,39 @@ export function ManifoldOrbifoldExplorer() {
         
         // For each tree edge in the manifold, draw it in this copy
         for (const manifoldEdgeIdx of spanningTree) {
-          // Find the corresponding orbifold edge for this manifold edge
-          const orbEdgeResult = getOrbifoldEdgeForManifoldEdge(manifold, orbifold, manifoldEdgeIdx);
-          if (!orbEdgeResult) continue;
+          const manifoldEdge = manifold.edges[manifoldEdgeIdx];
           
-          const { orbifoldEdge, reversed } = orbEdgeResult;
+          // Find the orbifold edge to get the voltage
+          const orbEdge = findOrbifoldEdge(orbifold, manifoldEdge.from, manifoldEdge.to);
+          let voltage: Matrix3x3;
+          let fromNodeIdx: number;
+          let toNodeIdx: number;
           
-          // Determine actual voltage based on edge direction
-          // If reversed, we use inverse voltage
-          const voltage = reversed ? inverse3x3(orbifoldEdge.voltage) : orbifoldEdge.voltage;
-          const fromNodeIdx = reversed ? orbifoldEdge.to : orbifoldEdge.from;
-          const toNodeIdx = reversed ? orbifoldEdge.from : orbifoldEdge.to;
+          if (orbEdge) {
+            voltage = orbEdge.voltage;
+            fromNodeIdx = manifoldEdge.from;
+            toNodeIdx = manifoldEdge.to;
+          } else {
+            const reverseOrbEdge = findOrbifoldEdge(orbifold, manifoldEdge.to, manifoldEdge.from);
+            if (reverseOrbEdge) {
+              voltage = inverse3x3(reverseOrbEdge.voltage);
+              fromNodeIdx = manifoldEdge.from;
+              toNodeIdx = manifoldEdge.to;
+            } else {
+              continue;
+            }
+          }
           
           // Source position in this copy
           const fromNode = orbifold.nodes[fromNodeIdx];
-          const fromPos = applyMatrix3x3(copy.matrix, fromNode.col + NODE_CENTER_OFFSET, fromNode.row + NODE_CENTER_OFFSET);
+          const fromPos = applyMatrix3x3(copy.matrix, fromNode.col, fromNode.row);
           const fromX = fromPos.x * scale + offsetX;
           const fromY = fromPos.y * scale + offsetY;
           
           // Target position: use the voltage to determine the target copy
           const targetCopyMatrix = matmul3x3(copy.matrix, voltage);
           const toNode = orbifold.nodes[toNodeIdx];
-          const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col + NODE_CENTER_OFFSET, toNode.row + NODE_CENTER_OFFSET);
+          const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col, toNode.row);
           const toX = toPos.x * scale + offsetX;
           const toY = toPos.y * scale + offsetY;
           
@@ -389,7 +501,7 @@ export function ManifoldOrbifoldExplorer() {
       
       // Draw nodes in this copy
       for (const node of orbifold.nodes) {
-        const pos = applyMatrix3x3(copy.matrix, node.col + NODE_CENTER_OFFSET, node.row + NODE_CENTER_OFFSET);
+        const pos = applyMatrix3x3(copy.matrix, node.col, node.row);
         const sx = pos.x * scale + offsetX;
         const sy = pos.y * scale + offsetY;
         
@@ -411,7 +523,7 @@ export function ManifoldOrbifoldExplorer() {
           />
         );
         
-        // Label all copies with node coords
+        // Label with original manifold node coordinates (row, col)
         elements.push(
           <text
             key={`copy-${copyIdx}-label-${node.index}`}
@@ -440,7 +552,7 @@ export function ManifoldOrbifoldExplorer() {
         
         // Source position: selected node in its copy
         const fromNode = orbifold.nodes[selectedNodeIndex];
-        const fromPos = applyMatrix3x3(selectedCopyMatrix, fromNode.col + NODE_CENTER_OFFSET, fromNode.row + NODE_CENTER_OFFSET);
+        const fromPos = applyMatrix3x3(selectedCopyMatrix, fromNode.col, fromNode.row);
         const fromX = fromPos.x * scale + offsetX;
         const fromY = fromPos.y * scale + offsetY;
         
@@ -448,7 +560,7 @@ export function ManifoldOrbifoldExplorer() {
         // The target copy = selectedCopyMatrix * voltage
         const targetCopyMatrix = matmul3x3(selectedCopyMatrix, orientedEdge.voltage);
         const toNode = orbifold.nodes[orientedEdge.targetNodeIndex];
-        const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col + NODE_CENTER_OFFSET, toNode.row + NODE_CENTER_OFFSET);
+        const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col, toNode.row);
         const toX = toPos.x * scale + offsetX;
         const toY = toPos.y * scale + offsetY;
         
@@ -520,7 +632,6 @@ export function ManifoldOrbifoldExplorer() {
             value={manifoldType} 
             onChange={(e) => {
               setManifoldType(e.target.value as ManifoldType);
-              setSelection(null);
             }}
             style={{ padding: "8px", fontSize: "14px", width: "100%" }}
           >
@@ -537,19 +648,29 @@ export function ManifoldOrbifoldExplorer() {
           minWidth: "150px"
         }}>
           <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
-            Size (n):
+            Size (n): <span style={{ fontSize: "11px", color: "#888" }}>(2-8)</span>
           </label>
           <input
-            type="number"
-            min={2}
-            max={8}
-            value={size}
-            onChange={(e) => {
-              setSize(Math.max(2, Math.min(8, parseInt(e.target.value) || 2)));
-              setSelection(null);
+            type="text"
+            value={sizeInput.inputValue}
+            onChange={sizeInput.handleChange}
+            onBlur={sizeInput.handleBlur}
+            style={{ 
+              padding: "8px", 
+              fontSize: "14px", 
+              width: "100%",
+              borderColor: sizeInput.isValid ? "#ccc" : "#e74c3c",
+              borderWidth: "2px",
+              borderStyle: "solid",
+              borderRadius: "4px",
+              outline: "none"
             }}
-            style={{ padding: "8px", fontSize: "14px", width: "100%" }}
           />
+          {!sizeInput.isValid && (
+            <div style={{ color: "#e74c3c", fontSize: "11px", marginTop: "4px" }}>
+              Enter 2-8
+            </div>
+          )}
         </div>
         
         {/* Multiplier */}
@@ -560,41 +681,29 @@ export function ManifoldOrbifoldExplorer() {
           minWidth: "150px"
         }}>
           <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
-            Multiplier:
+            Multiplier: <span style={{ fontSize: "11px", color: "#888" }}>(1-5)</span>
           </label>
           <input
-            type="number"
-            min={1}
-            max={5}
-            value={multiplier}
-            onChange={(e) => setMultiplier(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
-            style={{ padding: "8px", fontSize: "14px", width: "100%" }}
-          />
-        </div>
-        
-        {/* Orbifold Toggle */}
-        <div style={{ 
-          padding: "15px", 
-          backgroundColor: "#f8f9fa", 
-          borderRadius: "8px",
-          minWidth: "150px"
-        }}>
-          <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
-            Show Orbifold:
-          </label>
-          <button
-            onClick={() => setShowOrbifold(!showOrbifold)}
+            type="text"
+            value={multiplierInput.inputValue}
+            onChange={multiplierInput.handleChange}
+            onBlur={multiplierInput.handleBlur}
             style={{ 
-              padding: "8px 16px", 
-              fontSize: "14px",
-              backgroundColor: showOrbifold ? "#4ecdc4" : "#ddd",
-              border: "none",
+              padding: "8px", 
+              fontSize: "14px", 
+              width: "100%",
+              borderColor: multiplierInput.isValid ? "#ccc" : "#e74c3c",
+              borderWidth: "2px",
+              borderStyle: "solid",
               borderRadius: "4px",
-              cursor: "pointer"
+              outline: "none"
             }}
-          >
-            {showOrbifold ? "Hide Copies" : "Show Copies"}
-          </button>
+          />
+          {!multiplierInput.isValid && (
+            <div style={{ color: "#e74c3c", fontSize: "11px", marginTop: "4px" }}>
+              Enter 1-5
+            </div>
+          )}
         </div>
         
         {/* Spanning Tree Controls */}
@@ -663,11 +772,9 @@ export function ManifoldOrbifoldExplorer() {
             )}
           </span>
         )}
-        {showOrbifold && (
-          <span style={{ marginLeft: "20px" }}>
-            <strong>Copies:</strong> {copies.length}
-          </span>
-        )}
+        <span style={{ marginLeft: "20px" }}>
+          <strong>Copies:</strong> {copies.length}
+        </span>
       </div>
       
       {/* Visualization */}
@@ -688,23 +795,21 @@ export function ManifoldOrbifoldExplorer() {
           </p>
         </div>
         
-        {/* Orbifold View */}
-        {showOrbifold && (
-          <div>
-            <h3 style={{ marginBottom: "10px" }}>Orbifold Copies</h3>
-            <div style={{ 
-              border: "1px solid #ddd", 
-              borderRadius: "8px",
-              backgroundColor: "#fff",
-              display: "inline-block"
-            }}>
-              {renderOrbifoldViewer()}
-            </div>
-            <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
-              Click any node in any copy to see edges. Dashed lines show voltage edges.
-            </p>
+        {/* Orbifold View - always shown */}
+        <div>
+          <h3 style={{ marginBottom: "10px" }}>Lifted Graph (Orbifold Copies)</h3>
+          <div style={{ 
+            border: "1px solid #ddd", 
+            borderRadius: "8px",
+            backgroundColor: "#fff",
+            display: "inline-block"
+          }}>
+            {renderOrbifoldViewer()}
           </div>
-        )}
+          <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
+            Click any node in any copy to see edges. Dashed lines show voltage edges.
+          </p>
+        </div>
       </div>
       
       {/* Edge Details - Expandable */}
@@ -735,7 +840,8 @@ export function ManifoldOrbifoldExplorer() {
           
           {showEdgeDetails && (() => {
             const selectedNode = manifold.nodes[selection.nodeIndex];
-            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.col + NODE_CENTER_OFFSET, selectedNode.row + NODE_CENTER_OFFSET);
+            // Use integer coordinates (no offset)
+            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.col, selectedNode.row);
             const isNonIdentityCopy = matrixKey(selection.copyMatrix) !== matrixKey(IDENTITY_3X3);
             
             return (
@@ -749,6 +855,12 @@ export function ManifoldOrbifoldExplorer() {
                   fontSize: "13px"
                 }}>
                   <div style={{ marginBottom: "8px" }}>
+                    <strong>Node in Manifold:</strong>
+                    <span style={{ fontFamily: "monospace", marginLeft: "10px" }}>
+                      ({selectedNode.row}, {selectedNode.col})
+                    </span>
+                  </div>
+                  <div style={{ marginBottom: "8px" }}>
                     <strong>Copy Matrix (Group Element):</strong>
                     <span style={{ fontFamily: "monospace", marginLeft: "10px" }}>
                       [{selection.copyMatrix.slice(0, 3).join(", ")}]
@@ -760,7 +872,7 @@ export function ManifoldOrbifoldExplorer() {
                   <div>
                     <strong>Absolute Position (Lifted Graph):</strong>
                     <span style={{ fontFamily: "monospace", marginLeft: "10px" }}>
-                      ({liftedPos.x.toFixed(2)}, {liftedPos.y.toFixed(2)})
+                      ({Math.round(liftedPos.x)}, {Math.round(liftedPos.y)})
                     </span>
                   </div>
                 </div>
@@ -781,19 +893,19 @@ export function ManifoldOrbifoldExplorer() {
                       const targetNode = orbifold.nodes[orientedEdge.targetNodeIndex];
                       // Compute absolute target position: 
                       // targetCopyMatrix = currentCopyMatrix * voltage
-                      // then apply to target node
+                      // then apply to target node (integer coordinates)
                       const targetCopyMatrix = matmul3x3(selection.copyMatrix, orientedEdge.voltage);
-                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + NODE_CENTER_OFFSET, targetNode.row + NODE_CENTER_OFFSET);
+                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col, targetNode.row);
                       
-                      // Check if this edge is in the spanning tree
-                      const isInTree = spanningTree?.has(orientedEdge.edgeIndex) ?? false;
+                      // Check if this edge is in the spanning tree (use manifold edge index)
+                      const isInTree = spanningTree?.has(orientedEdge.manifoldEdgeIndex) ?? false;
                       
                       return (
                         <tr key={i} style={{ 
                           borderBottom: "1px solid #eee",
                           backgroundColor: isInTree ? "rgba(40, 167, 69, 0.1)" : "transparent"
                         }}>
-                          <td style={{ padding: "8px", color: "#999" }} title={`Edge index: ${orientedEdge.edgeIndex}`}>
+                          <td style={{ padding: "8px", color: "#999" }} title={`Manifold edge index: ${orientedEdge.manifoldEdgeIndex}`}>
                             {i + 1}
                           </td>
                           <td style={{ padding: "8px", fontWeight: "bold", color: isInTree ? "#28a745" : "#999" }}>
@@ -803,7 +915,7 @@ export function ManifoldOrbifoldExplorer() {
                             ({targetNode.row}, {targetNode.col})
                           </td>
                           <td style={{ padding: "8px", fontFamily: "monospace" }}>
-                            ({absTargetPos.x.toFixed(2)}, {absTargetPos.y.toFixed(2)})
+                            ({Math.round(absTargetPos.x)}, {Math.round(absTargetPos.y)})
                           </td>
                           <td style={{ padding: "8px", fontFamily: "monospace", fontSize: "11px" }}>
                             [{orientedEdge.voltage.slice(0, 3).join(", ")}]<br/>
