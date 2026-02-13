@@ -307,57 +307,48 @@ function getP4Neighbor(
   switch (dir) {
     case "N": {
       if (j === 1) {
-        // North border: heading north bumps into the east side of the adjacent domain
-        // Wraps (i, 1) to (maxOdd, maxOdd + 1 - i)
-        // This is a 90° CW rotation + translation to NE
-        // The transformed coordinate: new_i = maxOdd, new_j = maxOdd + 1 - i
+        // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
+        // The target absolute position should be (i, -1), which is 2 units north of (i, 1)
+        // Voltage: 90° CCW + translate(2n, -2n) maps (maxOdd, maxOdd+1-i) to (i, -1)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
-        // Voltage: rotate 90° CW then translate to place in correct domain
-        // Translation: (+2n, 0) to move to the domain north of origin
-        const voltage = translationWith90CW(2 * n, 0);
+        const voltage = translationWith90CCW(2 * n, -2 * n);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i, j - 2] as const, voltage: I3 };
     }
     case "S": {
       if (j === maxOdd) {
-        // South border: heading south bumps into the west side of the adjacent domain
-        // Wraps (i, maxOdd) to (1, maxOdd + 1 - i)
-        // This is a 90° CCW rotation + translation to SW
+        // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
+        // The target absolute position should be (i, maxOdd + 2), which is 2 units south
+        // Voltage: 90° CCW + translate(2n, 2n) maps (1, maxOdd+1-i) to (i, maxOdd+2)
         const newI = 1;
         const newJ = maxOdd + 1 - i;
-        // Voltage: rotate 90° CCW then translate to place in correct domain
-        // Translation: (0, 2n) to move to the domain south of origin
-        const voltage = translationWith90CCW(0, 2 * n);
+        const voltage = translationWith90CCW(2 * n, 2 * n);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i, j + 2] as const, voltage: I3 };
     }
     case "E": {
       if (i === maxOdd) {
-        // East border: heading east bumps into the north side of the adjacent domain
-        // Wraps (maxOdd, j) to (maxOdd + 1 - j, 1)
-        // This is a 90° CCW rotation + translation to SE
+        // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
+        // The target absolute position should be (maxOdd + 2, j), which is 2 units east
+        // Voltage: 90° CW + translate(2n, 2n) maps (maxOdd+1-j, 1) to (maxOdd+2, j)
         const newI = maxOdd + 1 - j;
         const newJ = 1;
-        // Voltage: rotate 90° CCW then translate to place in correct domain
-        // Translation: (2n, 0) to move to the domain east of origin
-        const voltage = translationWith90CCW(2 * n, 0);
+        const voltage = translationWith90CW(2 * n, 2 * n);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i + 2, j] as const, voltage: I3 };
     }
     case "W": {
       if (i === 1) {
-        // West border: heading west bumps into the south side of the adjacent domain
-        // Wraps (1, j) to (maxOdd + 1 - j, maxOdd)
-        // This is a 90° CW rotation + translation to NW
+        // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
+        // The target absolute position should be (-1, j), which is 2 units west
+        // Voltage: 90° CW + translate(-2n, 2n) maps (maxOdd+1-j, maxOdd) to (-1, j)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
-        // Voltage: rotate 90° CW then translate to place in correct domain
-        // Translation: (0, 0) - the domain to the west at origin-relative position
-        const voltage = translationWith90CW(0, 0);
+        const voltage = translationWith90CW(-2 * n, 2 * n);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i - 2, j] as const, voltage: I3 };
