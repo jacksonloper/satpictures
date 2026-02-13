@@ -193,7 +193,7 @@ function getP2Neighbor(
         // When going N from north edge, we flip to the opposite side with 180° rotation
         // The reflected coordinate is (maxOdd + 1 - i) for i, staying on north edge
         const reflectedI = maxOdd + 1 - i;
-        const voltage = translationWith180(0, -2 * n);
+        const voltage = translationWith180(2 * n, 0);
         return { coord: [reflectedI, 1] as const, voltage };
       }
       return { coord: [i, j - 2] as const, voltage: I3 };
@@ -202,7 +202,7 @@ function getP2Neighbor(
       if (j === maxOdd) {
         // South border: wrap with 180° rotation
         const reflectedI = maxOdd + 1 - i;
-        const voltage = translationWith180(0, 2 * n);
+        const voltage = translationWith180(2 * n, 4 * n);
         return { coord: [reflectedI, maxOdd] as const, voltage };
       }
       return { coord: [i, j + 2] as const, voltage: I3 };
@@ -211,7 +211,7 @@ function getP2Neighbor(
       if (i === maxOdd) {
         // East border: wrap with 180° rotation
         const reflectedJ = maxOdd + 1 - j;
-        const voltage = translationWith180(2 * n, 0);
+        const voltage = translationWith180(4 * n, 2 * n);
         return { coord: [maxOdd, reflectedJ] as const, voltage };
       }
       return { coord: [i + 2, j] as const, voltage: I3 };
@@ -220,7 +220,7 @@ function getP2Neighbor(
       if (i === 1) {
         // West border: wrap with 180° rotation
         const reflectedJ = maxOdd + 1 - j;
-        const voltage = translationWith180(-2 * n, 0);
+        const voltage = translationWith180(0, 2 * n);
         return { coord: [1, reflectedJ] as const, voltage };
       }
       return { coord: [i - 2, j] as const, voltage: I3 };
