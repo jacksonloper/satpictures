@@ -14,7 +14,7 @@ import {
 } from "./unifiedTiling.js";
 import { squareGridDefinition } from "./squareGridDef.js";
 import { hexGridDefinition } from "./hexGridDef.js";
-import type { GridDefinition, EdgeState } from "./types.js";
+import type { EdgeState } from "./types.js";
 import { MiniSatSolver } from "../../solvers/minisat-solver.js";
 
 /**

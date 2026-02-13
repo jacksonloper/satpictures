@@ -216,7 +216,7 @@ export function generateAllTransforms(
       minR = Math.min(minR, c.r);
     }
     
-    let offQ = -minQ;
+    const offQ = -minQ;
     let offR = -minR;
     
     // For triangle grids, preserve (q+r) % 2 parity
