@@ -200,7 +200,6 @@ export function P3RhombusRenderer({
   rootRow,
   rootCol,
   vacantCells,
-  wallpaperGroupName: _wallpaperGroupName,
   p3TiledGraph,
   showNeighbors = false,
   selectedNode = null,

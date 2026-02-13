@@ -392,6 +392,7 @@ export function PolyformExplorer() {
   // Check edge adjacency consistency when tiling result changes
   useEffect(() => {
     if (!tilingResult || !tilingResult.placements || !solvedPolyformType) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting derived state when inputs become invalid
       setEdgeViolations([]);
       setAllEdges([]);
       setSelectedEdgeIndex(null);
