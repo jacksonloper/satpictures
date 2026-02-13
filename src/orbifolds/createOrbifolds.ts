@@ -134,43 +134,50 @@ export function translationWith90CCW(dx: Int, dy: Int): Matrix3x3 {
 
 /**
  * 120° counter-clockwise rotation matrix in axial coordinates.
- * In axial coordinates (q, r), 120° CCW rotation maps (q, r) → (-r, q+r).
+ * In axial coordinates (q, r), 120° CCW rotation maps (q, r) → (-q-r, q).
  * The matrix representation (using homogeneous coords):
- * [ 0, -1, 0]
- * [ 1,  1, 0]
+ * [-1, -1, 0]
+ * [ 1,  0, 0]
  * [ 0,  0, 1]
  * 
- * This is an integer matrix that preserves the hexagonal lattice.
+ * Note: The formula (q, r) → (-r, q+r) is 60° CCW (hexagonal).
+ * 120° = 2 × 60° gives (q, r) → (-q-r, q).
+ * 
+ * Verify: R³ = I
+ * - (1,0) → (-1,1) → (0,-1) → (1,0) ✓
  */
 export const ROTATION_120_CCW: Matrix3x3 = [
-  [0, -1, 0],
-  [1, 1, 0],
+  [-1, -1, 0],
+  [1, 0, 0],
   [0, 0, 1],
 ] as const;
 
 /**
  * 120° clockwise rotation matrix in axial coordinates.
- * Equivalent to 240° CCW. Maps (q, r) → (q+r, -q).
+ * Equivalent to 240° CCW. Maps (q, r) → (r, -q-r).
  * The matrix representation (using homogeneous coords):
- * [ 1,  1, 0]
- * [-1,  0, 0]
+ * [ 0,  1, 0]
+ * [-1, -1, 0]
  * [ 0,  0, 1]
+ * 
+ * This is the inverse of ROTATION_120_CCW.
  */
 export const ROTATION_120_CW: Matrix3x3 = [
-  [1, 1, 0],
-  [-1, 0, 0],
+  [0, 1, 0],
+  [-1, -1, 0],
   [0, 0, 1],
 ] as const;
 
 /**
  * Create a combined rotation (120° CCW) + translation matrix in axial coords.
  * First rotate 120° counter-clockwise around origin, then translate by (dx, dy).
- * Result: [0, -1, dx], [1, 1, dy], [0, 0, 1]
+ * 120° CCW: (q, r) → (-q-r, q)
+ * Result: [-1, -1, dx], [1, 0, dy], [0, 0, 1]
  */
 export function translationWith120CCW(dx: Int, dy: Int): Matrix3x3 {
   return [
-    [0, -1, dx],
-    [1, 1, dy],
+    [-1, -1, dx],
+    [1, 0, dy],
     [0, 0, 1],
   ] as const;
 }
@@ -178,12 +185,13 @@ export function translationWith120CCW(dx: Int, dy: Int): Matrix3x3 {
 /**
  * Create a combined rotation (120° CW / 240° CCW) + translation matrix in axial coords.
  * First rotate 120° clockwise around origin, then translate by (dx, dy).
- * Result: [1, 1, dx], [-1, 0, dy], [0, 0, 1]
+ * 120° CW: (q, r) → (r, -q-r)
+ * Result: [0, 1, dx], [-1, -1, dy], [0, 0, 1]
  */
 export function translationWith120CW(dx: Int, dy: Int): Matrix3x3 {
   return [
-    [1, 1, dx],
-    [-1, 0, dy],
+    [0, 1, dx],
+    [-1, -1, dy],
     [0, 0, 1],
   ] as const;
 }
@@ -442,12 +450,14 @@ function getP3Neighbor(
   const maxOdd = 2 * n - 1;
   
   // For P3, the voltages use 120° rotations in axial coordinates.
-  // 120° CCW: (x, y) → (-y, x + y) using matrix [[0, -1], [1, 1]]
-  // 120° CW:  (x, y) → (x + y, -x) using matrix [[1, 1], [-1, 0]]
+  // 120° CCW: (q, r) → (-q-r, q) using matrix [[-1, -1], [1, 0]]
+  // 120° CW:  (q, r) → (r, -q-r) using matrix [[0, 1], [-1, -1]]
   //
-  // The translations include a +2 offset to account for the P3 tiling geometry.
-  // In P3, adjacent domains are rotated 120° relative to each other, which
-  // shifts the position by 2 compared to the naive calculation.
+  // These are TRUE 120° rotations (R³ = I), unlike the 60° rotations
+  // that were incorrectly used before.
+  //
+  // The voltages are simply rotation + translation, with no additional offsets.
+  // The translations place the neighbor at the correct adjacent position.
   
   switch (dir) {
     case "N": {
@@ -455,13 +465,12 @@ function getP3Neighbor(
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
-        // 120° CCW of (newI, newJ) = (-newJ, newI + newJ)
-        // Target screen position for lifted neighbor: (i + 2, -1)
-        // The +2 x-offset accounts for P3's 120° rotational tiling geometry
-        // tx = target_x - rotated_x = (i + 2) - (-newJ) = i + newJ + 2
-        // ty = target_y - rotated_y = -1 - (newI + newJ)
-        const tx = i + newJ + 2;
-        const ty = -1 - newI - newJ;
+        // 120° CCW of (newI, newJ) = (-newI-newJ, newI)
+        // Target screen position: (i, -1)
+        // tx = i - (-newI-newJ) = i + newI + newJ
+        // ty = -1 - newI
+        const tx = i + newI + newJ;
+        const ty = -1 - newI;
         const voltage = translationWith120CCW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
@@ -472,13 +481,12 @@ function getP3Neighbor(
         // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
         const newI = 1;
         const newJ = maxOdd + 1 - i;
-        // 120° CCW of (newI, newJ) = (-newJ, newI + newJ)
-        // Target screen position for lifted neighbor: (i + 2, maxOdd + 2)
-        // The +2 x-offset accounts for P3's 120° rotational tiling geometry
-        // tx = target_x - rotated_x = (i + 2) - (-newJ) = i + newJ + 2
-        // ty = target_y - rotated_y = (maxOdd + 2) - (newI + newJ)
-        const tx = i + newJ + 2;
-        const ty = maxOdd + 2 - newI - newJ;
+        // 120° CCW of (newI, newJ) = (-newI-newJ, newI)
+        // Target screen position: (i, maxOdd + 2)
+        // tx = i - (-newI-newJ) = i + newI + newJ
+        // ty = maxOdd + 2 - newI
+        const tx = i + newI + newJ;
+        const ty = maxOdd + 2 - newI;
         const voltage = translationWith120CCW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
@@ -489,13 +497,12 @@ function getP3Neighbor(
         // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
         const newI = maxOdd + 1 - j;
         const newJ = 1;
-        // 120° CW of (newI, newJ) = (newI + newJ, -newI)
-        // Target screen position for lifted neighbor: (maxOdd + 2, j + 2)
-        // The +2 y-offset accounts for P3's 120° rotational tiling geometry
-        // tx = target_x - rotated_x = (maxOdd + 2) - (newI + newJ)
-        // ty = target_y - rotated_y = (j + 2) - (-newI) = j + newI + 2
-        const tx = maxOdd + 2 - newI - newJ;
-        const ty = j + newI + 2;
+        // 120° CW of (newI, newJ) = (newJ, -newI-newJ)
+        // Target screen position: (maxOdd + 2, j)
+        // tx = maxOdd + 2 - newJ
+        // ty = j - (-newI-newJ) = j + newI + newJ
+        const tx = maxOdd + 2 - newJ;
+        const ty = j + newI + newJ;
         const voltage = translationWith120CW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
@@ -506,13 +513,12 @@ function getP3Neighbor(
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
-        // 120° CW of (newI, newJ) = (newI + newJ, -newI)
-        // Target screen position for lifted neighbor: (-1, j + 2)
-        // The +2 y-offset accounts for P3's 120° rotational tiling geometry
-        // tx = target_x - rotated_x = -1 - (newI + newJ)
-        // ty = target_y - rotated_y = (j + 2) - (-newI) = j + newI + 2
-        const tx = -1 - newI - newJ;
-        const ty = j + newI + 2;
+        // 120° CW of (newI, newJ) = (newJ, -newI-newJ)
+        // Target screen position: (-1, j)
+        // tx = -1 - newJ
+        // ty = j - (-newI-newJ) = j + newI + newJ
+        const tx = -1 - newJ;
+        const ty = j + newI + newJ;
         const voltage = translationWith120CW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
