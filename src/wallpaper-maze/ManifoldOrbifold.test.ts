@@ -441,4 +441,58 @@ console.log("\n=== Spanning Tree Tests ===\n");
   }
 }
 
+// Test: every node in the identity copy has at least one edge in the spanning tree
+// This is essential - it's a SPANNING tree, so every node must have at least one edge
+{
+  for (const type of ["P1", "P2"] as const) {
+    for (const n of [3, 4, 5]) {
+      const manifold = type === "P1" ? buildP1Manifold(n) : buildP2Manifold(n);
+      const tree = generateRandomSpanningTree(manifold);
+      
+      // For each node, check if it has at least one edge in the spanning tree
+      let allNodesHaveTreeEdge = true;
+      const nodesWithoutTreeEdge: number[] = [];
+      
+      for (const node of manifold.nodes) {
+        let hasTreeEdge = false;
+        
+        for (let edgeIdx = 0; edgeIdx < manifold.edges.length; edgeIdx++) {
+          const edge = manifold.edges[edgeIdx];
+          // Check if this node is connected by this edge
+          if (edge.from === node.index || edge.to === node.index) {
+            // Check if this edge is in the tree
+            if (tree.has(edgeIdx)) {
+              hasTreeEdge = true;
+              break;
+            }
+          }
+        }
+        
+        if (!hasTreeEdge) {
+          allNodesHaveTreeEdge = false;
+          nodesWithoutTreeEdge.push(node.index);
+        }
+      }
+      
+      if (!allNodesHaveTreeEdge) {
+        console.log(`  ❌ ${type} n=${n}: nodes without tree edges: ${nodesWithoutTreeEdge.join(", ")}`);
+        for (const idx of nodesWithoutTreeEdge.slice(0, 3)) {
+          const node = manifold.nodes[idx];
+          console.log(`    Node ${idx} at (${node.row}, ${node.col})`);
+          // List all edges connected to this node
+          for (let edgeIdx = 0; edgeIdx < manifold.edges.length; edgeIdx++) {
+            const edge = manifold.edges[edgeIdx];
+            if (edge.from === node.index || edge.to === node.index) {
+              console.log(`      Edge ${edgeIdx}: ${edge.from} <-> ${edge.to}, in tree: ${tree.has(edgeIdx)}`);
+            }
+          }
+        }
+      }
+      
+      assert(allNodesHaveTreeEdge, `${type} n=${n}: every node must have at least one edge in spanning tree`);
+      console.log(`✓ ${type} n=${n}: every node has at least one edge in spanning tree`);
+    }
+  }
+}
+
 console.log("\n=== All tests passed! ===");

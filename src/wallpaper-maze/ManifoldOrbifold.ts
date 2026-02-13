@@ -629,6 +629,54 @@ export function isStubEdge(
 }
 
 // ============================================================================
+// Manifold-to-Orbifold edge mapping
+// ============================================================================
+
+/**
+ * Find the orbifold edge that corresponds to a manifold edge going from `from` to `to`.
+ * Returns the orbifold edge (with its voltage) or null if not found.
+ */
+export function findOrbifoldEdge(
+  orbifold: Orbifold,
+  fromNodeIndex: number,
+  toNodeIndex: number,
+): OrbifoldEdge | null {
+  // Look for a directed edge from -> to in the orbifold
+  for (const edge of orbifold.edges) {
+    if (edge.from === fromNodeIndex && edge.to === toNodeIndex) {
+      return edge;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get the orbifold edge for a manifold edge, trying both directions.
+ * Returns { edge, reversed } where `reversed` indicates if we had to flip the direction.
+ */
+export function getOrbifoldEdgeForManifoldEdge(
+  manifold: Manifold,
+  orbifold: Orbifold,
+  manifoldEdgeIndex: number,
+): { orbifoldEdge: OrbifoldEdge; reversed: boolean } | null {
+  const manifoldEdge = manifold.edges[manifoldEdgeIndex];
+  
+  // Try forward direction first
+  const forwardEdge = findOrbifoldEdge(orbifold, manifoldEdge.from, manifoldEdge.to);
+  if (forwardEdge) {
+    return { orbifoldEdge: forwardEdge, reversed: false };
+  }
+  
+  // Try reverse direction
+  const reverseEdge = findOrbifoldEdge(orbifold, manifoldEdge.to, manifoldEdge.from);
+  if (reverseEdge) {
+    return { orbifoldEdge: reverseEdge, reversed: true };
+  }
+  
+  return null;
+}
+
+// ============================================================================
 // Random Spanning Tree
 // ============================================================================
 

@@ -22,8 +22,10 @@ import {
   applyMatrix3x3,
   matrixKey,
   matmul3x3,
+  inverse3x3,
   IDENTITY_3X3,
   generateRandomSpanningTree,
+  getOrbifoldEdgeForManifoldEdge,
   type ManifoldType,
   type Matrix3x3,
   type OrbifoldEdge,
@@ -336,26 +338,35 @@ export function ManifoldOrbifoldExplorer() {
         const copyKey = matrixKey(copy.matrix);
         
         // For each tree edge in the manifold, draw it in this copy
-        for (const edgeIdx of spanningTree) {
-          // Get the corresponding orbifold edge
-          const orbEdge = orbifold.edges[edgeIdx];
+        for (const manifoldEdgeIdx of spanningTree) {
+          // Find the corresponding orbifold edge for this manifold edge
+          const orbEdgeResult = getOrbifoldEdgeForManifoldEdge(manifold, orbifold, manifoldEdgeIdx);
+          if (!orbEdgeResult) continue;
+          
+          const { orbifoldEdge, reversed } = orbEdgeResult;
+          
+          // Determine actual voltage based on edge direction
+          // If reversed, we use inverse voltage
+          const voltage = reversed ? inverse3x3(orbifoldEdge.voltage) : orbifoldEdge.voltage;
+          const fromNodeIdx = reversed ? orbifoldEdge.to : orbifoldEdge.from;
+          const toNodeIdx = reversed ? orbifoldEdge.from : orbifoldEdge.to;
           
           // Source position in this copy
-          const fromNode = orbifold.nodes[orbEdge.from];
+          const fromNode = orbifold.nodes[fromNodeIdx];
           const fromPos = applyMatrix3x3(copy.matrix, fromNode.col + NODE_CENTER_OFFSET, fromNode.row + NODE_CENTER_OFFSET);
           const fromX = fromPos.x * scale + offsetX;
           const fromY = fromPos.y * scale + offsetY;
           
           // Target position: use the voltage to determine the target copy
-          const targetCopyMatrix = matmul3x3(copy.matrix, orbEdge.voltage);
-          const toNode = orbifold.nodes[orbEdge.to];
+          const targetCopyMatrix = matmul3x3(copy.matrix, voltage);
+          const toNode = orbifold.nodes[toNodeIdx];
           const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col + NODE_CENTER_OFFSET, toNode.row + NODE_CENTER_OFFSET);
           const toX = toPos.x * scale + offsetX;
           const toY = toPos.y * scale + offsetY;
           
           elements.push(
             <line
-              key={`tree-${copyKey}-${edgeIdx}`}
+              key={`tree-${copyKey}-${manifoldEdgeIdx}`}
               x1={fromX}
               y1={fromY}
               x2={toX}
