@@ -39,7 +39,7 @@ console.log("=== P1 Manifold Tests ===\n");
   }
 }
 
-// Test P1 lifted graph - all neighbors 1 unit away (for n >= 3 to avoid degeneracy)
+// Test P1 lifted graph - all neighbors 2 units away (in doubled coordinate system)
 {
   for (const n of [3, 4, 5]) {
     const orbifold = buildP1Orbifold(n);
@@ -48,20 +48,22 @@ console.log("=== P1 Manifold Tests ===\n");
     let errorCount = 0;
     
     for (const node of orbifold.nodes) {
-      const basePos = applyMatrix3x3(IDENTITY_3X3, node.col + 0.5, node.row + 0.5);
+      // Use the node's x, y coordinates directly (already in doubled space)
+      const basePos = applyMatrix3x3(IDENTITY_3X3, node.x, node.y);
       const outgoingEdges = orbifold.edges.filter(e => e.from === node.index);
       
       for (const edge of outgoingEdges) {
         const targetNode = orbifold.nodes[edge.to];
         const targetCopyMatrix = matmul3x3(IDENTITY_3X3, edge.voltage);
-        const targetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + 0.5, targetNode.row + 0.5);
+        const targetPos = applyMatrix3x3(targetCopyMatrix, targetNode.x, targetNode.y);
         
         const dist = Math.sqrt(
           Math.pow(targetPos.x - basePos.x, 2) + 
           Math.pow(targetPos.y - basePos.y, 2)
         );
         
-        if (Math.abs(dist - 1) > 0.001) {
+        // In doubled coordinate system, neighbors are 2 units apart
+        if (Math.abs(dist - 2) > 0.001) {
           allCorrect = false;
           errorCount++;
           if (errorCount <= 3) {
@@ -70,8 +72,8 @@ console.log("=== P1 Manifold Tests ===\n");
         }
       }
     }
-    assert(allCorrect, `P1 n=${n}: all neighbors should be 1 unit away (${errorCount} errors)`);
-    console.log(`✓ P1 n=${n}: all lifted graph neighbors are 1 unit away`);
+    assert(allCorrect, `P1 n=${n}: all neighbors should be 2 units away in doubled coords (${errorCount} errors)`);
+    console.log(`✓ P1 n=${n}: all lifted graph neighbors are 2 units away`);
   }
 }
 
@@ -124,7 +126,7 @@ console.log("\n=== P2 Manifold Tests ===\n");
   }
 }
 
-// Test P2 lifted graph - all neighbors 1 unit away (the key test!)
+// Test P2 lifted graph - all neighbors 2 units away (in doubled coordinate system)
 {
   for (const n of [2, 3, 4, 5]) {
     const orbifold = buildP2Orbifold(n);
@@ -133,20 +135,22 @@ console.log("\n=== P2 Manifold Tests ===\n");
     let errorCount = 0;
     
     for (const node of orbifold.nodes) {
-      const basePos = applyMatrix3x3(IDENTITY_3X3, node.col + 0.5, node.row + 0.5);
+      // Use node's x, y coordinates directly (already in doubled space)
+      const basePos = applyMatrix3x3(IDENTITY_3X3, node.x, node.y);
       const outgoingEdges = orbifold.edges.filter(e => e.from === node.index);
       
       for (const edge of outgoingEdges) {
         const targetNode = orbifold.nodes[edge.to];
         const targetCopyMatrix = matmul3x3(IDENTITY_3X3, edge.voltage);
-        const targetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col + 0.5, targetNode.row + 0.5);
+        const targetPos = applyMatrix3x3(targetCopyMatrix, targetNode.x, targetNode.y);
         
         const dist = Math.sqrt(
           Math.pow(targetPos.x - basePos.x, 2) + 
           Math.pow(targetPos.y - basePos.y, 2)
         );
         
-        if (Math.abs(dist - 1) > 0.001) {
+        // In doubled coordinate system, neighbors are 2 units apart
+        if (Math.abs(dist - 2) > 0.001) {
           allCorrect = false;
           errorCount++;
           if (errorCount <= 3) {
@@ -156,8 +160,8 @@ console.log("\n=== P2 Manifold Tests ===\n");
       }
     }
     
-    assert(allCorrect, `P2 n=${n}: all neighbors should be 1 unit away (${errorCount} errors)`);
-    console.log(`✓ P2 n=${n}: all lifted graph neighbors are 1 unit away`);
+    assert(allCorrect, `P2 n=${n}: all neighbors should be 2 units away in doubled coords (${errorCount} errors)`);
+    console.log(`✓ P2 n=${n}: all lifted graph neighbors are 2 units away`);
   }
 }
 
@@ -175,8 +179,8 @@ console.log("\n=== P2 Manifold Tests ===\n");
     
     for (const copy of copies) {
       for (const node of orbifold.nodes) {
-        // Apply copy transformation to get lifted position
-        const pos = applyMatrix3x3(copy.matrix, node.col + 0.5, node.row + 0.5);
+        // Apply copy transformation using node's x, y coordinates
+        const pos = applyMatrix3x3(copy.matrix, node.x, node.y);
         // Round to avoid floating point issues
         const key = `${Math.round(pos.x * 1000) / 1000},${Math.round(pos.y * 1000) / 1000}`;
         const desc = `(${node.row},${node.col}) in copy [${copy.matrix[2]},${copy.matrix[5]}]`;

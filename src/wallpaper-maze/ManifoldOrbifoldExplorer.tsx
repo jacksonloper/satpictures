@@ -410,12 +410,12 @@ export function ManifoldOrbifoldExplorer() {
   const renderOrbifoldViewer = () => {
     if (copies.length === 0) return null;
     
-    // Find bounds - use integer coordinates (no offset)
+    // Find bounds - use x, y coordinates from nodes (already in doubled coordinate space)
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     
     for (const copy of copies) {
       for (const node of orbifold.nodes) {
-        const pos = applyMatrix3x3(copy.matrix, node.col, node.row);
+        const pos = applyMatrix3x3(copy.matrix, node.x, node.y);
         minX = Math.min(minX, pos.x);
         minY = Math.min(minY, pos.y);
         maxX = Math.max(maxX, pos.x);
@@ -423,7 +423,8 @@ export function ManifoldOrbifoldExplorer() {
       }
     }
     
-    const scale = CELL_SIZE;
+    // Scale by half because we use doubled coordinates
+    const scale = CELL_SIZE / 2;
     const offsetX = -minX * scale + PADDING + CELL_SIZE / 2;
     const offsetY = -minY * scale + PADDING + CELL_SIZE / 2;
     const width = (maxX - minX) * scale + PADDING * 2 + CELL_SIZE;
@@ -462,16 +463,16 @@ export function ManifoldOrbifoldExplorer() {
             }
           }
           
-          // Source position in this copy
+          // Source position in this copy (use x, y coordinates)
           const fromNode = orbifold.nodes[fromNodeIdx];
-          const fromPos = applyMatrix3x3(copy.matrix, fromNode.col, fromNode.row);
+          const fromPos = applyMatrix3x3(copy.matrix, fromNode.x, fromNode.y);
           const fromX = fromPos.x * scale + offsetX;
           const fromY = fromPos.y * scale + offsetY;
           
           // Target position: use the voltage to determine the target copy
           const targetCopyMatrix = matmul3x3(copy.matrix, voltage);
           const toNode = orbifold.nodes[toNodeIdx];
-          const toPos = applyMatrix3x3(targetCopyMatrix, toNode.col, toNode.row);
+          const toPos = applyMatrix3x3(targetCopyMatrix, toNode.x, toNode.y);
           const toX = toPos.x * scale + offsetX;
           const toY = toPos.y * scale + offsetY;
           
@@ -498,9 +499,9 @@ export function ManifoldOrbifoldExplorer() {
       const copyKey = matrixKey(copy.matrix);
       const isIdentity = copyKey === matrixKey(IDENTITY_3X3);
       
-      // Draw nodes in this copy
+      // Draw nodes in this copy (use x, y coordinates)
       for (const node of orbifold.nodes) {
-        const pos = applyMatrix3x3(copy.matrix, node.col, node.row);
+        const pos = applyMatrix3x3(copy.matrix, node.x, node.y);
         const sx = pos.x * scale + offsetX;
         const sy = pos.y * scale + offsetY;
         
@@ -839,8 +840,8 @@ export function ManifoldOrbifoldExplorer() {
           
           {showEdgeDetails && (() => {
             const selectedNode = manifold.nodes[selection.nodeIndex];
-            // Use integer coordinates (no offset)
-            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.col, selectedNode.row);
+            // Use node's x, y coordinates (in doubled coordinate space)
+            const liftedPos = applyMatrix3x3(selection.copyMatrix, selectedNode.x, selectedNode.y);
             const isNonIdentityCopy = matrixKey(selection.copyMatrix) !== matrixKey(IDENTITY_3X3);
             
             return (
@@ -892,11 +893,10 @@ export function ManifoldOrbifoldExplorer() {
                       // Note: orbifold.nodes and manifold.nodes have the same structure
                       // The targetNodeIndex from the oriented edge maps to the same node in both
                       const targetManifoldNode = orbifold.nodes[orientedEdge.targetNodeIndex];
-                      // Compute absolute target position: 
+                      // Compute absolute target position using x, y coordinates
                       // targetCopyMatrix = currentCopyMatrix * voltage
-                      // then apply to target node (integer coordinates)
                       const targetCopyMatrix = matmul3x3(selection.copyMatrix, orientedEdge.voltage);
-                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetManifoldNode.col, targetManifoldNode.row);
+                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetManifoldNode.x, targetManifoldNode.y);
                       
                       // Check if this edge is in the spanning tree (use manifold edge index)
                       const isInTree = spanningTree?.has(orientedEdge.manifoldEdgeIndex) ?? false;

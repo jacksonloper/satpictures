@@ -99,8 +99,10 @@ export function apply2x2(m: Matrix2x2, x: number, y: number): { x: number; y: nu
 /** A node in the manifold */
 export interface ManifoldNode {
   index: number;
-  row: number;
-  col: number;
+  row: number;  // Row in the grid (0 to n-1)
+  col: number;  // Column in the grid (0 to n-1)
+  x: number;    // X coordinate in doubled space (odd integer: 1, 3, 5, ...)
+  y: number;    // Y coordinate in doubled space (odd integer: 1, 3, 5, ...)
 }
 
 /** An undirected edge in the manifold (indices of two nodes) */
@@ -166,16 +168,21 @@ export interface Orbifold {
 /**
  * Build P1 manifold for a grid of size n x n
  * P1 has torus topology (wrap around all edges)
+ * 
+ * Nodes are at odd integer coordinates: (2*col+1, 2*row+1)
+ * For n=3: x/y coordinates are 1, 3, 5 (representing cell centers)
  */
 export function buildP1Manifold(n: number): Manifold {
   const nodes: ManifoldNode[] = [];
   const nodeAtMap = new Map<string, number>();
   
-  // Create nodes
+  // Create nodes with doubled coordinates
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const index = nodes.length;
-      nodes.push({ index, row, col });
+      const x = 2 * col + 1;  // Odd integer: 1, 3, 5, ...
+      const y = 2 * row + 1;  // Odd integer: 1, 3, 5, ...
+      nodes.push({ index, row, col, x, y });
       nodeAtMap.set(nodeKey(row, col), index);
     }
   }
@@ -222,21 +229,26 @@ export function buildP1Manifold(n: number): Manifold {
 /**
  * Build P1 orbifold for a grid of size n x n
  * P1 orbifold has directed edges with translation voltages at boundaries
+ * 
+ * Nodes are at odd integer coordinates: (2*col+1, 2*row+1)
+ * Voltages translate by 2n to maintain proper neighbor distances in lifted graph
  */
 export function buildP1Orbifold(n: number): Orbifold {
   const nodes: ManifoldNode[] = [];
   const nodeAtMap = new Map<string, number>();
   
-  // Create nodes (same as manifold)
+  // Create nodes with doubled coordinates (same as manifold)
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const index = nodes.length;
-      nodes.push({ index, row, col });
+      const x = 2 * col + 1;
+      const y = 2 * row + 1;
+      nodes.push({ index, row, col, x, y });
       nodeAtMap.set(nodeKey(row, col), index);
     }
   }
   
-  // Create directed edges with voltages
+  // Create directed edges with voltages (doubled translations)
   const edges: OrbifoldEdge[] = [];
   
   for (let row = 0; row < n; row++) {
@@ -246,27 +258,27 @@ export function buildP1Orbifold(n: number): Orbifold {
       // East edge
       const eastCol = (col + 1) % n;
       const eastIdx = nodeAtMap.get(nodeKey(row, eastCol))!;
-      // Voltage: identity inside, translate by (n, 0) when wrapping
+      // Voltage: identity inside, translate by (2n, 0) when wrapping
       const eastVoltage: Matrix3x3 = col === n - 1 
-        ? translation3x3(n, 0)  // Wrap: translate right by n
+        ? translation3x3(2 * n, 0)  // Wrap: translate right by 2n
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: eastIdx, voltage: eastVoltage });
       
       // South edge
       const southRow = (row + 1) % n;
       const southIdx = nodeAtMap.get(nodeKey(southRow, col))!;
-      // Voltage: identity inside, translate by (0, n) when wrapping
+      // Voltage: identity inside, translate by (0, 2n) when wrapping
       const southVoltage: Matrix3x3 = row === n - 1
-        ? translation3x3(0, n)  // Wrap: translate down by n
+        ? translation3x3(0, 2 * n)  // Wrap: translate down by 2n
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: southIdx, voltage: southVoltage });
     }
   }
   
-  // P1 generators: two translations
+  // P1 generators: two translations (doubled)
   const generators: Matrix3x3[] = [
-    translation3x3(n, 0),  // Translate right by n
-    translation3x3(0, n),  // Translate down by n
+    translation3x3(2 * n, 0),  // Translate right by 2n
+    translation3x3(0, 2 * n),  // Translate down by 2n
   ];
   
   return {
@@ -331,16 +343,20 @@ function getP2Neighbors(row: number, col: number, n: number): {
  * 
  * Every node has exactly 4 edges (counting multi-edges), since it has
  * 4 cardinal directions that each produce an edge.
+ * 
+ * Nodes are at odd integer coordinates: (2*col+1, 2*row+1)
  */
 export function buildP2Manifold(n: number): Manifold {
   const nodes: ManifoldNode[] = [];
   const nodeAtMap = new Map<string, number>();
   
-  // Create nodes
+  // Create nodes with doubled coordinates
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const index = nodes.length;
-      nodes.push({ index, row, col });
+      const x = 2 * col + 1;
+      const y = 2 * row + 1;
+      nodes.push({ index, row, col, x, y });
       nodeAtMap.set(nodeKey(row, col), index);
     }
   }
@@ -415,32 +431,37 @@ export function buildP2Manifold(n: number): Manifold {
  * Interior edges have identity voltage.
  * Boundary edges have 180° rotation voltages (det = 1, not reflections!)
  * 
+ * Nodes are at odd integer coordinates: (2*col+1, 2*row+1)
+ * All voltages use doubled coordinates (2n instead of n)
+ * 
  * P2 copies are arranged in a checkerboard pattern:
  * - Type 0 (identity) at even (copyRow + copyCol)
- * - Type 1 (180° rotated around (n/2, n/2)) at odd (copyRow + copyCol)
+ * - Type 1 (180° rotated around center) at odd (copyRow + copyCol)
  * 
- * Voltage formulas (all are 180° rotations with det = 1):
- * - North (row=0): T(0,-n) * R = [[-1, 0, n], [0, -1, 0], [0, 0, 1]]
- * - South (row=n-1): T(0,n) * R = [[-1, 0, n], [0, -1, 2n], [0, 0, 1]]
- * - East (col=n-1): T(n,0) * R = [[-1, 0, 2n], [0, -1, n], [0, 0, 1]]
- * - West (col=0): T(-n,0) * R = [[-1, 0, 0], [0, -1, n], [0, 0, 1]]
+ * Voltage formulas (all are 180° rotations with det = 1, in doubled coords):
+ * - North (row=0): T(0,-2n) * R = [[-1, 0, 2n], [0, -1, 0], [0, 0, 1]]
+ * - South (row=n-1): T(0,2n) * R = [[-1, 0, 2n], [0, -1, 4n], [0, 0, 1]]
+ * - East (col=n-1): T(2n,0) * R = [[-1, 0, 4n], [0, -1, 2n], [0, 0, 1]]
+ * - West (col=0): T(-2n,0) * R = [[-1, 0, 0], [0, -1, 2n], [0, 0, 1]]
  * 
- * Where R = 180° rotation around (n/2, n/2) = [[-1,0,n], [0,-1,n], [0,0,1]]
+ * Where R = 180° rotation around center (n, n) = [[-1,0,2n], [0,-1,2n], [0,0,1]]
  */
 export function buildP2Orbifold(n: number): Orbifold {
   const nodes: ManifoldNode[] = [];
   const nodeAtMap = new Map<string, number>();
   
-  // Create nodes
+  // Create nodes with doubled coordinates
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const index = nodes.length;
-      nodes.push({ index, row, col });
+      const x = 2 * col + 1;
+      const y = 2 * row + 1;
+      nodes.push({ index, row, col, x, y });
       nodeAtMap.set(nodeKey(row, col), index);
     }
   }
   
-  // Create directed edges with voltages
+  // Create directed edges with voltages (all doubled)
   // Each node has 4 outgoing edges: N, S, E, W
   const edges: OrbifoldEdge[] = [];
   
@@ -451,46 +472,44 @@ export function buildP2Orbifold(n: number): Orbifold {
       
       // North edge
       const northIdx = nodeAtMap.get(nodeKey(neighbors.N.row, neighbors.N.col))!;
-      // North boundary: T(0,-n) * R where R = rotation around (n/2, n/2)
+      // North boundary: T(0,-2n) * R where R = rotation around center (n, n)
       const northVoltage: Matrix3x3 = row === 0
-        ? [-1, 0, n, 0, -1, 0, 0, 0, 1]
+        ? [-1, 0, 2 * n, 0, -1, 0, 0, 0, 1]
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: northIdx, voltage: northVoltage });
       
       // South edge
       const southIdx = nodeAtMap.get(nodeKey(neighbors.S.row, neighbors.S.col))!;
-      // South boundary: T(0,n) * R
+      // South boundary: T(0,2n) * R
       const southVoltage: Matrix3x3 = row === n - 1
-        ? [-1, 0, n, 0, -1, 2 * n, 0, 0, 1]
+        ? [-1, 0, 2 * n, 0, -1, 4 * n, 0, 0, 1]
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: southIdx, voltage: southVoltage });
       
       // East edge
       const eastIdx = nodeAtMap.get(nodeKey(neighbors.E.row, neighbors.E.col))!;
-      // East boundary: T(n,0) * R
+      // East boundary: T(2n,0) * R
       const eastVoltage: Matrix3x3 = col === n - 1
-        ? [-1, 0, 2 * n, 0, -1, n, 0, 0, 1]
+        ? [-1, 0, 4 * n, 0, -1, 2 * n, 0, 0, 1]
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: eastIdx, voltage: eastVoltage });
       
       // West edge
       const westIdx = nodeAtMap.get(nodeKey(neighbors.W.row, neighbors.W.col))!;
-      // West boundary: T(-n,0) * R
+      // West boundary: T(-2n,0) * R
       const westVoltage: Matrix3x3 = col === 0
-        ? [-1, 0, 0, 0, -1, n, 0, 0, 1]
+        ? [-1, 0, 0, 0, -1, 2 * n, 0, 0, 1]
         : IDENTITY_3X3;
       edges.push({ from: fromIdx, to: westIdx, voltage: westVoltage });
     }
   }
   
-  // P2 generators: T(n,0), T(0,n), and R (180° rotation around center)
-  // Note: Tx by 2n and Ty by 2n generate type-0-to-type-0 translations
-  // But the full P2 group includes T(n,0) and T(0,n) which go to type-1 copies
-  const R: Matrix3x3 = [-1, 0, n, 0, -1, n, 0, 0, 1];  // 180° around (n/2, n/2)
+  // P2 generators (all doubled): T(2n,0), T(0,2n), and R (180° rotation around center)
+  const R: Matrix3x3 = [-1, 0, 2 * n, 0, -1, 2 * n, 0, 0, 1];  // 180° around (n, n)
   const generators: Matrix3x3[] = [
-    translation3x3(n, 0),   // Takes type 0 -> type 1
-    translation3x3(0, n),   // Takes type 0 -> type 1
-    R,                      // 180° rotation
+    translation3x3(2 * n, 0),   // Takes type 0 -> type 1
+    translation3x3(0, 2 * n),   // Takes type 0 -> type 1
+    R,                          // 180° rotation
   ];
   
   return {
