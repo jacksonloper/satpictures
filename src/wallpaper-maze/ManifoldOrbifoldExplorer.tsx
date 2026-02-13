@@ -30,7 +30,6 @@ import {
   type Manifold,
   type Orbifold,
   type Matrix3x3,
-  type ManifoldEdge,
 } from "./ManifoldOrbifold";
 
 /** Selection state: a node in a specific copy */
@@ -74,8 +73,8 @@ function getOrientedEdgesForNode(
   const result: OrientedEdge[] = [];
   const nodeEdges = getNodeEdges(manifold, nodeIndex);
   
-  for (let i = 0; i < nodeEdges.length; i++) {
-    const manifoldEdge = nodeEdges[i];
+  for (let edgeIndex = 0; edgeIndex < nodeEdges.length; edgeIndex++) {
+    const manifoldEdge = nodeEdges[edgeIndex];
     const manifoldEdgeIndex = manifold.edges.indexOf(manifoldEdge);
     const targetNodeIndex = getOtherNode(manifoldEdge, nodeIndex);
     
@@ -890,12 +889,14 @@ export function ManifoldOrbifoldExplorer() {
                   </thead>
                   <tbody>
                     {orientedEdges.map((orientedEdge, i) => {
-                      const targetNode = orbifold.nodes[orientedEdge.targetNodeIndex];
+                      // Note: orbifold.nodes and manifold.nodes have the same structure
+                      // The targetNodeIndex from the oriented edge maps to the same node in both
+                      const targetManifoldNode = orbifold.nodes[orientedEdge.targetNodeIndex];
                       // Compute absolute target position: 
                       // targetCopyMatrix = currentCopyMatrix * voltage
                       // then apply to target node (integer coordinates)
                       const targetCopyMatrix = matmul3x3(selection.copyMatrix, orientedEdge.voltage);
-                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetNode.col, targetNode.row);
+                      const absTargetPos = applyMatrix3x3(targetCopyMatrix, targetManifoldNode.col, targetManifoldNode.row);
                       
                       // Check if this edge is in the spanning tree (use manifold edge index)
                       const isInTree = spanningTree?.has(orientedEdge.manifoldEdgeIndex) ?? false;
@@ -912,7 +913,7 @@ export function ManifoldOrbifoldExplorer() {
                             {isInTree ? "✓ Yes" : "No"}
                           </td>
                           <td style={{ padding: "8px" }}>
-                            ({targetNode.row}, {targetNode.col})
+                            ({targetManifoldNode.row}, {targetManifoldNode.col})
                           </td>
                           <td style={{ padding: "8px", fontFamily: "monospace" }}>
                             ({Math.round(absTargetPos.x)}, {Math.round(absTargetPos.y)})
