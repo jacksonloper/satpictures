@@ -436,10 +436,18 @@ function getP4Neighbor(
  * - West of (1, j) wraps to (maxOdd + 1 - j, maxOdd) - heading west bumps into south side
  * - East of (maxOdd, j) wraps to (maxOdd + 1 - j, 1) - heading east bumps into north side
  * 
- * The voltages incorporate 120° rotations in axial coordinates plus translations.
+ * IMPORTANT: The voltages are UNIFORM per edge type (not position-dependent).
+ * They are pure products of the P3 generators: R (120° rotation) and T1, T2 (translations).
+ * This ensures the voltage group acts freely on the plane with no node collisions.
  * 
- * Note: For P3 in axial coords, neighbor distances may not be exactly uniform
- * (unlike P4 which works in regular Cartesian coords). The combinatorics remain correct.
+ * The voltages use the translation lattice with L = 2n:
+ * - V_N = R * T(-L, 0)   = R * T1⁻¹  (120° CCW + translate left)
+ * - V_S = R² * T(L, 0)   = R² * T1   (120° CW + translate right)
+ * - V_E = R² * T(0, L)   = R² * T2   (120° CW + translate down)
+ * - V_W = R * T(0, -L)   = R * T2⁻¹  (120° CCW + translate up)
+ * 
+ * Note: In axial coords, neighbor screen positions may not be exactly 2 apart,
+ * but the lifted graph tiles the plane correctly without collisions.
  */
 function getP3Neighbor(
   i: Int,
@@ -448,16 +456,14 @@ function getP3Neighbor(
   n: Int
 ): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
   const maxOdd = 2 * n - 1;
+  const L = 2 * n; // Lattice constant = grid width
   
-  // For P3, the voltages use 120° rotations in axial coordinates.
-  // 120° CCW: (q, r) → (-q-r, q) using matrix [[-1, -1], [1, 0]]
-  // 120° CW:  (q, r) → (r, -q-r) using matrix [[0, 1], [-1, -1]]
+  // P3 voltages are uniform per edge type, using the lattice generators.
+  // R: 120° CCW rotation, R²: 120° CW rotation
+  // T1 = T(L, 0), T2 = T(0, L)
   //
-  // These are TRUE 120° rotations (R³ = I), unlike the 60° rotations
-  // that were incorrectly used before.
-  //
-  // The voltages are simply rotation + translation, with no additional offsets.
-  // The translations place the neighbor at the correct adjacent position.
+  // The key insight is that these lattice-based voltages ensure the voltage group
+  // acts freely on the plane, preventing any node collisions in the lifted graph.
   
   switch (dir) {
     case "N": {
@@ -465,13 +471,8 @@ function getP3Neighbor(
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
-        // 120° CCW of (newI, newJ) = (-newI-newJ, newI)
-        // Target screen position: (i, -1)
-        // tx = i - (-newI-newJ) = i + newI + newJ
-        // ty = -1 - newI
-        const tx = i + newI + newJ;
-        const ty = -1 - newI;
-        const voltage = translationWith120CCW(tx, ty);
+        // Voltage: R * T(-L, 0) = R * T1⁻¹
+        const voltage = translationWith120CCW(-L, 0);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i, j - 2] as const, voltage: I3 };
@@ -481,13 +482,8 @@ function getP3Neighbor(
         // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
         const newI = 1;
         const newJ = maxOdd + 1 - i;
-        // 120° CCW of (newI, newJ) = (-newI-newJ, newI)
-        // Target screen position: (i, maxOdd + 2)
-        // tx = i - (-newI-newJ) = i + newI + newJ
-        // ty = maxOdd + 2 - newI
-        const tx = i + newI + newJ;
-        const ty = maxOdd + 2 - newI;
-        const voltage = translationWith120CCW(tx, ty);
+        // Voltage: R² * T(L, 0) = R² * T1
+        const voltage = translationWith120CW(L, 0);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i, j + 2] as const, voltage: I3 };
@@ -497,13 +493,8 @@ function getP3Neighbor(
         // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
         const newI = maxOdd + 1 - j;
         const newJ = 1;
-        // 120° CW of (newI, newJ) = (newJ, -newI-newJ)
-        // Target screen position: (maxOdd + 2, j)
-        // tx = maxOdd + 2 - newJ
-        // ty = j - (-newI-newJ) = j + newI + newJ
-        const tx = maxOdd + 2 - newJ;
-        const ty = j + newI + newJ;
-        const voltage = translationWith120CW(tx, ty);
+        // Voltage: R² * T(0, L) = R² * T2
+        const voltage = translationWith120CW(0, L);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i + 2, j] as const, voltage: I3 };
@@ -513,13 +504,8 @@ function getP3Neighbor(
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
-        // 120° CW of (newI, newJ) = (newJ, -newI-newJ)
-        // Target screen position: (-1, j)
-        // tx = -1 - newJ
-        // ty = j - (-newI-newJ) = j + newI + newJ
-        const tx = -1 - newJ;
-        const ty = j + newI + newJ;
-        const voltage = translationWith120CW(tx, ty);
+        // Voltage: R * T(0, -L) = R * T2⁻¹
+        const voltage = translationWith120CCW(0, -L);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i - 2, j] as const, voltage: I3 };
