@@ -445,9 +445,9 @@ function getP3Neighbor(
   // 120° CCW: (x, y) → (-y, x + y) using matrix [[0, -1], [1, 1]]
   // 120° CW:  (x, y) → (x + y, -x) using matrix [[1, 1], [-1, 0]]
   //
-  // Unlike P4, the translations must be position-dependent to ensure correct
-  // neighbor positions in the lifted graph. This means edge distances won't be
-  // uniform (as noted in the problem statement), but combinatorics are preserved.
+  // The translations include a +2 offset to account for the P3 tiling geometry.
+  // In P3, adjacent domains are rotated 120° relative to each other, which
+  // shifts the position by 2 compared to the naive calculation.
   
   switch (dir) {
     case "N": {
@@ -456,10 +456,11 @@ function getP3Neighbor(
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
         // 120° CCW of (newI, newJ) = (-newJ, newI + newJ)
-        // Want position (i, -1)
-        // tx = i - (-newJ) = i + newJ
-        // ty = -1 - (newI + newJ) = -1 - newI - newJ
-        const tx = i + newJ;
+        // Target screen position for lifted neighbor: (i + 2, -1)
+        // The +2 x-offset accounts for P3's 120° rotational tiling geometry
+        // tx = target_x - rotated_x = (i + 2) - (-newJ) = i + newJ + 2
+        // ty = target_y - rotated_y = -1 - (newI + newJ)
+        const tx = i + newJ + 2;
         const ty = -1 - newI - newJ;
         const voltage = translationWith120CCW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
@@ -472,10 +473,11 @@ function getP3Neighbor(
         const newI = 1;
         const newJ = maxOdd + 1 - i;
         // 120° CCW of (newI, newJ) = (-newJ, newI + newJ)
-        // Want position (i, maxOdd + 2)
-        // tx = i - (-newJ) = i + newJ
-        // ty = (maxOdd + 2) - (newI + newJ) = maxOdd + 2 - newI - newJ
-        const tx = i + newJ;
+        // Target screen position for lifted neighbor: (i + 2, maxOdd + 2)
+        // The +2 x-offset accounts for P3's 120° rotational tiling geometry
+        // tx = target_x - rotated_x = (i + 2) - (-newJ) = i + newJ + 2
+        // ty = target_y - rotated_y = (maxOdd + 2) - (newI + newJ)
+        const tx = i + newJ + 2;
         const ty = maxOdd + 2 - newI - newJ;
         const voltage = translationWith120CCW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
@@ -488,11 +490,12 @@ function getP3Neighbor(
         const newI = maxOdd + 1 - j;
         const newJ = 1;
         // 120° CW of (newI, newJ) = (newI + newJ, -newI)
-        // Want position (maxOdd + 2, j)
-        // tx = (maxOdd + 2) - (newI + newJ) = maxOdd + 2 - newI - newJ
-        // ty = j - (-newI) = j + newI
+        // Target screen position for lifted neighbor: (maxOdd + 2, j + 2)
+        // The +2 y-offset accounts for P3's 120° rotational tiling geometry
+        // tx = target_x - rotated_x = (maxOdd + 2) - (newI + newJ)
+        // ty = target_y - rotated_y = (j + 2) - (-newI) = j + newI + 2
         const tx = maxOdd + 2 - newI - newJ;
-        const ty = j + newI;
+        const ty = j + newI + 2;
         const voltage = translationWith120CW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
@@ -504,11 +507,12 @@ function getP3Neighbor(
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
         // 120° CW of (newI, newJ) = (newI + newJ, -newI)
-        // Want position (-1, j)
-        // tx = -1 - (newI + newJ) = -1 - newI - newJ
-        // ty = j - (-newI) = j + newI
+        // Target screen position for lifted neighbor: (-1, j + 2)
+        // The +2 y-offset accounts for P3's 120° rotational tiling geometry
+        // tx = target_x - rotated_x = -1 - (newI + newJ)
+        // ty = target_y - rotated_y = (j + 2) - (-newI) = j + newI + 2
         const tx = -1 - newI - newJ;
-        const ty = j + newI;
+        const ty = j + newI + 2;
         const voltage = translationWith120CW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
