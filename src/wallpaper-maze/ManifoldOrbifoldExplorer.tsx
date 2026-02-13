@@ -782,7 +782,7 @@ export function ManifoldOrbifoldExplorer() {
                           borderBottom: "1px solid #eee",
                           backgroundColor: isInTree ? "rgba(40, 167, 69, 0.1)" : "transparent"
                         }}>
-                          <td style={{ padding: "8px", color: "#999" }}>
+                          <td style={{ padding: "8px", color: "#999" }} title={`Edge index: ${orientedEdge.edgeIndex}`}>
                             {i + 1}
                           </td>
                           <td style={{ padding: "8px", fontWeight: "bold", color: isInTree ? "#28a745" : "#999" }}>
