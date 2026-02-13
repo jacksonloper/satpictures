@@ -137,10 +137,14 @@ interface InspectionInfo {
 }
 
 /**
- * Format a voltage matrix for display.
+ * Format a voltage matrix for display as multiple lines.
  */
-function formatVoltage(v: Matrix3x3): string {
-  return `[[${v[0].join(",")}], [${v[1].join(",")}], [${v[2].join(",")}]]`;
+function formatVoltageRows(v: Matrix3x3): string[] {
+  return [
+    `[${v[0].join(", ")}]`,
+    `[${v[1].join(", ")}]`,
+    `[${v[2].join(", ")}]`,
+  ];
 }
 
 /**
@@ -186,12 +190,7 @@ function OrbifoldGridTools({
         const j = getOddCoord(row);
         const nodeId = nodeIdFromCoord([i, j]);
         
-        // Build adjacency if not already done
-        if (!grid.adjacency) {
-          buildAdjacency(grid);
-        }
-        
-        // Get edges for this node
+        // Get edges for this node (adjacency is built during grid creation)
         const edgeIds = grid.adjacency?.get(nodeId) ?? [];
         const edges: EdgeInfo[] = [];
         
@@ -400,14 +399,18 @@ export function OrbifoldsExplorer() {
   const [tool, setTool] = useState<ToolType>("color");
   const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
   
-  // Initialize orbifold grid
-  const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData>>(() =>
-    createOrbifoldGrid(wallpaperGroup, size)
-  );
+  // Initialize orbifold grid with adjacency built
+  const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData>>(() => {
+    const grid = createOrbifoldGrid(wallpaperGroup, size);
+    buildAdjacency(grid);
+    return grid;
+  });
 
   // Recreate grid when wallpaper group or size changes
   useEffect(() => {
-    setOrbifoldGrid(createOrbifoldGrid(wallpaperGroup, size));
+    const grid = createOrbifoldGrid(wallpaperGroup, size);
+    buildAdjacency(grid);
+    setOrbifoldGrid(grid);
     setInspectionInfo(null); // Clear inspection when grid changes
   }, [wallpaperGroup, size]);
 
@@ -599,7 +602,9 @@ export function OrbifoldsExplorer() {
                   >
                     <div><strong>→ Target:</strong> {edge.targetNodeId} ({edge.targetCoord[0]},{edge.targetCoord[1]})</div>
                     <div><strong>Voltage:</strong></div>
-                    <div style={{ marginLeft: "10px" }}>{formatVoltage(edge.voltage)}</div>
+                    {formatVoltageRows(edge.voltage).map((row, rowIdx) => (
+                      <div key={rowIdx} style={{ marginLeft: "10px" }}>{row}</div>
+                    ))}
                   </div>
                 ))}
               </div>
