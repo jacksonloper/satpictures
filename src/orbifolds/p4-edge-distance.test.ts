@@ -227,7 +227,7 @@ if (testResult.failures.length > 0) {
     console.log(`\n${testResult.failures[i]}`);
   }
 } else {
-  console.log(`\n✅ PASSED: All ${testResult.failures.length === 0 ? "edges" : ""} have distance exactly 2`);
+  console.log(`\n✅ PASSED: All edges have distance exactly 2`);
 }
 
 // Exit with appropriate code
