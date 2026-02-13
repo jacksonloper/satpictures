@@ -287,19 +287,37 @@ function applyMatrix(matrix: Matrix3x3, x: number, y: number): { x: number; y: n
 }
 
 /**
+ * Apply axial-to-Cartesian transformation.
+ * Axial coords (q, r) map to Cartesian (x, y) via:
+ * x = q + r * 0.5
+ * y = r * sqrt(3)/2
+ */
+function axialToCartesian(q: number, r: number): { x: number; y: number } {
+  return {
+    x: q + r * 0.5,
+    y: r * Math.sqrt(3) / 2,
+  };
+}
+
+/**
  * Lifted graph renderer.
  * Positions each lifted node using: voltage × orbifold node coordinates.
  * Colors each node using the ExtraData color from the orbifold node.
  * Highlights nodes whose orbifold node matches the inspected node.
+ * 
+ * For P3 (axial coordinates), an optional transform can be applied to convert
+ * axial coordinates to Cartesian for better visualization.
  */
 function LiftedGraphRenderer({
   liftedGraph,
   orbifoldGrid,
   highlightOrbifoldNodeId,
+  useAxialTransform = false,
 }: {
   liftedGraph: LiftedGraph<ColorData>;
   orbifoldGrid: OrbifoldGrid<ColorData>;
   highlightOrbifoldNodeId?: OrbifoldNodeId | null;
+  useAxialTransform?: boolean;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
@@ -314,7 +332,12 @@ function LiftedGraphRenderer({
       
       // Position = voltage × orbifold node coordinates
       const [ox, oy] = orbNode.coord;
-      const pos = applyMatrix(node.voltage, ox, oy);
+      let pos = applyMatrix(node.voltage, ox, oy);
+      
+      // Optionally apply axial-to-Cartesian transform for P3
+      if (useAxialTransform) {
+        pos = axialToCartesian(pos.x, pos.y);
+      }
       
       minX = Math.min(minX, pos.x);
       maxX = Math.max(maxX, pos.x);
@@ -326,7 +349,7 @@ function LiftedGraphRenderer({
     }
     
     return { positions, minX, maxX, minY, maxY };
-  }, [liftedGraph, orbifoldGrid]);
+  }, [liftedGraph, orbifoldGrid, useAxialTransform]);
 
   const { positions, minX, maxX, minY, maxY } = nodePositions;
   
@@ -398,6 +421,7 @@ export function OrbifoldsExplorer() {
   const [expansion, setExpansion] = useState(DEFAULT_EXPANSION);
   const [tool, setTool] = useState<ToolType>("color");
   const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
+  const [useAxialTransform, setUseAxialTransform] = useState(false);
   
   // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData>>(() => {
@@ -478,6 +502,7 @@ export function OrbifoldsExplorer() {
           >
             <option value="P1">P1 (Torus)</option>
             <option value="P2">P2 (180° rotation)</option>
+            <option value="P3">P3 (120° rotation - axial)</option>
             <option value="P4">P4 (90° rotation)</option>
           </select>
         </div>
@@ -499,6 +524,20 @@ export function OrbifoldsExplorer() {
           max={20}
           label="Expansion (m)"
         />
+        
+        {/* Axial Transform Checkbox (only visible for P3) */}
+        {wallpaperGroup === "P3" && (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={useAxialTransform}
+                onChange={(e) => setUseAxialTransform(e.target.checked)}
+              />
+              Show axial coordinates
+            </label>
+          </div>
+        )}
       </div>
       
       {/* Main content area */}
@@ -614,7 +653,7 @@ export function OrbifoldsExplorer() {
         
         {/* Lifted Graph */}
         <div>
-          <h3 style={{ marginBottom: "10px" }}>Lifted Graph</h3>
+          <h3 style={{ marginBottom: "10px" }}>Lifted Graph{wallpaperGroup === "P3" && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
             {inspectionInfo && (
@@ -627,6 +666,7 @@ export function OrbifoldsExplorer() {
             liftedGraph={liftedGraph}
             orbifoldGrid={orbifoldGrid}
             highlightOrbifoldNodeId={inspectionInfo?.nodeId}
+            useAxialTransform={wallpaperGroup === "P3" && useAxialTransform}
           />
           
           {/* Legend */}
@@ -660,11 +700,18 @@ export function OrbifoldsExplorer() {
         <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>
           <li><strong>P1:</strong> Simple torus wrapping (translations only)</li>
           <li><strong>P2:</strong> Includes 180° rotations at boundaries</li>
+          <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
           <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
         </ul>
         <p style={{ marginTop: "8px" }}>
           Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
         </p>
+        {wallpaperGroup === "P3" && (
+          <p style={{ marginTop: "8px", color: "#666" }}>
+            <strong>Note:</strong> P3 uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
+            may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
+          </p>
+        )}
       </div>
     </div>
   );
