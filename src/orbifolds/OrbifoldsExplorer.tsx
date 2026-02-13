@@ -361,6 +361,7 @@ export function OrbifoldsExplorer() {
           >
             <option value="P1">P1 (Torus)</option>
             <option value="P2">P2 (180° rotation)</option>
+            <option value="P4">P4 (90° rotation)</option>
           </select>
         </div>
         
@@ -441,6 +442,7 @@ export function OrbifoldsExplorer() {
         <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>
           <li><strong>P1:</strong> Simple torus wrapping (translations only)</li>
           <li><strong>P2:</strong> Includes 180° rotations at boundaries</li>
+          <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
         </ul>
         <p style={{ marginTop: "8px" }}>
           Increase <strong>expansion (m)</strong> to see more of the lifted graph unfold.
