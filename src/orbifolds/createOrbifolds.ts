@@ -137,14 +137,14 @@ export function translationWith90CCW(dx: Int, dy: Int): Matrix3x3 {
  * In axial coordinates (q, r), 120° CCW rotation maps (q, r) → (-r, q+r).
  * The matrix representation (using homogeneous coords):
  * [ 0, -1, 0]
- * [ 1, -1, 0]
+ * [ 1,  1, 0]
  * [ 0,  0, 1]
  * 
  * This is an integer matrix that preserves the hexagonal lattice.
  */
 export const ROTATION_120_CCW: Matrix3x3 = [
   [0, -1, 0],
-  [1, -1, 0],
+  [1, 1, 0],
   [0, 0, 1],
 ] as const;
 
@@ -152,12 +152,12 @@ export const ROTATION_120_CCW: Matrix3x3 = [
  * 120° clockwise rotation matrix in axial coordinates.
  * Equivalent to 240° CCW. Maps (q, r) → (q+r, -q).
  * The matrix representation (using homogeneous coords):
- * [-1,  1, 0]
+ * [ 1,  1, 0]
  * [-1,  0, 0]
  * [ 0,  0, 1]
  */
 export const ROTATION_120_CW: Matrix3x3 = [
-  [-1, 1, 0],
+  [1, 1, 0],
   [-1, 0, 0],
   [0, 0, 1],
 ] as const;
@@ -165,12 +165,12 @@ export const ROTATION_120_CW: Matrix3x3 = [
 /**
  * Create a combined rotation (120° CCW) + translation matrix in axial coords.
  * First rotate 120° counter-clockwise around origin, then translate by (dx, dy).
- * Result: [0, -1, dx], [1, -1, dy], [0, 0, 1]
+ * Result: [0, -1, dx], [1, 1, dy], [0, 0, 1]
  */
 export function translationWith120CCW(dx: Int, dy: Int): Matrix3x3 {
   return [
     [0, -1, dx],
-    [1, -1, dy],
+    [1, 1, dy],
     [0, 0, 1],
   ] as const;
 }
@@ -178,11 +178,11 @@ export function translationWith120CCW(dx: Int, dy: Int): Matrix3x3 {
 /**
  * Create a combined rotation (120° CW / 240° CCW) + translation matrix in axial coords.
  * First rotate 120° clockwise around origin, then translate by (dx, dy).
- * Result: [-1, 1, dx], [-1, 0, dy], [0, 0, 1]
+ * Result: [1, 1, dx], [-1, 0, dy], [0, 0, 1]
  */
 export function translationWith120CW(dx: Int, dy: Int): Matrix3x3 {
   return [
-    [-1, 1, dx],
+    [1, 1, dx],
     [-1, 0, dy],
     [0, 0, 1],
   ] as const;
@@ -442,8 +442,8 @@ function getP3Neighbor(
   const maxOdd = 2 * n - 1;
   
   // For P3, the voltages use 120° rotations in axial coordinates.
-  // 120° CCW: (x, y) → (-y, x - y) using matrix [[0, -1], [1, -1]]
-  // 120° CW:  (x, y) → (-x + y, -x) using matrix [[-1, 1], [-1, 0]]
+  // 120° CCW: (x, y) → (-y, x + y) using matrix [[0, -1], [1, 1]]
+  // 120° CW:  (x, y) → (x + y, -x) using matrix [[1, 1], [-1, 0]]
   //
   // Unlike P4, the translations must be position-dependent to ensure correct
   // neighbor positions in the lifted graph. This means edge distances won't be
@@ -455,12 +455,12 @@ function getP3Neighbor(
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
-        // 120° CCW of (newI, newJ) = (-newJ, newI - newJ)
+        // 120° CCW of (newI, newJ) = (-newJ, newI + newJ)
         // Want position (i, -1)
         // tx = i - (-newJ) = i + newJ
-        // ty = -1 - (newI - newJ) = -1 - newI + newJ
+        // ty = -1 - (newI + newJ) = -1 - newI - newJ
         const tx = i + newJ;
-        const ty = -1 - newI + newJ;
+        const ty = -1 - newI - newJ;
         const voltage = translationWith120CCW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
@@ -471,12 +471,12 @@ function getP3Neighbor(
         // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
         const newI = 1;
         const newJ = maxOdd + 1 - i;
-        // 120° CCW of (newI, newJ) = (-newJ, newI - newJ)
+        // 120° CCW of (newI, newJ) = (-newJ, newI + newJ)
         // Want position (i, maxOdd + 2)
         // tx = i - (-newJ) = i + newJ
-        // ty = (maxOdd + 2) - (newI - newJ) = maxOdd + 2 - newI + newJ
+        // ty = (maxOdd + 2) - (newI + newJ) = maxOdd + 2 - newI - newJ
         const tx = i + newJ;
-        const ty = maxOdd + 2 - newI + newJ;
+        const ty = maxOdd + 2 - newI - newJ;
         const voltage = translationWith120CCW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
       }
@@ -487,11 +487,11 @@ function getP3Neighbor(
         // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
         const newI = maxOdd + 1 - j;
         const newJ = 1;
-        // 120° CW of (newI, newJ) = (-newI + newJ, -newI)
+        // 120° CW of (newI, newJ) = (newI + newJ, -newI)
         // Want position (maxOdd + 2, j)
-        // tx = (maxOdd + 2) - (-newI + newJ) = maxOdd + 2 + newI - newJ
+        // tx = (maxOdd + 2) - (newI + newJ) = maxOdd + 2 - newI - newJ
         // ty = j - (-newI) = j + newI
-        const tx = maxOdd + 2 + newI - newJ;
+        const tx = maxOdd + 2 - newI - newJ;
         const ty = j + newI;
         const voltage = translationWith120CW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
@@ -503,11 +503,11 @@ function getP3Neighbor(
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
-        // 120° CW of (newI, newJ) = (-newI + newJ, -newI)
+        // 120° CW of (newI, newJ) = (newI + newJ, -newI)
         // Want position (-1, j)
-        // tx = -1 - (-newI + newJ) = -1 + newI - newJ
+        // tx = -1 - (newI + newJ) = -1 - newI - newJ
         // ty = j - (-newI) = j + newI
-        const tx = -1 + newI - newJ;
+        const tx = -1 - newI - newJ;
         const ty = j + newI;
         const voltage = translationWith120CW(tx, ty);
         return { coord: [newI, newJ] as const, voltage };
