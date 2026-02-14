@@ -591,6 +591,10 @@ export function OrbifoldsExplorer() {
   }, []);
 
   // Handle edge linestyle toggle
+  // Helper function to toggle linestyle
+  const toggleLinestyle = (current: EdgeLinestyle): EdgeLinestyle => 
+    current === "solid" ? "dashed" : "solid";
+
   const handleEdgeLinestyleToggle = useCallback((edgeId: OrbifoldEdgeId) => {
     setOrbifoldGrid((prev) => {
       // Create a shallow copy of the grid with edges also copied
@@ -598,7 +602,7 @@ export function OrbifoldsExplorer() {
       const edge = newEdges.get(edgeId);
       if (edge) {
         const currentLinestyle = edge.data?.linestyle ?? "solid";
-        const newLinestyle: EdgeLinestyle = currentLinestyle === "solid" ? "dashed" : "solid";
+        const newLinestyle = toggleLinestyle(currentLinestyle);
         newEdges.set(edgeId, { ...edge, data: { linestyle: newLinestyle } });
       }
       
@@ -620,7 +624,7 @@ export function OrbifoldsExplorer() {
           if (e.edgeId === edgeId) {
             return {
               ...e,
-              linestyle: e.linestyle === "solid" ? "dashed" : "solid",
+              linestyle: toggleLinestyle(e.linestyle),
             };
           }
           return e;
