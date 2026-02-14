@@ -182,11 +182,11 @@ export function LiftedGraphRenderer({
       
       // Apply voltage transform
       const transformedCorners = squareCorners.map(corner => {
-        let pos = applyMatrix(node.voltage, corner.x, corner.y);
+        let transformedCorner = applyMatrix(node.voltage, corner.x, corner.y);
         if (useAxialTransform) {
-          pos = axialToCartesian(pos.x, pos.y);
+          transformedCorner = axialToCartesian(transformedCorner.x, transformedCorner.y);
         }
-        return pos;
+        return transformedCorner;
       });
       
       shadings.push({

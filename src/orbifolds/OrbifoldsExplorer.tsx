@@ -307,7 +307,9 @@ export function OrbifoldsExplorer() {
     
     const link = document.createElement("a");
     link.href = url;
-    link.download = `lifted-graph-${wallpaperGroup}-${size}x${size}.svg`;
+    // Sanitize filename components (wallpaperGroup is already constrained to P1/P2/P3/P4/pgg)
+    const safeGroup = wallpaperGroup.toLowerCase();
+    link.download = `lifted-graph-${safeGroup}-${size}x${size}.svg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
