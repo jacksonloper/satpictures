@@ -199,6 +199,16 @@ export function translationWith120CW(dx: Int, dy: Int): Matrix3x3 {
 type Direction = "N" | "S" | "E" | "W";
 
 /**
+ * Result from a getNeighbor function.
+ * Returns null if this direction should not create an edge (e.g., P3/P4 S/E on border).
+ */
+type NeighborResult = {
+  coord: readonly [Int, Int];
+  voltage: Matrix3x3;
+  edgeKey: string;
+} | null;
+
+/**
  * Get odd coordinates for a given grid index.
  * For index i in [0, n-1], the odd coordinate is 2*i + 1.
  */
@@ -256,38 +266,49 @@ function getNeighborCoord(coord: Int, dir: Direction, n: Int): { newCoord: Int; 
 /**
  * Get the neighbor node for P1 wallpaper group.
  * P1 has simple torus wrapping - straight translation.
+ * Edge keys use NS/EW labels to distinguish vertical vs horizontal edges.
  */
 function getP1Neighbor(
   i: Int,
   j: Int,
   dir: Direction,
   n: Int
-): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
+): NeighborResult {
+  const fromId = nodeIdFromCoord([i, j]);
+  
   switch (dir) {
     case "N": {
       const { newCoord, wrapped } = getNeighborCoord(j, "N", n);
       // When wrapping north from j=1 to j=maxOdd, the neighbor in the cover space
       // is in the adjacent fundamental domain to the north (negative y direction)
       const voltage = wrapped ? translationMatrix(0, -2 * n) : I3;
-      return { coord: [i, newCoord] as const, voltage };
+      const toId = nodeIdFromCoord([i, newCoord]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+      return { coord: [i, newCoord] as const, voltage, edgeKey };
     }
     case "S": {
       const { newCoord, wrapped } = getNeighborCoord(j, "S", n);
       // When wrapping south, neighbor is in the adjacent fundamental domain to the south
       const voltage = wrapped ? translationMatrix(0, 2 * n) : I3;
-      return { coord: [i, newCoord] as const, voltage };
+      const toId = nodeIdFromCoord([i, newCoord]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+      return { coord: [i, newCoord] as const, voltage, edgeKey };
     }
     case "E": {
       const { newCoord, wrapped } = getNeighborCoord(i, "E", n);
       // When wrapping east, neighbor is in the adjacent fundamental domain to the east
       const voltage = wrapped ? translationMatrix(2 * n, 0) : I3;
-      return { coord: [newCoord, j] as const, voltage };
+      const toId = nodeIdFromCoord([newCoord, j]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+      return { coord: [newCoord, j] as const, voltage, edgeKey };
     }
     case "W": {
       const { newCoord, wrapped } = getNeighborCoord(i, "W", n);
       // When wrapping west, neighbor is in the adjacent fundamental domain to the west
       const voltage = wrapped ? translationMatrix(-2 * n, 0) : I3;
-      return { coord: [newCoord, j] as const, voltage };
+      const toId = nodeIdFromCoord([newCoord, j]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+      return { coord: [newCoord, j] as const, voltage, edgeKey };
     }
   }
 }
@@ -295,6 +316,7 @@ function getP1Neighbor(
 /**
  * Get the neighbor node for P2 wallpaper group.
  * P2 has 180° rotation at boundaries.
+ * Edge keys use NS/EW labels to distinguish vertical vs horizontal edges.
  * 
  * For border edges, the voltage includes translation AND a 180° flip.
  * When n is odd, the center node on a boundary edge connects to itself (self-loop).
@@ -304,8 +326,9 @@ function getP2Neighbor(
   j: Int,
   dir: Direction,
   n: Int
-): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
+): NeighborResult {
   const maxOdd = 2 * n - 1;
+  const fromId = nodeIdFromCoord([i, j]);
   
   switch (dir) {
     case "N": {
@@ -315,36 +338,52 @@ function getP2Neighbor(
         // The reflected coordinate is (maxOdd + 1 - i) for i, staying on north edge
         const reflectedI = maxOdd + 1 - i;
         const voltage = translationWith180(2 * n, 0);
-        return { coord: [reflectedI, 1] as const, voltage };
+        const toId = nodeIdFromCoord([reflectedI, 1]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+        return { coord: [reflectedI, 1] as const, voltage, edgeKey };
       }
-      return { coord: [i, j - 2] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i, j - 2]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
     }
     case "S": {
       if (j === maxOdd) {
         // South border: wrap with 180° rotation
         const reflectedI = maxOdd + 1 - i;
         const voltage = translationWith180(2 * n, 4 * n);
-        return { coord: [reflectedI, maxOdd] as const, voltage };
+        const toId = nodeIdFromCoord([reflectedI, maxOdd]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+        return { coord: [reflectedI, maxOdd] as const, voltage, edgeKey };
       }
-      return { coord: [i, j + 2] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i, j + 2]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
     }
     case "E": {
       if (i === maxOdd) {
         // East border: wrap with 180° rotation
         const reflectedJ = maxOdd + 1 - j;
         const voltage = translationWith180(4 * n, 2 * n);
-        return { coord: [maxOdd, reflectedJ] as const, voltage };
+        const toId = nodeIdFromCoord([maxOdd, reflectedJ]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+        return { coord: [maxOdd, reflectedJ] as const, voltage, edgeKey };
       }
-      return { coord: [i + 2, j] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i + 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
     }
     case "W": {
       if (i === 1) {
         // West border: wrap with 180° rotation
         const reflectedJ = maxOdd + 1 - j;
         const voltage = translationWith180(0, 2 * n);
-        return { coord: [1, reflectedJ] as const, voltage };
+        const toId = nodeIdFromCoord([1, reflectedJ]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+        return { coord: [1, reflectedJ] as const, voltage, edgeKey };
       }
-      return { coord: [i - 2, j] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i - 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
     }
   }
 }
@@ -353,72 +392,75 @@ function getP2Neighbor(
  * Get the neighbor node for P4 wallpaper group.
  * P4 has 4-fold (90°) rotational symmetry at boundaries.
  * 
- * For border edges, the voltage includes 90° rotation plus translation.
- * The wrapping pattern follows the WallpaperGroups.ts P4 definition:
- * - North of (i, 1) wraps to (maxOdd, maxOdd + 1 - i) - heading north bumps into east side
- * - South of (i, maxOdd) wraps to (1, maxOdd + 1 - i) - heading south bumps into west side
- * - West of (1, j) wraps to (maxOdd + 1 - j, maxOdd) - heading west bumps into south side
- * - East of (maxOdd, j) wraps to (maxOdd + 1 - j, 1) - heading east bumps into north side
+ * For P4, coordinates alone disambiguate edges EXCEPT for the two edges
+ * between (1,1) and (maxOdd, maxOdd). These need NE/SW labels:
+ * - NE: North from NW corner OR West from SE corner
+ * - SW: South from NW corner OR East from SE corner
  * 
- * The voltages incorporate 90° rotations plus translations to place the neighbor
- * in the correct adjacent fundamental domain.
+ * S and E directions on the border return null because those edges are
+ * already created by N and W from the other endpoint.
  */
 function getP4Neighbor(
   i: Int,
   j: Int,
   dir: Direction,
   n: Int
-): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
+): NeighborResult {
   const maxOdd = 2 * n - 1;
+  const fromId = nodeIdFromCoord([i, j]);
   
   switch (dir) {
     case "N": {
       if (j === 1) {
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
-        // The target absolute position should be (i, -1), which is 2 units north of (i, 1)
-        // Voltage: 90° CCW + translate(2n, -2n) maps (maxOdd, maxOdd+1-i) to (i, -1)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
         const voltage = translationWith90CCW(2 * n, -2 * n);
-        return { coord: [newI, newJ] as const, voltage };
+        const toId = nodeIdFromCoord([newI, newJ]);
+        // Special case: (1,1) -> (maxOdd, maxOdd) is the NE edge
+        const edgeKey = (i === 1 && newI === maxOdd && newJ === maxOdd)
+          ? [fromId, toId].sort().join("|") + "|NE"
+          : [fromId, toId].sort().join("|");
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
       }
-      return { coord: [i, j - 2] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i, j - 2]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
     }
     case "S": {
       if (j === maxOdd) {
-        // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
-        // The target absolute position should be (i, maxOdd + 2), which is 2 units south
-        // Voltage: 90° CCW + translate(2n, 2n) maps (1, maxOdd+1-i) to (i, maxOdd+2)
-        const newI = 1;
-        const newJ = maxOdd + 1 - i;
-        const voltage = translationWith90CCW(2 * n, 2 * n);
-        return { coord: [newI, newJ] as const, voltage };
+        // South border: return null - this edge is created by N from the other side
+        return null;
       }
-      return { coord: [i, j + 2] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i, j + 2]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
     }
     case "E": {
       if (i === maxOdd) {
-        // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
-        // The target absolute position should be (maxOdd + 2, j), which is 2 units east
-        // Voltage: 90° CW + translate(2n, 2n) maps (maxOdd+1-j, 1) to (maxOdd+2, j)
-        const newI = maxOdd + 1 - j;
-        const newJ = 1;
-        const voltage = translationWith90CW(2 * n, 2 * n);
-        return { coord: [newI, newJ] as const, voltage };
+        // East border: return null - this edge is created by W from the other side
+        return null;
       }
-      return { coord: [i + 2, j] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i + 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
     }
     case "W": {
       if (i === 1) {
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
-        // The target absolute position should be (-1, j), which is 2 units west
-        // Voltage: 90° CW + translate(-2n, 2n) maps (maxOdd+1-j, maxOdd) to (-1, j)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
         const voltage = translationWith90CW(-2 * n, 2 * n);
-        return { coord: [newI, newJ] as const, voltage };
+        const toId = nodeIdFromCoord([newI, newJ]);
+        // Special case: W from (1, 1) goes to (maxOdd, maxOdd) - this is the SW edge
+        const edgeKey = (j === 1 && newI === maxOdd && newJ === maxOdd)
+          ? [fromId, toId].sort().join("|") + "|SW"
+          : [fromId, toId].sort().join("|");
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
       }
-      return { coord: [i - 2, j] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i - 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
     }
   }
 }
@@ -430,40 +472,23 @@ function getP4Neighbor(
  * The orbifold edge wrapping is IDENTICAL to P4 - same coordinate mapping.
  * However, the voltages use 120° rotations instead of 90° rotations in AXIAL coordinates.
  * 
- * The wrapping pattern (same as P4):
- * - North of (i, 1) wraps to (maxOdd, maxOdd + 1 - i) - heading north bumps into east side
- * - South of (i, maxOdd) wraps to (1, maxOdd + 1 - i) - heading south bumps into west side
- * - West of (1, j) wraps to (maxOdd + 1 - j, maxOdd) - heading west bumps into south side
- * - East of (maxOdd, j) wraps to (maxOdd + 1 - j, 1) - heading east bumps into north side
+ * For P3, coordinates alone disambiguate edges EXCEPT for the two edges
+ * between (1,1) and (maxOdd, maxOdd). These need NE/SW labels:
+ * - NE: North from NW corner OR West from SE corner
+ * - SW: South from NW corner OR East from SE corner
  * 
- * IMPORTANT: The voltages are UNIFORM per edge type (not position-dependent).
- * They are pure products of the P3 generators: R (120° rotation) and T1, T2 (translations).
- * This ensures the voltage group acts freely on the plane with no node collisions.
- * 
- * The voltages use the translation lattice with L = 2n:
- * - V_N = R * T(-L, 0)   = R * T1⁻¹  (120° CCW + translate left)
- * - V_S = R² * T(L, 0)   = R² * T1   (120° CW + translate right)
- * - V_E = R² * T(0, L)   = R² * T2   (120° CW + translate down)
- * - V_W = R * T(0, -L)   = R * T2⁻¹  (120° CCW + translate up)
- * 
- * Note: In axial coords, neighbor screen positions may not be exactly 2 apart,
- * but the lifted graph tiles the plane correctly without collisions.
+ * S and E directions on the border return null because those edges are
+ * already created by N and W from the other endpoint.
  */
 function getP3Neighbor(
   i: Int,
   j: Int,
   dir: Direction,
   n: Int
-): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
+): NeighborResult {
   const maxOdd = 2 * n - 1;
   const L = 2 * n; // Lattice constant = grid width
-  
-  // P3 voltages are uniform per edge type, using the lattice generators.
-  // R: 120° CCW rotation, R²: 120° CW rotation
-  // T1 = T(L, 0), T2 = T(0, L)
-  //
-  // The key insight is that these lattice-based voltages ensure the voltage group
-  // acts freely on the plane, preventing any node collisions in the lifted graph.
+  const fromId = nodeIdFromCoord([i, j]);
   
   switch (dir) {
     case "N": {
@@ -471,62 +496,63 @@ function getP3Neighbor(
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
-        // Voltage: R * T(-L, 0) = R * T1⁻¹
-        const voltage = translationWith120CCW(-L, 0);
-        return { coord: [newI, newJ] as const, voltage };
+        // Voltage: R * T(2L, -L) where L=2n - translate right by 4n, up by 2n
+        const voltage = translationWith120CCW(2 * L, -L);
+        const toId = nodeIdFromCoord([newI, newJ]);
+        // Special case: (1,1) -> (maxOdd, maxOdd) is the NE edge
+        const edgeKey = (i === 1 && newI === maxOdd && newJ === maxOdd)
+          ? [fromId, toId].sort().join("|") + "|NE"
+          : [fromId, toId].sort().join("|");
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
       }
-      return { coord: [i, j - 2] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i, j - 2]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
     }
     case "S": {
       if (j === maxOdd) {
-        // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
-        const newI = 1;
-        const newJ = maxOdd + 1 - i;
-        // Voltage: R² * T(L, 0) = R² * T1
-        const voltage = translationWith120CW(L, 0);
-        return { coord: [newI, newJ] as const, voltage };
+        // South border: return null - this edge is created by N from the other side
+        return null;
       }
-      return { coord: [i, j + 2] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i, j + 2]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
     }
     case "E": {
       if (i === maxOdd) {
-        // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
-        const newI = maxOdd + 1 - j;
-        const newJ = 1;
-        // Voltage: R² * T(0, L) = R² * T2
-        const voltage = translationWith120CW(0, L);
-        return { coord: [newI, newJ] as const, voltage };
+        // East border: return null - this edge is created by W from the other side
+        return null;
       }
-      return { coord: [i + 2, j] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i + 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
     }
     case "W": {
       if (i === 1) {
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
-        // Voltage: R * T(0, -L) = R * T2⁻¹
-        const voltage = translationWith120CCW(0, -L);
-        return { coord: [newI, newJ] as const, voltage };
+        // Voltage: R² * T(-L, 2L) where L=2n - translate left by 2n, down by 6n
+        const voltage = translationWith120CW(-L, 2 * L);
+        const toId = nodeIdFromCoord([newI, newJ]);
+        // Special case: W from (1, 1) goes to (maxOdd, maxOdd) - this is the SW edge
+        const edgeKey = (j === 1 && newI === maxOdd && newJ === maxOdd)
+          ? [fromId, toId].sort().join("|") + "|SW"
+          : [fromId, toId].sort().join("|");
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
       }
-      return { coord: [i - 2, j] as const, voltage: I3 };
+      const toId = nodeIdFromCoord([i - 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|");
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
     }
   }
-}
-
-/**
- * Create an edge ID from two node IDs.
- * Edge ID is the sorted concatenation to ensure uniqueness.
- */
-function createEdgeId(node1: OrbifoldNodeId, node2: OrbifoldNodeId, dirType: string): OrbifoldEdgeId {
-  const sorted = [node1, node2].sort();
-  return `${sorted[0]}--${dirType}--${sorted[1]}`;
 }
 
 /**
  * Create an orbifold grid for the given wallpaper group and size.
  * 
  * @param groupType - "P1", "P2", "P3", or "P4"
- * @param n - Grid size (results in n×n nodes)
+ * @param n - Grid size (results in n×n nodes). Must be at least 2.
  * @param initialColors - Optional initial colors for each cell (row-major, n×n array)
  */
 export function createOrbifoldGrid(
@@ -534,8 +560,8 @@ export function createOrbifoldGrid(
   n: Int,
   initialColors?: ("black" | "white")[][]
 ): OrbifoldGrid<ColorData> {
-  if (n < 1) {
-    throw new Error("Grid size n must be at least 1");
+  if (n < 2) {
+    throw new Error("Grid size n must be at least 2");
   }
   
   const nodes = new Map<OrbifoldNodeId, OrbifoldNode<ColorData>>();
@@ -561,8 +587,8 @@ export function createOrbifoldGrid(
   }
   
   // Create edges (N, S, E, W for each node)
-  // We only need to create each edge once, so we process N and E directions
-  // (S is N's reverse, W is E's reverse)
+  // The getNeighbor functions provide edge keys and may return null
+  // to indicate that an edge should not be created (e.g., P3/P4 S/E on border)
   const processedEdges = new Set<string>();
   
   // Select the appropriate neighbor function based on group type
@@ -582,18 +608,24 @@ export function createOrbifoldGrid(
       
       // Process all 4 directions
       for (const dir of ["N", "S", "E", "W"] as Direction[]) {
-        const { coord: toCoord, voltage } = getNeighbor(i, j, dir, n);
+        const result = getNeighbor(i, j, dir, n);
+        
+        // Skip if this direction returns null (edge already created from other side)
+        if (result === null) {
+          continue;
+        }
+        
+        const { coord: toCoord, voltage, edgeKey } = result;
         const toId = nodeIdFromCoord(toCoord);
         
-        // Create unique edge key
-        const edgeKey = [fromId, toId].sort().join("|") + "|" + (dir === "N" || dir === "S" ? "NS" : "EW");
-        
+        // Skip if this edge has already been created (either by a previous direction or by the other endpoint)
         if (processedEdges.has(edgeKey)) {
           continue;
         }
         processedEdges.add(edgeKey);
         
-        const edgeId = createEdgeId(fromId, toId, dir === "N" || dir === "S" ? "NS" : "EW");
+        // Edge ID is just the edge key with -- separators for readability
+        const edgeId = edgeKey.replace(/\|/g, "--");
         
         // Check if this is a self-loop (same node)
         if (fromId === toId) {
