@@ -3,6 +3,8 @@ export {
   createOrbifoldGrid,
   setNodeColor,
   getNodeColor,
+  getEdgeLinestyle,
+  setEdgeLinestyle,
   coordToGridPos,
   translationMatrix,
   translationWith180,
@@ -13,5 +15,7 @@ export {
   ROTATION_90_CCW,
   type WallpaperGroupType,
   type ColorData,
+  type EdgeStyleData,
+  type EdgeLinestyle,
 } from "./createOrbifolds";
 export * from "./orbifoldbasics";
