@@ -11,7 +11,7 @@ import {
   matInvUnimodular,
 } from "./orbifoldbasics";
 
-export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4" | "pgg";
+export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg";
 
 export type EdgeLinestyle = "solid" | "dashed";
 
