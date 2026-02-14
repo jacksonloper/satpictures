@@ -95,8 +95,11 @@ function applyRandomSpanningTreeToWhiteNodes(
   // Track edges we've already added to avoid duplicates (parallel edges)
   const addedEdgePairs = new Set<string>();
   
+  // Group orbifold edges by their normalized edge pair key (for later random selection)
+  // Key: "nodeA-nodeB" (sorted), Value: array of orbifold edge IDs connecting those nodes
+  const edgePairToOrbifoldEdges = new Map<string, OrbifoldEdgeId[]>();
+  
   // Add edges with random weights
-  const edgeToGraphEdge = new Map<OrbifoldEdgeId, { source: string; target: string }>();
   for (const edgeId of edgesBetweenWhiteNodes) {
     const edge = grid.edges.get(edgeId)!;
     const endpoints = Array.from(edge.halfEdges.keys());
@@ -109,18 +112,21 @@ function applyRandomSpanningTreeToWhiteNodes(
       continue;
     }
     
-    // Skip parallel edges - the graph library doesn't allow them
+    // Create normalized edge pair key
     const edgePairKey = source < target ? `${source}-${target}` : `${target}-${source}`;
-    if (addedEdgePairs.has(edgePairKey)) {
-      // Still track this edge for linestyle updates, but don't add to Kruskal graph
-      edgeToGraphEdge.set(edgeId, { source, target });
-      continue;
-    }
-    addedEdgePairs.add(edgePairKey);
     
-    const randomWeight = Math.random();
-    kruskalGraph.addEdge(source, target, randomWeight);
-    edgeToGraphEdge.set(edgeId, { source, target });
+    // Add this orbifold edge to the group for this node pair
+    if (!edgePairToOrbifoldEdges.has(edgePairKey)) {
+      edgePairToOrbifoldEdges.set(edgePairKey, []);
+    }
+    edgePairToOrbifoldEdges.get(edgePairKey)!.push(edgeId);
+    
+    // Only add to Kruskal graph if we haven't seen this node pair yet
+    if (!addedEdgePairs.has(edgePairKey)) {
+      addedEdgePairs.add(edgePairKey);
+      const randomWeight = Math.random();
+      kruskalGraph.addEdge(source, target, randomWeight);
+    }
   }
 
   // Run Kruskal's algorithm to get the minimum spanning tree (with random weights = random tree)
@@ -144,23 +150,21 @@ function applyRandomSpanningTreeToWhiteNodes(
     return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
   }
 
-  // Update edge linestyles: solid if in spanning tree, dashed otherwise
+  // For each spanning tree edge, randomly select exactly ONE orbifold edge to mark as solid
+  const selectedOrbifoldEdges = new Set<OrbifoldEdgeId>();
+  for (const edgePairKey of spanningTreeEdgeSet) {
+    const orbifoldEdgesForPair = edgePairToOrbifoldEdges.get(edgePairKey);
+    if (orbifoldEdgesForPair && orbifoldEdgesForPair.length > 0) {
+      // Randomly select exactly one orbifold edge from this group
+      const randomIndex = Math.floor(Math.random() * orbifoldEdgesForPair.length);
+      selectedOrbifoldEdges.add(orbifoldEdgesForPair[randomIndex]);
+    }
+  }
+
+  // Update edge linestyles: solid only if selected, dashed otherwise
   const newEdges = new Map(grid.edges);
   for (const [edgeId, edge] of newEdges) {
-    const endpoints = Array.from(edge.halfEdges.keys());
-    const bothEndpointsWhite = endpoints.every(nodeId => whiteNodeIds.has(nodeId));
-    
-    let linestyle: EdgeLinestyle;
-    if (bothEndpointsWhite && endpoints.length === 2) {
-      // Check if this edge is in the spanning tree
-      const [source, target] = endpoints;
-      const edgeKey = source < target ? `${source}-${target}` : `${target}-${source}`;
-      linestyle = spanningTreeEdgeSet.has(edgeKey) ? "solid" : "dashed";
-    } else {
-      // Edge doesn't connect two different white nodes - set to dashed
-      linestyle = "dashed";
-    }
-    
+    const linestyle: EdgeLinestyle = selectedOrbifoldEdges.has(edgeId) ? "solid" : "dashed";
     newEdges.set(edgeId, { ...edge, data: { linestyle } });
   }
 
