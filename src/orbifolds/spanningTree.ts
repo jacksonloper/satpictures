@@ -5,7 +5,6 @@
  * used for maze generation in wallpaper patterns.
  */
 
-import { Graph, kruskalMST } from "@graphty/algorithms";
 import type {
   ColorData,
   EdgeStyleData,
@@ -16,6 +15,79 @@ import type {
   OrbifoldNodeId,
   OrbifoldEdgeId,
 } from "./orbifoldbasics";
+
+type WeightedEdge = {
+  source: OrbifoldNodeId;
+  target: OrbifoldNodeId;
+  weight: number;
+};
+
+function buildSpanningTreeEdgeSet(
+  nodeIds: Set<OrbifoldNodeId>,
+  edges: WeightedEdge[]
+): Set<string> | null {
+  const parent = new Map<OrbifoldNodeId, OrbifoldNodeId>();
+  const rank = new Map<OrbifoldNodeId, number>();
+
+  for (const nodeId of nodeIds) {
+    parent.set(nodeId, nodeId);
+    rank.set(nodeId, 0);
+  }
+
+  const find = (nodeId: OrbifoldNodeId): OrbifoldNodeId => {
+    const current = parent.get(nodeId);
+    if (!current) {
+      return nodeId;
+    }
+    if (current !== nodeId) {
+      const root = find(current);
+      parent.set(nodeId, root);
+      return root;
+    }
+    return current;
+  };
+
+  const union = (left: OrbifoldNodeId, right: OrbifoldNodeId): boolean => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot === rightRoot) {
+      return false;
+    }
+    const leftRank = rank.get(leftRoot) ?? 0;
+    const rightRank = rank.get(rightRoot) ?? 0;
+    if (leftRank < rightRank) {
+      parent.set(leftRoot, rightRoot);
+    } else if (leftRank > rightRank) {
+      parent.set(rightRoot, leftRoot);
+    } else {
+      parent.set(rightRoot, leftRoot);
+      rank.set(leftRoot, leftRank + 1);
+    }
+    return true;
+  };
+
+  const sortedEdges = [...edges].sort((a, b) => a.weight - b.weight);
+  const edgeSet = new Set<string>();
+  let edgesAdded = 0;
+
+  for (const edge of sortedEdges) {
+    if (union(edge.source, edge.target)) {
+      const s = String(edge.source);
+      const t = String(edge.target);
+      edgeSet.add(s < t ? `${s}-${t}` : `${t}-${s}`);
+      edgesAdded += 1;
+      if (edgesAdded === nodeIds.size - 1) {
+        break;
+      }
+    }
+  }
+
+  if (edgesAdded !== nodeIds.size - 1) {
+    return null;
+  }
+
+  return edgeSet;
+}
 
 /**
  * Constructs a random spanning tree of the white orbifold nodes using Kruskal's algorithm
@@ -60,20 +132,14 @@ export function applyRandomSpanningTreeToWhiteNodes(
     }
   }
 
-  // Build a graph for Kruskal's algorithm using @graphty/algorithms
-  const kruskalGraph = new Graph({ directed: false });
-  
-  // Add white nodes
-  for (const nodeId of whiteNodeIds) {
-    kruskalGraph.addNode(nodeId);
-  }
-  
   // Track edges we've already added to avoid duplicates (parallel edges)
   const addedEdgePairs = new Set<string>();
   
   // Group orbifold edges by their normalized edge pair key (for later random selection)
   // Key: "nodeA-nodeB" (sorted), Value: array of orbifold edge IDs connecting those nodes
   const edgePairToOrbifoldEdges = new Map<string, OrbifoldEdgeId[]>();
+
+  const weightedEdges: WeightedEdge[] = [];
   
   // Add edges with random weights
   for (const edgeId of edgesBetweenWhiteNodes) {
@@ -101,23 +167,13 @@ export function applyRandomSpanningTreeToWhiteNodes(
     if (!addedEdgePairs.has(edgePairKey)) {
       addedEdgePairs.add(edgePairKey);
       const randomWeight = Math.random();
-      kruskalGraph.addEdge(source, target, randomWeight);
+      weightedEdges.push({ source, target, weight: randomWeight });
     }
   }
 
   // Run Kruskal's algorithm to get the minimum spanning tree (with random weights = random tree)
-  let spanningTreeEdgeSet: Set<string>;
-  try {
-    const mstResult = kruskalMST(kruskalGraph);
-    // Create a set of edges in the spanning tree (as "source-target" strings, sorted)
-    spanningTreeEdgeSet = new Set(
-      mstResult.edges.map(e => {
-        const s = String(e.source);
-        const t = String(e.target);
-        return s < t ? `${s}-${t}` : `${t}-${s}`;
-      })
-    );
-  } catch {
+  const spanningTreeEdgeSet = buildSpanningTreeEdgeSet(whiteNodeIds, weightedEdges);
+  if (!spanningTreeEdgeSet) {
     // Graph is not connected - just set all edges to dashed
     const newEdges = new Map(grid.edges);
     for (const [edgeId, edge] of newEdges) {
