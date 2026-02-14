@@ -10,7 +10,7 @@
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, Component, type ReactNode } from "react";
 import {
   createOrbifoldGrid,
   setNodeColor,
@@ -36,6 +36,68 @@ import { Graph, kruskalMST } from "@graphty/algorithms";
 import "../App.css";
 
 type ToolType = "color" | "inspect";
+
+/**
+ * Error Boundary component to catch React errors and prevent white screen of death.
+ */
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    console.error("Error caught by boundary:", error, errorInfo);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: "40px",
+          textAlign: "center",
+          backgroundColor: "#fee",
+          borderRadius: "8px",
+          margin: "20px",
+        }}>
+          <h2 style={{ color: "#c0392b" }}>⚠️ Something went wrong</h2>
+          <p style={{ color: "#666", marginBottom: "20px" }}>
+            {this.state.error?.message || "An unexpected error occurred"}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#3498db",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // Constants
 const DEFAULT_SIZE = 3;
@@ -92,6 +154,9 @@ function applyRandomSpanningTreeToWhiteNodes(
     kruskalGraph.addNode(nodeId);
   }
   
+  // Track edges we've already added to avoid duplicates (parallel edges)
+  const addedEdgePairs = new Set<string>();
+  
   // Add edges with random weights
   const edgeToGraphEdge = new Map<OrbifoldEdgeId, { source: string; target: string }>();
   for (const edgeId of edgesBetweenWhiteNodes) {
@@ -105,6 +170,15 @@ function applyRandomSpanningTreeToWhiteNodes(
     if (source === target) {
       continue;
     }
+    
+    // Skip parallel edges - the graph library doesn't allow them
+    const edgePairKey = source < target ? `${source}-${target}` : `${target}-${source}`;
+    if (addedEdgePairs.has(edgePairKey)) {
+      // Still track this edge for linestyle updates, but don't add to Kruskal graph
+      edgeToGraphEdge.set(edgeId, { source, target });
+      continue;
+    }
+    addedEdgePairs.add(edgePairKey);
     
     const randomWeight = Math.random();
     kruskalGraph.addEdge(source, target, randomWeight);
@@ -680,6 +754,7 @@ export function OrbifoldsExplorer() {
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
   const [showDomains, setShowDomains] = useState(true);
   const [showDashedLines, setShowDashedLines] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -766,12 +841,19 @@ export function OrbifoldsExplorer() {
 
   // Handle random spanning tree button click
   const handleRandomSpanningTree = useCallback(() => {
-    setOrbifoldGrid((prev) => {
-      const newGrid = applyRandomSpanningTreeToWhiteNodes(prev);
-      return newGrid;
-    });
-    // Clear inspection info since edge linestyles have changed
-    setInspectionInfo(null);
+    try {
+      setErrorMessage(null); // Clear any previous error
+      setOrbifoldGrid((prev) => {
+        const newGrid = applyRandomSpanningTreeToWhiteNodes(prev);
+        return newGrid;
+      });
+      // Clear inspection info since edge linestyles have changed
+      setInspectionInfo(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "An unexpected error occurred";
+      setErrorMessage(`Random tree generation failed: ${message}`);
+      console.error("Random spanning tree error:", error);
+    }
   }, []);
 
   // Handle lifted node click (for domain highlighting)
@@ -858,6 +940,35 @@ export function OrbifoldsExplorer() {
           </div>
         )}
       </div>
+      
+      {/* Error message display */}
+      {errorMessage && (
+        <div style={{
+          padding: "12px 16px",
+          marginBottom: "20px",
+          backgroundColor: "#fee",
+          border: "1px solid #e74c3c",
+          borderRadius: "8px",
+          color: "#c0392b",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}>
+          <span>⚠️ {errorMessage}</span>
+          <button
+            onClick={() => setErrorMessage(null)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "16px",
+              color: "#c0392b",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       
       {/* Main content area */}
       <div style={{ display: "flex", gap: "40px", flexWrap: "wrap" }}>
@@ -1119,4 +1230,15 @@ export function OrbifoldsExplorer() {
   );
 }
 
-export default OrbifoldsExplorer;
+/**
+ * Wrapped OrbifoldsExplorer with Error Boundary for graceful error handling.
+ */
+function OrbifoldsExplorerWithErrorBoundary() {
+  return (
+    <ErrorBoundary>
+      <OrbifoldsExplorer />
+    </ErrorBoundary>
+  );
+}
+
+export default OrbifoldsExplorerWithErrorBoundary;
