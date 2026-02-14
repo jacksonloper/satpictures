@@ -27,6 +27,7 @@ import {
   formatVoltageRows,
   type OrbifoldGrid,
   type OrbifoldEdgeId,
+  type LiftedNodeId,
 } from "./orbifoldbasics";
 import { applyRandomSpanningTreeToWhiteNodes } from "./spanningTree";
 import {
@@ -37,11 +38,20 @@ import {
   type ToolType,
   type InspectionInfo,
 } from "./components";
+import GraphLiftWorker from "./graph-lift.worker?worker";
+import type { GraphLiftRequest, GraphLiftResponse } from "./graph-lift.worker";
 import "../App.css";
 
 // Constants
 const DEFAULT_SIZE = 3;
 const DEFAULT_EXPANSION = 2;
+
+/** Result from the graph lift SAT solver */
+interface GraphLiftResult {
+  orbifoldParentEdge: Map<string, string>;
+  liftedParent: Map<LiftedNodeId, LiftedNodeId | null>;
+  liftedDepth: Map<LiftedNodeId, number>;
+}
 
 /**
  * Main Orbifolds Explorer component.
@@ -62,6 +72,16 @@ export function OrbifoldsExplorer() {
   
   // Ref for SVG export
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
+
+  // ── Graph Lift SAT solver state ──
+  const [graphLiftRoot, setGraphLiftRoot] = useState<LiftedNodeId | null>(null);
+  const [graphLiftTarget, setGraphLiftTarget] = useState<LiftedNodeId | null>(null);
+  const [graphLiftDist, setGraphLiftDist] = useState(3);
+  const [graphLiftSolving, setGraphLiftSolving] = useState(false);
+  const [graphLiftStats, setGraphLiftStats] = useState<{ numVars: number; numClauses: number } | null>(null);
+  const [graphLiftError, setGraphLiftError] = useState<string | null>(null);
+  const [graphLiftResult, setGraphLiftResult] = useState<GraphLiftResult | null>(null);
+  const graphLiftWorkerRef = useRef<Worker | null>(null);
   
   // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -218,6 +238,106 @@ export function OrbifoldsExplorer() {
     
     return lifted;
   }, [orbifoldGrid, expansion]);
+
+  // Cleanup graph lift worker on unmount
+  useEffect(() => {
+    return () => {
+      if (graphLiftWorkerRef.current) {
+        graphLiftWorkerRef.current.terminate();
+      }
+    };
+  }, []);
+
+  // Build sorted list of interior lifted node IDs for the dropdowns
+  const liftedNodeIds = useMemo(() => {
+    const ids: LiftedNodeId[] = [];
+    for (const [id, node] of liftedGraph.nodes) {
+      if (node.interior) ids.push(id);
+    }
+    ids.sort();
+    return ids;
+  }, [liftedGraph]);
+
+  // Handle graph lift solve
+  const handleGraphLiftSolve = useCallback(() => {
+    if (!graphLiftRoot || !graphLiftTarget) return;
+    if (graphLiftWorkerRef.current) {
+      graphLiftWorkerRef.current.terminate();
+    }
+
+    setGraphLiftSolving(true);
+    setGraphLiftError(null);
+    setGraphLiftStats(null);
+
+    // Build request from current orbifold + lifted graph
+    const orbifoldNodeIds = Array.from(orbifoldGrid.nodes.keys());
+    const orbifoldEdges = Array.from(orbifoldGrid.edges.values()).map(e => ({
+      edgeId: e.id,
+      halfEdges: Array.from(e.halfEdges.entries()).map(([from, he]) => ({ from, to: he.to })),
+    }));
+    const orbifoldAdjacency = Array.from(orbifoldGrid.adjacency ?? new Map()).map(
+      ([nid, eids]) => [nid, eids] as [string, string[]]
+    );
+    const liftedNodes = Array.from(liftedGraph.nodes.values())
+      .filter(n => n.interior)
+      .map(n => ({ id: n.id, orbifoldNode: n.orbifoldNode }));
+    const interiorIds = new Set(liftedNodes.map(n => n.id));
+    const liftedEdges = Array.from(liftedGraph.edges.values())
+      .filter(e => interiorIds.has(e.a) && interiorIds.has(e.b) && e.orbifoldEdgeId !== undefined)
+      .map(e => ({ a: e.a, b: e.b, orbifoldEdgeId: e.orbifoldEdgeId! }));
+
+    const request: GraphLiftRequest = {
+      orbifoldNodeIds,
+      orbifoldEdges,
+      orbifoldAdjacency,
+      liftedNodes,
+      liftedEdges,
+      rootLiftedNodeId: graphLiftRoot,
+      targetLiftedNodeId: graphLiftTarget,
+      minDepth: graphLiftDist,
+    };
+
+    const worker = new GraphLiftWorker();
+    graphLiftWorkerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<GraphLiftResponse>) => {
+      const resp = event.data;
+      if (resp.messageType === "progress") {
+        if (resp.stats) setGraphLiftStats(resp.stats);
+        return;
+      }
+      if (resp.success && resp.result) {
+        setGraphLiftResult({
+          orbifoldParentEdge: new Map(resp.result.orbifoldParentEdge),
+          liftedParent: new Map(resp.result.liftedParent),
+          liftedDepth: new Map(resp.result.liftedDepth),
+        });
+        setGraphLiftError(null);
+      } else {
+        setGraphLiftError(resp.error || "Solve failed");
+      }
+      setGraphLiftSolving(false);
+      graphLiftWorkerRef.current = null;
+    };
+
+    worker.onerror = (err) => {
+      setGraphLiftError(`Worker error: ${err.message}`);
+      setGraphLiftSolving(false);
+      graphLiftWorkerRef.current = null;
+    };
+
+    worker.postMessage(request);
+  }, [graphLiftRoot, graphLiftTarget, graphLiftDist, orbifoldGrid, liftedGraph]);
+
+  // Handle graph lift cancel
+  const handleGraphLiftCancel = useCallback(() => {
+    if (graphLiftWorkerRef.current) {
+      graphLiftWorkerRef.current.terminate();
+      graphLiftWorkerRef.current = null;
+      setGraphLiftSolving(false);
+      setGraphLiftError("Cancelled");
+    }
+  }, []);
 
   return (
     <div className="orbifolds-explorer" style={{ padding: "20px" }}>
@@ -573,6 +693,155 @@ export function OrbifoldsExplorer() {
             )}
           </div>
         </div>
+      </div>
+      
+      {/* ── Graph Lift SAT Tool ── */}
+      <div style={{
+        marginTop: "30px",
+        padding: "16px",
+        backgroundColor: "#fef9e7",
+        borderRadius: "8px",
+        border: "1px solid #f39c12",
+      }}>
+        <h4 style={{ marginBottom: "12px" }}>🌳 Graph Lift Arborescence (SAT)</h4>
+        <p style={{ fontSize: "13px", color: "#666", marginBottom: "12px" }}>
+          Find an arborescence on the lifted graph: each orbifold node picks a parent edge,
+          lifted nodes follow that choice.  The target node must be at least DST deep.
+        </p>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "flex-end", marginBottom: "12px" }}>
+          {/* Root node */}
+          <div>
+            <label style={{ fontSize: "12px", display: "block", marginBottom: "4px" }}>Root (R)</label>
+            <select
+              value={graphLiftRoot ?? ""}
+              onChange={e => setGraphLiftRoot(e.target.value || null)}
+              style={{ padding: "4px", borderRadius: "4px", border: "1px solid #ccc", maxWidth: "220px" }}
+            >
+              <option value="">— select —</option>
+              {liftedNodeIds.map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </div>
+
+          {/* Target node */}
+          <div>
+            <label style={{ fontSize: "12px", display: "block", marginBottom: "4px" }}>Target (N)</label>
+            <select
+              value={graphLiftTarget ?? ""}
+              onChange={e => setGraphLiftTarget(e.target.value || null)}
+              style={{ padding: "4px", borderRadius: "4px", border: "1px solid #ccc", maxWidth: "220px" }}
+            >
+              <option value="">— select —</option>
+              {liftedNodeIds.map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </div>
+
+          {/* Distance */}
+          <ValidatedInput
+            value={graphLiftDist}
+            onChange={setGraphLiftDist}
+            min={1}
+            max={999}
+            label="Min depth (DST)"
+          />
+
+          {/* Solve / Cancel */}
+          {!graphLiftSolving ? (
+            <button
+              onClick={handleGraphLiftSolve}
+              disabled={!graphLiftRoot || !graphLiftTarget}
+              style={{
+                padding: "6px 16px",
+                borderRadius: "4px",
+                border: "1px solid #27ae60",
+                backgroundColor: "#e8f6ef",
+                cursor: graphLiftRoot && graphLiftTarget ? "pointer" : "not-allowed",
+                opacity: graphLiftRoot && graphLiftTarget ? 1 : 0.5,
+              }}
+            >
+              ▶ Solve
+            </button>
+          ) : (
+            <button
+              onClick={handleGraphLiftCancel}
+              style={{
+                padding: "6px 16px",
+                borderRadius: "4px",
+                border: "1px solid #e74c3c",
+                backgroundColor: "#fdecea",
+                cursor: "pointer",
+              }}
+            >
+              ✕ Cancel
+            </button>
+          )}
+        </div>
+
+        {/* Stats */}
+        {graphLiftStats && (
+          <p style={{ fontSize: "12px", color: "#888", marginBottom: "8px" }}>
+            SAT problem: {graphLiftStats.numVars} vars, {graphLiftStats.numClauses} clauses
+            {graphLiftSolving && " — solving…"}
+          </p>
+        )}
+
+        {/* Error */}
+        {graphLiftError && (
+          <p style={{ fontSize: "13px", color: "#c0392b", marginBottom: "8px" }}>⚠️ {graphLiftError}</p>
+        )}
+
+        {/* Result (totally disconnected from rest of page state) */}
+        {graphLiftResult && (
+          <div style={{
+            marginTop: "12px",
+            padding: "12px",
+            backgroundColor: "#fff",
+            borderRadius: "6px",
+            border: "1px solid #d5dbdb",
+            maxHeight: "400px",
+            overflowY: "auto",
+          }}>
+            <h5 style={{ marginBottom: "8px" }}>Arborescence Result</h5>
+            <table style={{ fontSize: "12px", borderCollapse: "collapse", width: "100%" }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Lifted Node</th>
+                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Depth</th>
+                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Parent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from(graphLiftResult.liftedDepth.entries())
+                  .sort((a, b) => a[1] - b[1])
+                  .map(([nodeId, depth]) => {
+                    const parent = graphLiftResult.liftedParent.get(nodeId);
+                    return (
+                      <tr key={nodeId}>
+                        <td style={{
+                          padding: "3px 8px",
+                          fontFamily: "monospace",
+                          fontSize: "11px",
+                          backgroundColor: nodeId === graphLiftRoot ? "#e8f6ef" : nodeId === graphLiftTarget ? "#fef9e7" : undefined,
+                        }}>
+                          {nodeId}
+                          {nodeId === graphLiftRoot && " (root)"}
+                          {nodeId === graphLiftTarget && " (target)"}
+                        </td>
+                        <td style={{ padding: "3px 8px" }}>{depth}</td>
+                        <td style={{ padding: "3px 8px", fontFamily: "monospace", fontSize: "11px" }}>
+                          {parent ?? "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+            <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+              Orbifold edge choices:{" "}
+              {Array.from(graphLiftResult.orbifoldParentEdge.entries()).map(([n, e]) => `${n}→${e}`).join(", ")}
+            </p>
+          </div>
+        )}
       </div>
       
       {/* Help text */}
