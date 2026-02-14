@@ -33,7 +33,7 @@ import {
   matInvUnimodular,
 } from "./orbifoldbasics";
 
-export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4";
+export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4" | "pgg";
 
 export type EdgeLinestyle = "solid" | "dashed";
 
@@ -198,6 +198,58 @@ export function translationWith120CW(dx: Int, dy: Int): Matrix3x3 {
   return [
     [0, 1, dx],
     [-1, -1, dy],
+    [0, 0, 1],
+  ] as const;
+}
+
+/**
+ * Reflection across the y-axis (horizontal flip): x → -x, y → y
+ * The y-axis serves as the mirror line.
+ * Matrix: [-1, 0, 0], [0, 1, 0], [0, 0, 1]
+ */
+export const REFLECTION_Y: Matrix3x3 = [
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+] as const;
+
+/**
+ * Reflection across the x-axis (vertical flip): x → x, y → -y
+ * The x-axis serves as the mirror line.
+ * Matrix: [1, 0, 0], [0, -1, 0], [0, 0, 1]
+ */
+export const REFLECTION_X: Matrix3x3 = [
+  [1, 0, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+] as const;
+
+/**
+ * Create a glide reflection: reflect across y-axis then translate.
+ * First reflect x → -x (using y-axis as mirror), then translate by (dx, dy).
+ * Result: [-1, 0, dx], [0, 1, dy], [0, 0, 1]
+ * 
+ * For pgg, the north/south boundaries use this glide reflection (flip x-coords).
+ */
+export function glideReflectionY(dx: Int, dy: Int): Matrix3x3 {
+  return [
+    [-1, 0, dx],
+    [0, 1, dy],
+    [0, 0, 1],
+  ] as const;
+}
+
+/**
+ * Create a glide reflection: reflect across x-axis then translate.
+ * First reflect y → -y (using x-axis as mirror), then translate by (dx, dy).
+ * Result: [1, 0, dx], [0, -1, dy], [0, 0, 1]
+ * 
+ * For pgg, the east/west boundaries use this glide reflection (flip y-coords).
+ */
+export function glideReflectionX(dx: Int, dy: Int): Matrix3x3 {
+  return [
+    [1, 0, dx],
+    [0, -1, dy],
     [0, 0, 1],
   ] as const;
 }
@@ -555,9 +607,102 @@ function getP3Neighbor(
 }
 
 /**
+ * Get the neighbor node for pgg wallpaper group.
+ * pgg has glide reflections at boundaries (no pure rotations).
+ * 
+ * The orbifold edge wrapping for pgg:
+ * - North of (i, 1) wraps to (maxOdd + 1 - i, maxOdd) with a vertical glide reflection
+ * - South of (i, maxOdd) wraps to (maxOdd + 1 - i, 1) with a vertical glide reflection
+ * - West of (1, j) wraps to (maxOdd, maxOdd + 1 - j) with a horizontal glide reflection
+ * - East of (maxOdd, j) wraps to (1, maxOdd + 1 - j) with a horizontal glide reflection
+ * 
+ * Edge keys use NS/EW labels to distinguish vertical vs horizontal edges.
+ * 
+ * For pgg, all boundary edges are created from both sides (unlike P3/P4 which only create
+ * from one side), but each edge is only created once using edge key deduplication.
+ */
+function getPggNeighbor(
+  i: Int,
+  j: Int,
+  dir: Direction,
+  n: Int
+): NeighborResult {
+  const maxOdd = 2 * n - 1;
+  const L = 2 * n; // Lattice constant = grid width (same as height for square)
+  const fromId = nodeIdFromCoord([i, j]);
+  
+  switch (dir) {
+    case "N": {
+      if (j === 1) {
+        // North border: heading north from (i, 1) wraps to (maxOdd + 1 - i, maxOdd)
+        // This is a vertical glide reflection: flip x, then translate
+        const newI = maxOdd + 1 - i;
+        const newJ = maxOdd;
+        // Voltage: reflect in y-axis (flip x) then translate
+        // The glide sends (x, y) → (-x + 2n, y - 2n)
+        const voltage = glideReflectionY(L, -L);
+        const toId = nodeIdFromCoord([newI, newJ]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
+      }
+      const toId = nodeIdFromCoord([i, j - 2]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
+    }
+    case "S": {
+      if (j === maxOdd) {
+        // South border: heading south from (i, maxOdd) wraps to (maxOdd + 1 - i, 1)
+        const newI = maxOdd + 1 - i;
+        const newJ = 1;
+        // Voltage: glide reflection (inverse of north) - x → -x + 2n, y → -y + 4n
+        const voltage = glideReflectionY(L, L);
+        const toId = nodeIdFromCoord([newI, newJ]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
+      }
+      const toId = nodeIdFromCoord([i, j + 2]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|NS";
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
+    }
+    case "E": {
+      if (i === maxOdd) {
+        // East border: heading east from (maxOdd, j) wraps to (1, maxOdd + 1 - j)
+        const newI = 1;
+        const newJ = maxOdd + 1 - j;
+        // Voltage: horizontal glide reflection - reflect y, translate
+        // x → x + 2n, y → -y + 2n
+        const voltage = glideReflectionX(L, L);
+        const toId = nodeIdFromCoord([newI, newJ]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
+      }
+      const toId = nodeIdFromCoord([i + 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
+    }
+    case "W": {
+      if (i === 1) {
+        // West border: heading west from (1, j) wraps to (maxOdd, maxOdd + 1 - j)
+        const newI = maxOdd;
+        const newJ = maxOdd + 1 - j;
+        // Voltage: horizontal glide reflection (inverse of east)
+        // x → x - 2n, y → -y + 2n
+        const voltage = glideReflectionX(-L, L);
+        const toId = nodeIdFromCoord([newI, newJ]);
+        const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+        return { coord: [newI, newJ] as const, voltage, edgeKey };
+      }
+      const toId = nodeIdFromCoord([i - 2, j]);
+      const edgeKey = [fromId, toId].sort().join("|") + "|EW";
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
+    }
+  }
+}
+
+/**
  * Create an orbifold grid for the given wallpaper group and size.
  * 
- * @param groupType - "P1", "P2", "P3", or "P4"
+ * @param groupType - "P1", "P2", "P3", "P4", or "pgg"
  * @param n - Grid size (results in n×n nodes). Must be at least 2.
  * @param initialColors - Optional initial colors for each cell (row-major, n×n array)
  */
@@ -598,13 +743,24 @@ export function createOrbifoldGrid(
   const processedEdges = new Set<string>();
   
   // Select the appropriate neighbor function based on group type
-  const getNeighbor = groupType === "P1" 
-    ? getP1Neighbor 
-    : groupType === "P2" 
-      ? getP2Neighbor 
-      : groupType === "P3"
-        ? getP3Neighbor
-        : getP4Neighbor;
+  let getNeighbor: (i: Int, j: Int, dir: Direction, n: Int) => NeighborResult;
+  switch (groupType) {
+    case "P1":
+      getNeighbor = getP1Neighbor;
+      break;
+    case "P2":
+      getNeighbor = getP2Neighbor;
+      break;
+    case "P3":
+      getNeighbor = getP3Neighbor;
+      break;
+    case "P4":
+      getNeighbor = getP4Neighbor;
+      break;
+    case "pgg":
+      getNeighbor = getPggNeighbor;
+      break;
+  }
   
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {

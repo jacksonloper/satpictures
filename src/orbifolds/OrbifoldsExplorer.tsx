@@ -329,6 +329,7 @@ export function OrbifoldsExplorer() {
           >
             <option value="P1">P1 (Torus)</option>
             <option value="P2">P2 (180° rotation)</option>
+            <option value="pgg">pgg (glide reflections)</option>
             <option value="P3">P3 (120° rotation - axial)</option>
             <option value="P4">P4 (90° rotation)</option>
           </select>
@@ -639,6 +640,7 @@ export function OrbifoldsExplorer() {
         <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>
           <li><strong>P1:</strong> Simple torus wrapping (translations only)</li>
           <li><strong>P2:</strong> Includes 180° rotations at boundaries</li>
+          <li><strong>pgg:</strong> Includes glide reflections at boundaries (no pure rotations)</li>
           <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
           <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
         </ul>
