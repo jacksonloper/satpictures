@@ -22,6 +22,10 @@ import { type ColorData, type EdgeStyleData } from "../createOrbifolds";
 const LIFTED_CELL_SIZE = 16;
 const GRID_PADDING = 20;
 
+// Edge widths (doubled from original 3/1 to 6/2)
+const SOLID_EDGE_WIDTH = 6;
+const DASHED_EDGE_WIDTH = 2;
+
 /**
  * Serialize a voltage matrix to a string key for uniqueness comparison.
  */
@@ -53,6 +57,8 @@ export function LiftedGraphRenderer({
   onNodeClick,
   showDomains = true,
   showDashedLines = true,
+  showNodes = false,
+  svgRef,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -63,6 +69,8 @@ export function LiftedGraphRenderer({
   onNodeClick: (liftedNodeId: string, voltageKey: string) => void;
   showDomains?: boolean;
   showDashedLines?: boolean;
+  showNodes?: boolean;
+  svgRef?: React.RefObject<SVGSVGElement | null>;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
@@ -150,6 +158,46 @@ export function LiftedGraphRenderer({
     return domains;
   }, [uniqueVoltages, fundamentalDomainSize, useAxialTransform]);
   
+  // Compute shading quadrilaterals for black nodes
+  // For each black orbifold node, create the (i-1,i+1)×(j-1,j+1) square
+  // transformed by voltage and optional axial transform
+  const blackNodeShadings = useMemo(() => {
+    const shadings: Array<{
+      id: string;
+      corners: Array<{ x: number; y: number }>;
+    }> = [];
+    
+    for (const [id, node] of liftedGraph.nodes) {
+      const orbNode = orbifoldGrid.nodes.get(node.orbifoldNode);
+      if (!orbNode || orbNode.data?.color !== "black") continue;
+      
+      // Create the (i-1,i+1)×(j-1,j+1) square around the node
+      const [ox, oy] = orbNode.coord;
+      const squareCorners = [
+        { x: ox - 1, y: oy - 1 },
+        { x: ox + 1, y: oy - 1 },
+        { x: ox + 1, y: oy + 1 },
+        { x: ox - 1, y: oy + 1 },
+      ];
+      
+      // Apply voltage transform
+      const transformedCorners = squareCorners.map(corner => {
+        let transformedCorner = applyMatrix(node.voltage, corner.x, corner.y);
+        if (useAxialTransform) {
+          transformedCorner = axialToCartesian(transformedCorner.x, transformedCorner.y);
+        }
+        return transformedCorner;
+      });
+      
+      shadings.push({
+        id,
+        corners: transformedCorners,
+      });
+    }
+    
+    return shadings;
+  }, [liftedGraph, orbifoldGrid, useAxialTransform]);
+  
   // Compute SVG dimensions with padding - include domain corners in bounds
   const allBounds = useMemo(() => {
     let bMinX = minX, bMaxX = maxX, bMinY = minY, bMaxY = maxY;
@@ -177,6 +225,7 @@ export function LiftedGraphRenderer({
 
   return (
     <svg
+      ref={svgRef}
       width={Math.max(width, 200)}
       height={Math.max(height, 200)}
       style={{ border: "1px solid #ccc", borderRadius: "4px", backgroundColor: "#f8f9fa" }}
@@ -199,6 +248,22 @@ export function LiftedGraphRenderer({
         );
       })}
       
+      {/* Black node shadings (drawn after domains, before edges) */}
+      {blackNodeShadings.map((shading) => {
+        const points = shading.corners
+          .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
+          .join(' ');
+        
+        return (
+          <polygon
+            key={`shading-${shading.id}`}
+            points={points}
+            fill="rgba(0, 0, 0, 0.5)"
+            stroke="none"
+          />
+        );
+      })}
+      
       {/* Edges */}
       {Array.from(liftedGraph.edges.values()).map((edge) => {
         const posA = positions.get(edge.a);
@@ -215,6 +280,7 @@ export function LiftedGraphRenderer({
         }
         
         // Solid lines: thick black paths; Dashed lines: thin gray dashed
+        // All edges use round endcaps
         const isSolid = linestyle === "solid";
         
         return (
@@ -225,15 +291,15 @@ export function LiftedGraphRenderer({
             x2={toSvgX(posB.x)}
             y2={toSvgY(posB.y)}
             stroke={isSolid ? "#000000" : "#bdc3c7"}
-            strokeWidth={isSolid ? 3 : 1}
+            strokeWidth={isSolid ? SOLID_EDGE_WIDTH : DASHED_EDGE_WIDTH}
             strokeDasharray={isSolid ? undefined : "4,3"}
-            strokeLinecap={isSolid ? "round" : undefined}
+            strokeLinecap="round"
           />
         );
       })}
       
-      {/* Nodes */}
-      {Array.from(positions.entries()).map(([id, pos]) => {
+      {/* Nodes (optional, off by default) */}
+      {showNodes && Array.from(positions.entries()).map(([id, pos]) => {
         const node = liftedGraph.nodes.get(id);
         const isInterior = node?.interior ?? false;
         const isHighlighted = highlightOrbifoldNodeId && pos.orbifoldNodeId === highlightOrbifoldNodeId;

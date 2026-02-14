@@ -10,7 +10,7 @@
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   createOrbifoldGrid,
   setNodeColor,
@@ -180,7 +180,11 @@ export function OrbifoldsExplorer() {
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
   const [showDomains, setShowDomains] = useState(true);
   const [showDashedLines, setShowDashedLines] = useState(true);
+  const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Ref for SVG export
+  const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
   
   // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -281,6 +285,36 @@ export function OrbifoldsExplorer() {
       console.error("Random spanning tree error:", error);
     }
   }, []);
+
+  // Handle SVG export
+  const handleExportSvg = useCallback(() => {
+    const svgElement = liftedGraphSvgRef.current;
+    if (!svgElement) return;
+    
+    // Clone the SVG to avoid modifying the original
+    const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
+    
+    // Add xmlns attribute for standalone SVG file
+    svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    
+    // Serialize to string
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svgClone);
+    
+    // Create blob and download
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    // Sanitize filename components (wallpaperGroup is already constrained to P1/P2/P3/P4/pgg)
+    const safeGroup = wallpaperGroup.toLowerCase();
+    link.download = `lifted-graph-${safeGroup}-${size}x${size}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [wallpaperGroup, size]);
 
   // Handle lifted node click (for domain highlighting)
   // Note: liftedNodeId is available for future extension (e.g., showing node details)
@@ -567,9 +601,11 @@ export function OrbifoldsExplorer() {
           {/* Display options */}
           <div style={{ 
             display: "flex", 
+            flexWrap: "wrap",
             gap: "16px", 
             marginBottom: "10px",
             fontSize: "12px",
+            alignItems: "center",
           }}>
             <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
               <input
@@ -587,6 +623,28 @@ export function OrbifoldsExplorer() {
               />
               Show dashed lines
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showNodes}
+                onChange={(e) => setShowNodes(e.target.checked)}
+              />
+              Show nodes
+            </label>
+            <button
+              onClick={handleExportSvg}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "4px",
+                border: "1px solid #3498db",
+                backgroundColor: "#ebf5fb",
+                cursor: "pointer",
+                fontSize: "12px",
+              }}
+              title="Download lifted graph as SVG file"
+            >
+              💾 Save SVG
+            </button>
           </div>
           
           <LiftedGraphRenderer
@@ -599,27 +657,35 @@ export function OrbifoldsExplorer() {
             onNodeClick={handleLiftedNodeClick}
             showDomains={showDomains}
             showDashedLines={showDashedLines}
+            showNodes={showNodes}
+            svgRef={liftedGraphSvgRef}
           />
           
           {/* Legend */}
           <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
             <p>
-              <span style={{ color: "#27ae60" }}>●</span> Interior nodes
-              <span style={{ marginLeft: "16px", color: "#e74c3c" }}>○</span> Exterior nodes
-              {inspectionInfo && (
+              {showNodes && (
                 <>
-                  <span style={{ marginLeft: "16px", color: "#3498db" }}>◉</span> Highlighted
+                  <span style={{ color: "#27ae60" }}>●</span> Interior nodes
+                  <span style={{ marginLeft: "16px", color: "#e74c3c" }}>○</span> Exterior nodes
+                  {inspectionInfo && (
+                    <>
+                      <span style={{ marginLeft: "16px", color: "#3498db" }}>◉</span> Highlighted
+                    </>
+                  )}
                 </>
               )}
               {selectedVoltageKey && (
                 <>
-                  <span style={{ marginLeft: "16px" }}>▢</span> Selected domain (click node to highlight)
+                  <span style={{ marginLeft: showNodes ? "16px" : "0" }}>▢</span> Selected domain (click node to highlight)
                 </>
               )}
             </p>
-            <p style={{ marginTop: "4px" }}>
-              Click on a lifted node to highlight its fundamental domain.
-            </p>
+            {showNodes && (
+              <p style={{ marginTop: "4px" }}>
+                Click on a lifted node to highlight its fundamental domain.
+              </p>
+            )}
           </div>
         </div>
       </div>
