@@ -1,7 +1,7 @@
 /**
- * Orbifold creation routines for P1, P2, and P4 wallpaper groups.
+ * Orbifold creation routines for P1, P2, P3, and P4 wallpaper groups.
  * 
- * For P1, P2, and P4, for a fixed n, the set of nodes are integer coordinates like (i,j)
+ * For P1, P2, P3, and P4, for a fixed n, the set of nodes are integer coordinates like (i,j)
  * where i and j are *odd* and there are n^2 of them.
  * So for n=3, its (1,1),(1,3),(1,5),(3,1),...,(5,5).
  * 
@@ -12,6 +12,9 @@
  * Border edges have special voltages:
  * - P1: translation by 2n in the direction of that side
  * - P2: translation by 2n in direction AND a 180° flip
+ * - P3: 120° rotation plus translation in AXIAL coordinates (same edge wrapping as P4
+ *       but with 120° rotations instead of 90°). Note: neighbor distances in the lifted
+ *       graph may not be uniform when displayed in Cartesian coordinates.
  * - P4: 90° rotation plus translation (heading north you bump into the east side
  *       of the next fundamental domain, so voltage is rotate 90° CW + translate NE)
  */
@@ -30,7 +33,7 @@ import {
   matInvUnimodular,
 } from "./orbifoldbasics";
 
-export type WallpaperGroupType = "P1" | "P2" | "P4";
+export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4";
 
 export interface ColorData extends ExtraData {
   color: "black" | "white";
@@ -125,6 +128,70 @@ export function translationWith90CCW(dx: Int, dy: Int): Matrix3x3 {
   return [
     [0, -1, dx],
     [1, 0, dy],
+    [0, 0, 1],
+  ] as const;
+}
+
+/**
+ * 120° counter-clockwise rotation matrix in axial coordinates.
+ * In axial coordinates (q, r), 120° CCW rotation maps (q, r) → (-q-r, q).
+ * The matrix representation (using homogeneous coords):
+ * [-1, -1, 0]
+ * [ 1,  0, 0]
+ * [ 0,  0, 1]
+ * 
+ * Note: The formula (q, r) → (-r, q+r) is 60° CCW (hexagonal).
+ * 120° = 2 × 60° gives (q, r) → (-q-r, q).
+ * 
+ * Verify: R³ = I
+ * - (1,0) → (-1,1) → (0,-1) → (1,0) ✓
+ */
+export const ROTATION_120_CCW: Matrix3x3 = [
+  [-1, -1, 0],
+  [1, 0, 0],
+  [0, 0, 1],
+] as const;
+
+/**
+ * 120° clockwise rotation matrix in axial coordinates.
+ * Equivalent to 240° CCW. Maps (q, r) → (r, -q-r).
+ * The matrix representation (using homogeneous coords):
+ * [ 0,  1, 0]
+ * [-1, -1, 0]
+ * [ 0,  0, 1]
+ * 
+ * This is the inverse of ROTATION_120_CCW.
+ */
+export const ROTATION_120_CW: Matrix3x3 = [
+  [0, 1, 0],
+  [-1, -1, 0],
+  [0, 0, 1],
+] as const;
+
+/**
+ * Create a combined rotation (120° CCW) + translation matrix in axial coords.
+ * First rotate 120° counter-clockwise around origin, then translate by (dx, dy).
+ * 120° CCW: (q, r) → (-q-r, q)
+ * Result: [-1, -1, dx], [1, 0, dy], [0, 0, 1]
+ */
+export function translationWith120CCW(dx: Int, dy: Int): Matrix3x3 {
+  return [
+    [-1, -1, dx],
+    [1, 0, dy],
+    [0, 0, 1],
+  ] as const;
+}
+
+/**
+ * Create a combined rotation (120° CW / 240° CCW) + translation matrix in axial coords.
+ * First rotate 120° clockwise around origin, then translate by (dx, dy).
+ * 120° CW: (q, r) → (r, -q-r)
+ * Result: [0, 1, dx], [-1, -1, dy], [0, 0, 1]
+ */
+export function translationWith120CW(dx: Int, dy: Int): Matrix3x3 {
+  return [
+    [0, 1, dx],
+    [-1, -1, dy],
     [0, 0, 1],
   ] as const;
 }
@@ -357,6 +424,96 @@ function getP4Neighbor(
 }
 
 /**
+ * Get the neighbor node for P3 wallpaper group.
+ * P3 has 3-fold (120°) rotational symmetry at boundaries.
+ * 
+ * The orbifold edge wrapping is IDENTICAL to P4 - same coordinate mapping.
+ * However, the voltages use 120° rotations instead of 90° rotations in AXIAL coordinates.
+ * 
+ * The wrapping pattern (same as P4):
+ * - North of (i, 1) wraps to (maxOdd, maxOdd + 1 - i) - heading north bumps into east side
+ * - South of (i, maxOdd) wraps to (1, maxOdd + 1 - i) - heading south bumps into west side
+ * - West of (1, j) wraps to (maxOdd + 1 - j, maxOdd) - heading west bumps into south side
+ * - East of (maxOdd, j) wraps to (maxOdd + 1 - j, 1) - heading east bumps into north side
+ * 
+ * IMPORTANT: The voltages are UNIFORM per edge type (not position-dependent).
+ * They are pure products of the P3 generators: R (120° rotation) and T1, T2 (translations).
+ * This ensures the voltage group acts freely on the plane with no node collisions.
+ * 
+ * The voltages use the translation lattice with L = 2n:
+ * - V_N = R * T(-L, 0)   = R * T1⁻¹  (120° CCW + translate left)
+ * - V_S = R² * T(L, 0)   = R² * T1   (120° CW + translate right)
+ * - V_E = R² * T(0, L)   = R² * T2   (120° CW + translate down)
+ * - V_W = R * T(0, -L)   = R * T2⁻¹  (120° CCW + translate up)
+ * 
+ * Note: In axial coords, neighbor screen positions may not be exactly 2 apart,
+ * but the lifted graph tiles the plane correctly without collisions.
+ */
+function getP3Neighbor(
+  i: Int,
+  j: Int,
+  dir: Direction,
+  n: Int
+): { coord: readonly [Int, Int]; voltage: Matrix3x3 } {
+  const maxOdd = 2 * n - 1;
+  const L = 2 * n; // Lattice constant = grid width
+  
+  // P3 voltages are uniform per edge type, using the lattice generators.
+  // R: 120° CCW rotation, R²: 120° CW rotation
+  // T1 = T(L, 0), T2 = T(0, L)
+  //
+  // The key insight is that these lattice-based voltages ensure the voltage group
+  // acts freely on the plane, preventing any node collisions in the lifted graph.
+  
+  switch (dir) {
+    case "N": {
+      if (j === 1) {
+        // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
+        const newI = maxOdd;
+        const newJ = maxOdd + 1 - i;
+        // Voltage: R * T(-L, 0) = R * T1⁻¹
+        const voltage = translationWith120CCW(-L, 0);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i, j - 2] as const, voltage: I3 };
+    }
+    case "S": {
+      if (j === maxOdd) {
+        // South border: heading south from (i, maxOdd) wraps to orbifold node (1, maxOdd + 1 - i)
+        const newI = 1;
+        const newJ = maxOdd + 1 - i;
+        // Voltage: R² * T(L, 0) = R² * T1
+        const voltage = translationWith120CW(L, 0);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i, j + 2] as const, voltage: I3 };
+    }
+    case "E": {
+      if (i === maxOdd) {
+        // East border: heading east from (maxOdd, j) wraps to orbifold node (maxOdd + 1 - j, 1)
+        const newI = maxOdd + 1 - j;
+        const newJ = 1;
+        // Voltage: R² * T(0, L) = R² * T2
+        const voltage = translationWith120CW(0, L);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i + 2, j] as const, voltage: I3 };
+    }
+    case "W": {
+      if (i === 1) {
+        // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
+        const newI = maxOdd + 1 - j;
+        const newJ = maxOdd;
+        // Voltage: R * T(0, -L) = R * T2⁻¹
+        const voltage = translationWith120CCW(0, -L);
+        return { coord: [newI, newJ] as const, voltage };
+      }
+      return { coord: [i - 2, j] as const, voltage: I3 };
+    }
+  }
+}
+
+/**
  * Create an edge ID from two node IDs.
  * Edge ID is the sorted concatenation to ensure uniqueness.
  */
@@ -368,7 +525,7 @@ function createEdgeId(node1: OrbifoldNodeId, node2: OrbifoldNodeId, dirType: str
 /**
  * Create an orbifold grid for the given wallpaper group and size.
  * 
- * @param groupType - "P1", "P2", or "P4"
+ * @param groupType - "P1", "P2", "P3", or "P4"
  * @param n - Grid size (results in n×n nodes)
  * @param initialColors - Optional initial colors for each cell (row-major, n×n array)
  */
@@ -413,7 +570,9 @@ export function createOrbifoldGrid(
     ? getP1Neighbor 
     : groupType === "P2" 
       ? getP2Neighbor 
-      : getP4Neighbor;
+      : groupType === "P3"
+        ? getP3Neighbor
+        : getP4Neighbor;
   
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {

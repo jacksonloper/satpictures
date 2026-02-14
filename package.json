@@ -8,11 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npx tsx src/polyform-explorer/grids/unifiedTiling.test.ts && npx tsx src/problem/polyhex-tiling.test.ts && npx tsx src/wallpaper-maze/p3-neighbor-distance.test.ts && npx tsx src/wallpaper-maze/wallpaper-maze.test.ts && npx tsx src/orbifolds/p4-edge-distance.test.ts"
+    "test": "npx tsx src/polyform-explorer/grids/unifiedTiling.test.ts && npx tsx src/problem/polyhex-tiling.test.ts && npx tsx src/wallpaper-maze/p3-neighbor-distance.test.ts && npx tsx src/wallpaper-maze/wallpaper-maze.test.ts && npx tsx src/orbifolds/p4-edge-distance.test.ts && npx tsx src/orbifolds/p3-edge-distance.test.ts"
   },
   "dependencies": {
     "@babel/parser": "^7.28.6",
-    "logic-solver": "^2.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -26,6 +25,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "logic-solver": "^2.0.1",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
