@@ -15,79 +15,18 @@
 
 import {
   createOrbifoldGrid,
-  type WallpaperGroupType,
   type ColorData,
 } from "./createOrbifolds.js";
 
 import {
-  type Matrix3x3,
-  type LiftedGraph,
-  type OrbifoldGrid,
-  I3,
-  matMul,
   constructLiftedGraphFromOrbifold,
   processAllNonInteriorOnce,
   buildAdjacency,
-  nodeIdFromCoord,
+  getLiftedNodeAbsolutePosition,
+  axialToCartesian,
+  distance,
+  formatVoltage,
 } from "./orbifoldbasics.js";
-
-/**
- * Apply a 3x3 homogeneous transformation matrix to a 2D point.
- * Returns the transformed (x, y) coordinates.
- */
-function applyMatrix(matrix: Matrix3x3, x: number, y: number): { x: number; y: number } {
-  const w = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2];
-  return {
-    x: (matrix[0][0] * x + matrix[0][1] * y + matrix[0][2]) / w,
-    y: (matrix[1][0] * x + matrix[1][1] * y + matrix[1][2]) / w,
-  };
-}
-
-/**
- * Apply axial-to-Cartesian transformation.
- * Axial coords (q, r) map to Cartesian (x, y) via:
- * x = q + r * 0.5
- * y = r * sqrt(3)/2
- */
-function axialToCartesian(q: number, r: number): { x: number; y: number } {
-  return {
-    x: q + r * 0.5,
-    y: r * Math.sqrt(3) / 2,
-  };
-}
-
-/**
- * Calculate the absolute position of a lifted node.
- * Absolute position = voltage applied to orbifold node coordinates.
- */
-function getLiftedNodeAbsolutePosition(
-  orbifoldGrid: OrbifoldGrid<ColorData>,
-  orbifoldNodeId: string,
-  voltage: Matrix3x3
-): { x: number; y: number } {
-  const orbNode = orbifoldGrid.nodes.get(orbifoldNodeId);
-  if (!orbNode) {
-    throw new Error(`Orbifold node not found: ${orbifoldNodeId}`);
-  }
-  const [ox, oy] = orbNode.coord;
-  return applyMatrix(voltage, ox, oy);
-}
-
-/**
- * Calculate Euclidean distance between two points.
- */
-function distance(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-/**
- * Format a voltage matrix for display.
- */
-function formatVoltage(v: Matrix3x3): string {
-  return `[[${v[0].join(",")}], [${v[1].join(",")}], [${v[2].join(",")}]]`;
-}
 
 /**
  * Test the P3 lifted graph structure.
