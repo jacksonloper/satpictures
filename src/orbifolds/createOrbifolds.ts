@@ -471,8 +471,8 @@ function getP3Neighbor(
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
-        // Voltage: R * T(-L, 0) = R * T1⁻¹
-        const voltage = translationWith120CCW(-L, 0);
+        // Voltage: R * T(0, 0) - translate right by 2n compared to original
+        const voltage = translationWith120CCW(0, 0);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i, j - 2] as const, voltage: I3 };
@@ -504,8 +504,8 @@ function getP3Neighbor(
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
-        // Voltage: R * T(0, -L) = R * T2⁻¹
-        const voltage = translationWith120CCW(0, -L);
+        // Voltage: R² * T(0, -L) = R² * T2⁻¹ - rotate CW instead of CCW
+        const voltage = translationWith120CW(0, -L);
         return { coord: [newI, newJ] as const, voltage };
       }
       return { coord: [i - 2, j] as const, voltage: I3 };
