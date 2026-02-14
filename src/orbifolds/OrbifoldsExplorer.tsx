@@ -2,7 +2,7 @@
  * Orbifolds Explorer Page
  * 
  * Allows a user to:
- * - Select a wallpaper group (P1, P2, or P4)
+ * - Select a wallpaper group (P1, P2, P3, P4, P4g, or pgg)
  * - Set a size n (creating an n×n coloring grid)
  * - Set an expansion count m (how many times to expand the lifted graph)
  * - Color in the grid cells (black/white) using "color" tool
@@ -58,6 +58,7 @@ export function OrbifoldsExplorer() {
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const minSize = wallpaperGroup === "P4g" ? 4 : 2;
   
   // Ref for SVG export
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
@@ -68,6 +69,13 @@ export function OrbifoldsExplorer() {
     buildAdjacency(grid);
     return grid;
   });
+
+  const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
+    if (nextGroup === "P4g" && size < 4) {
+      setSize(4);
+    }
+    setWallpaperGroup(nextGroup);
+  };
 
   // Recreate grid when wallpaper group or size changes
   useEffect(() => {
@@ -230,7 +238,7 @@ export function OrbifoldsExplorer() {
           <label>Wallpaper Group:</label>
           <select
             value={wallpaperGroup}
-            onChange={(e) => setWallpaperGroup(e.target.value as WallpaperGroupType)}
+            onChange={(e) => handleWallpaperGroupChange(e.target.value as WallpaperGroupType)}
             style={{
               padding: "4px 8px",
               borderRadius: "4px",
@@ -242,6 +250,7 @@ export function OrbifoldsExplorer() {
             <option value="pgg">pgg (glide reflections)</option>
             <option value="P3">P3 (120° rotation - axial)</option>
             <option value="P4">P4 (90° rotation)</option>
+            <option value="P4g">P4g (90° rotation + diagonal flip)</option>
           </select>
         </div>
         
@@ -249,7 +258,7 @@ export function OrbifoldsExplorer() {
         <ValidatedInput
           value={size}
           onChange={setSize}
-          min={2}
+          min={minSize}
           max={10}
           label="Size (n)"
         />
@@ -585,6 +594,7 @@ export function OrbifoldsExplorer() {
           <li><strong>pgg:</strong> Includes glide reflections at boundaries (no pure rotations)</li>
           <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
           <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
+          <li><strong>P4g:</strong> Like P4, but folded across the NW-SE diagonal (requires n &ge; 4)</li>
         </ul>
         <p style={{ marginTop: "8px" }}>
           Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.

@@ -74,14 +74,16 @@ export function OrbifoldGridTools({
     const row = Math.floor(y / cellSize);
     
     if (row >= 0 && row < n && col >= 0 && col < n) {
+      const i = getOddCoord(col);
+      const j = getOddCoord(row);
+      const nodeId = nodeIdFromCoord([i, j]);
+      if (!grid.nodes.has(nodeId)) {
+        return;
+      }
       if (tool === "color") {
         onColorToggle(row, col);
       } else {
         // Inspect tool
-        const i = getOddCoord(col);
-        const j = getOddCoord(row);
-        const nodeId = nodeIdFromCoord([i, j]);
-        
         // Get edges for this node (adjacency is built during grid creation)
         const edgeIds = grid.adjacency?.get(nodeId) ?? [];
         const edges: EdgeInfo[] = [];
@@ -128,12 +130,13 @@ export function OrbifoldGridTools({
       {/* Grid cells */}
       {Array.from({ length: n }, (_, row) =>
         Array.from({ length: n }, (_, col) => {
-          const color = getNodeColor(grid, row, col);
           const x = GRID_PADDING + col * cellSize;
           const y = GRID_PADDING + row * cellSize;
           const i = getOddCoord(col);
           const j = getOddCoord(row);
           const nodeId = nodeIdFromCoord([i, j]);
+          const nodeExists = grid.nodes.has(nodeId);
+          const color = nodeExists ? getNodeColor(grid, row, col) : "white";
           const isInspected = nodeId === inspectedNodeId;
           
           return (
@@ -143,12 +146,12 @@ export function OrbifoldGridTools({
                 y={y}
                 width={cellSize}
                 height={cellSize}
-                fill={color === "black" ? "#2c3e50" : "white"}
-                stroke={isInspected ? "#3498db" : "#7f8c8d"}
+                fill={nodeExists ? (color === "black" ? "#2c3e50" : "white") : "#ecf0f1"}
+                stroke={nodeExists ? (isInspected ? "#3498db" : "#7f8c8d") : "#bdc3c7"}
                 strokeWidth={isInspected ? 3 : 1}
               />
               {/* Show coordinates when in inspect mode */}
-              {tool === "inspect" && (
+              {tool === "inspect" && nodeExists && (
                 <text
                   x={x + cellSize / 2}
                   y={y + cellSize / 2}
