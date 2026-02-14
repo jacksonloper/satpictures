@@ -229,6 +229,7 @@ export interface LiftedGraphEdge<D extends ExtraData = ExtraData> {
   id: LiftedEdgeId;
   a: LiftedNodeId;
   b: LiftedNodeId;
+  orbifoldEdgeId?: OrbifoldEdgeId;
   data?: D;
 }
 
@@ -308,6 +309,7 @@ export function addLiftedEdge<LED extends ExtraData>(
   g: LiftedGraph<any, any, any, LED>,
   a: LiftedNodeId,
   b: LiftedNodeId,
+  orbifoldEdgeId?: OrbifoldEdgeId,
   data?: LED
 ): LiftedEdgeId {
   if (a === b) {
@@ -316,7 +318,7 @@ export function addLiftedEdge<LED extends ExtraData>(
   }
   const id = liftedEdgeId(a, b);
   if (!g.edges.has(id)) {
-    g.edges.set(id, { id, a, b, data });
+    g.edges.set(id, { id, a, b, orbifoldEdgeId, data });
   }
   return id;
 }
@@ -360,7 +362,7 @@ export function augmentLiftedGraphUntilInterior(
       const WV = matMul(W, V);
 
       const nbId = getOrCreateLiftedNode(g, half.to, WV);
-      addLiftedEdge(g, lid, nbId);
+      addLiftedEdge(g, lid, nbId, eid);
     }
 
     // After expanding along all orbifold edges, mark as interior.

@@ -35,8 +35,14 @@ import {
 
 export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4";
 
+export type EdgeLinestyle = "solid" | "dashed";
+
 export interface ColorData extends ExtraData {
   color: "black" | "white";
+}
+
+export interface EdgeStyleData extends ExtraData {
+  linestyle: EdgeLinestyle;
 }
 
 /**
@@ -559,13 +565,13 @@ export function createOrbifoldGrid(
   groupType: WallpaperGroupType,
   n: Int,
   initialColors?: ("black" | "white")[][]
-): OrbifoldGrid<ColorData> {
+): OrbifoldGrid<ColorData, EdgeStyleData> {
   if (n < 2) {
     throw new Error("Grid size n must be at least 2");
   }
   
   const nodes = new Map<OrbifoldNodeId, OrbifoldNode<ColorData>>();
-  const edges = new Map<OrbifoldEdgeId, OrbifoldEdge>();
+  const edges = new Map<OrbifoldEdgeId, OrbifoldEdge<EdgeStyleData>>();
   
   // Create nodes with odd integer coordinates
   for (let row = 0; row < n; row++) {
@@ -636,6 +642,7 @@ export function createOrbifoldGrid(
           edges.set(edgeId, {
             id: edgeId,
             halfEdges,
+            data: { linestyle: "solid" },
           });
         } else {
           // Regular edge: two half-edges with inverse voltages
@@ -648,6 +655,7 @@ export function createOrbifoldGrid(
           edges.set(edgeId, {
             id: edgeId,
             halfEdges,
+            data: { linestyle: "solid" },
           });
         }
       }
@@ -690,6 +698,31 @@ export function getNodeColor(
   
   const node = grid.nodes.get(id);
   return node?.data?.color ?? "white";
+}
+
+/**
+ * Get the linestyle of an orbifold edge.
+ */
+export function getEdgeLinestyle(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+  edgeId: OrbifoldEdgeId
+): EdgeLinestyle {
+  const edge = grid.edges.get(edgeId);
+  return edge?.data?.linestyle ?? "solid";
+}
+
+/**
+ * Set the linestyle of an orbifold edge.
+ */
+export function setEdgeLinestyle(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+  edgeId: OrbifoldEdgeId,
+  linestyle: EdgeLinestyle
+): void {
+  const edge = grid.edges.get(edgeId);
+  if (edge) {
+    edge.data = { linestyle };
+  }
 }
 
 /**

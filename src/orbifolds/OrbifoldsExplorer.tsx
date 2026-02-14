@@ -15,8 +15,11 @@ import {
   createOrbifoldGrid,
   setNodeColor,
   getNodeColor,
+  getEdgeLinestyle,
   type WallpaperGroupType,
   type ColorData,
+  type EdgeStyleData,
+  type EdgeLinestyle,
 } from "./createOrbifolds";
 import {
   constructLiftedGraphFromOrbifold,
@@ -26,6 +29,7 @@ import {
   type LiftedGraph,
   type OrbifoldGrid,
   type OrbifoldNodeId,
+  type OrbifoldEdgeId,
   type Matrix3x3,
 } from "./orbifoldbasics";
 import "../App.css";
@@ -122,10 +126,11 @@ function ValidatedInput({
  * Edge info for inspection display.
  */
 interface EdgeInfo {
-  edgeId: string;
+  edgeId: OrbifoldEdgeId;
   targetNodeId: OrbifoldNodeId;
   targetCoord: readonly [number, number];
   voltage: Matrix3x3;
+  linestyle: EdgeLinestyle;
 }
 
 /**
@@ -160,7 +165,7 @@ function OrbifoldGridTools({
   inspectedNodeId,
 }: {
   n: number;
-  grid: OrbifoldGrid<ColorData>;
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>;
   tool: ToolType;
   onColorToggle: (row: number, col: number) => void;
   onInspect: (info: InspectionInfo | null) => void;
@@ -210,6 +215,7 @@ function OrbifoldGridTools({
             targetNodeId: halfEdge.to,
             targetCoord: targetNode.coord,
             voltage: halfEdge.voltage,
+            linestyle: getEdgeLinestyle(grid, edgeId),
           });
         }
         
@@ -340,8 +346,8 @@ function LiftedGraphRenderer({
   selectedVoltageKey,
   onNodeClick,
 }: {
-  liftedGraph: LiftedGraph<ColorData>;
-  orbifoldGrid: OrbifoldGrid<ColorData>;
+  liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
+  orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
   highlightOrbifoldNodeId?: OrbifoldNodeId | null;
   useAxialTransform?: boolean;
   fundamentalDomainSize: number;
@@ -489,6 +495,11 @@ function LiftedGraphRenderer({
         const posB = positions.get(edge.b);
         if (!posA || !posB) return null;
         
+        // Get linestyle from orbifold edge
+        const orbifoldEdge = edge.orbifoldEdgeId ? orbifoldGrid.edges.get(edge.orbifoldEdgeId) : undefined;
+        const linestyle = orbifoldEdge?.data?.linestyle ?? "solid";
+        const strokeDasharray = linestyle === "dashed" ? "4,3" : undefined;
+        
         return (
           <line
             key={edge.id}
@@ -498,6 +509,7 @@ function LiftedGraphRenderer({
             y2={toSvgY(posB.y)}
             stroke="#bdc3c7"
             strokeWidth={1}
+            strokeDasharray={strokeDasharray}
           />
         );
       })}
@@ -544,7 +556,7 @@ export function OrbifoldsExplorer() {
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
   
   // Initialize orbifold grid with adjacency built
-  const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData>>(() => {
+  const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
     const grid = createOrbifoldGrid(wallpaperGroup, size);
     buildAdjacency(grid);
     return grid;
@@ -563,7 +575,7 @@ export function OrbifoldsExplorer() {
   const handleColorToggle = useCallback((row: number, col: number) => {
     setOrbifoldGrid((prev) => {
       // Create a shallow copy of the grid
-      const newGrid: OrbifoldGrid<ColorData> = {
+      const newGrid: OrbifoldGrid<ColorData, EdgeStyleData> = {
         nodes: new Map(prev.nodes),
         edges: prev.edges,
         adjacency: prev.adjacency,
@@ -575,6 +587,49 @@ export function OrbifoldsExplorer() {
       setNodeColor(newGrid, row, col, newColor);
       
       return newGrid;
+    });
+  }, []);
+
+  // Handle edge linestyle toggle
+  // Helper function to toggle linestyle
+  const toggleLinestyle = (current: EdgeLinestyle): EdgeLinestyle => 
+    current === "solid" ? "dashed" : "solid";
+
+  const handleEdgeLinestyleToggle = useCallback((edgeId: OrbifoldEdgeId) => {
+    setOrbifoldGrid((prev) => {
+      // Create a shallow copy of the grid with edges also copied
+      const newEdges = new Map(prev.edges);
+      const edge = newEdges.get(edgeId);
+      if (edge) {
+        const currentLinestyle = edge.data?.linestyle ?? "solid";
+        const newLinestyle = toggleLinestyle(currentLinestyle);
+        newEdges.set(edgeId, { ...edge, data: { linestyle: newLinestyle } });
+      }
+      
+      const newGrid: OrbifoldGrid<ColorData, EdgeStyleData> = {
+        nodes: prev.nodes,
+        edges: newEdges,
+        adjacency: prev.adjacency,
+      };
+      
+      return newGrid;
+    });
+    
+    // Also update the inspection info to reflect the new linestyle
+    setInspectionInfo((prevInfo) => {
+      if (!prevInfo) return null;
+      return {
+        ...prevInfo,
+        edges: prevInfo.edges.map((e) => {
+          if (e.edgeId === edgeId) {
+            return {
+              ...e,
+              linestyle: toggleLinestyle(e.linestyle),
+            };
+          }
+          return e;
+        }),
+      };
     });
   }, []);
 
@@ -592,7 +647,7 @@ export function OrbifoldsExplorer() {
 
   // Build the lifted graph
   const liftedGraph = useMemo(() => {
-    const lifted = constructLiftedGraphFromOrbifold<ColorData>(orbifoldGrid);
+    const lifted = constructLiftedGraphFromOrbifold<ColorData, EdgeStyleData>(orbifoldGrid);
     
     // Expand the graph m times
     for (let i = 0; i < expansion; i++) {
@@ -769,6 +824,36 @@ export function OrbifoldsExplorer() {
                   >
                     <div><strong>Edge ID:</strong> <code style={{ backgroundColor: "#f0f0f0", padding: "1px 3px", fontSize: "11px" }}>{edge.edgeId}</code></div>
                     <div><strong>→ Target:</strong> {edge.targetNodeId} ({edge.targetCoord[0]},{edge.targetCoord[1]})</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                      <strong>Linestyle:</strong>
+                      <button
+                        onClick={() => handleEdgeLinestyleToggle(edge.edgeId)}
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: "11px",
+                          borderRadius: "4px",
+                          border: "1px solid #3498db",
+                          backgroundColor: edge.linestyle === "dashed" ? "#ebf5fb" : "white",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <svg width="24" height="8" style={{ verticalAlign: "middle" }}>
+                          <line
+                            x1="2"
+                            y1="4"
+                            x2="22"
+                            y2="4"
+                            stroke="#3498db"
+                            strokeWidth="2"
+                            strokeDasharray={edge.linestyle === "dashed" ? "4,3" : undefined}
+                          />
+                        </svg>
+                        {edge.linestyle}
+                      </button>
+                    </div>
                     <div><strong>Voltage:</strong></div>
                     {formatVoltageRows(edge.voltage).map((row, rowIdx) => (
                       <div key={rowIdx} style={{ marginLeft: "10px" }}>{row}</div>
