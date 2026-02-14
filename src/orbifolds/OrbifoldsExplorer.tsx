@@ -10,7 +10,7 @@
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, Component, type ReactNode } from "react";
 import {
   createOrbifoldGrid,
   setNodeColor,
@@ -32,9 +32,72 @@ import {
   type OrbifoldEdgeId,
   type Matrix3x3,
 } from "./orbifoldbasics";
+import { Graph, kruskalMST } from "@graphty/algorithms";
 import "../App.css";
 
 type ToolType = "color" | "inspect";
+
+/**
+ * Error Boundary component to catch React errors and prevent white screen of death.
+ */
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    console.error("Error caught by boundary:", error, errorInfo);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: "40px",
+          textAlign: "center",
+          backgroundColor: "#fee",
+          borderRadius: "8px",
+          margin: "20px",
+        }}>
+          <h2 style={{ color: "#c0392b" }}>⚠️ Something went wrong</h2>
+          <p style={{ color: "#666", marginBottom: "20px" }}>
+            {this.state.error?.message || "An unexpected error occurred"}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#3498db",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // Constants
 const DEFAULT_SIZE = 3;
@@ -42,6 +105,129 @@ const DEFAULT_EXPANSION = 2;
 const CELL_SIZE = 40;
 const LIFTED_CELL_SIZE = 16;
 const GRID_PADDING = 20;
+
+/**
+ * Constructs a random spanning tree of the white orbifold nodes using Kruskal's algorithm
+ * with random weights. Sets edges in the tree as solid and edges not in the tree as dashed.
+ * 
+ * @param grid - The orbifold grid to modify (edges will be updated in place)
+ * @returns A new grid with updated edge linestyles
+ */
+function applyRandomSpanningTreeToWhiteNodes(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>
+): OrbifoldGrid<ColorData, EdgeStyleData> {
+  // Get all white nodes
+  const whiteNodeIds = new Set<OrbifoldNodeId>();
+  for (const [nodeId, node] of grid.nodes) {
+    if (node.data?.color === "white") {
+      whiteNodeIds.add(nodeId);
+    }
+  }
+
+  // If we have 0 or 1 white nodes, nothing to do
+  if (whiteNodeIds.size < 2) {
+    // Just set all edges to dashed (no spanning tree possible)
+    const newEdges = new Map(grid.edges);
+    for (const [edgeId, edge] of newEdges) {
+      newEdges.set(edgeId, { ...edge, data: { linestyle: "dashed" } });
+    }
+    return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
+  }
+
+  // Find edges that connect two white nodes
+  const edgesBetweenWhiteNodes: OrbifoldEdgeId[] = [];
+  for (const [edgeId, edge] of grid.edges) {
+    // Get the two endpoint node IDs from the half-edges
+    const endpoints = Array.from(edge.halfEdges.keys());
+    const bothEndpointsWhite = endpoints.every(nodeId => whiteNodeIds.has(nodeId));
+    
+    if (bothEndpointsWhite) {
+      edgesBetweenWhiteNodes.push(edgeId);
+    }
+  }
+
+  // Build a graph for Kruskal's algorithm using @graphty/algorithms
+  const kruskalGraph = new Graph({ directed: false });
+  
+  // Add white nodes
+  for (const nodeId of whiteNodeIds) {
+    kruskalGraph.addNode(nodeId);
+  }
+  
+  // Track edges we've already added to avoid duplicates (parallel edges)
+  const addedEdgePairs = new Set<string>();
+  
+  // Add edges with random weights
+  const edgeToGraphEdge = new Map<OrbifoldEdgeId, { source: string; target: string }>();
+  for (const edgeId of edgesBetweenWhiteNodes) {
+    const edge = grid.edges.get(edgeId)!;
+    const endpoints = Array.from(edge.halfEdges.keys());
+    const [source, target] = endpoints.length === 1 
+      ? [endpoints[0], endpoints[0]]  // Self-loop
+      : endpoints;
+    
+    // Skip self-loops - they can't be part of a spanning tree
+    if (source === target) {
+      continue;
+    }
+    
+    // Skip parallel edges - the graph library doesn't allow them
+    const edgePairKey = source < target ? `${source}-${target}` : `${target}-${source}`;
+    if (addedEdgePairs.has(edgePairKey)) {
+      // Still track this edge for linestyle updates, but don't add to Kruskal graph
+      edgeToGraphEdge.set(edgeId, { source, target });
+      continue;
+    }
+    addedEdgePairs.add(edgePairKey);
+    
+    const randomWeight = Math.random();
+    kruskalGraph.addEdge(source, target, randomWeight);
+    edgeToGraphEdge.set(edgeId, { source, target });
+  }
+
+  // Run Kruskal's algorithm to get the minimum spanning tree (with random weights = random tree)
+  let spanningTreeEdgeSet: Set<string>;
+  try {
+    const mstResult = kruskalMST(kruskalGraph);
+    // Create a set of edges in the spanning tree (as "source-target" strings, sorted)
+    spanningTreeEdgeSet = new Set(
+      mstResult.edges.map(e => {
+        const s = String(e.source);
+        const t = String(e.target);
+        return s < t ? `${s}-${t}` : `${t}-${s}`;
+      })
+    );
+  } catch {
+    // Graph is not connected - just set all edges to dashed
+    const newEdges = new Map(grid.edges);
+    for (const [edgeId, edge] of newEdges) {
+      newEdges.set(edgeId, { ...edge, data: { linestyle: "dashed" } });
+    }
+    return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
+  }
+
+  // Update edge linestyles: solid if in spanning tree, dashed otherwise
+  const newEdges = new Map(grid.edges);
+  for (const [edgeId, edge] of newEdges) {
+    const endpoints = Array.from(edge.halfEdges.keys());
+    const bothEndpointsWhite = endpoints.every(nodeId => whiteNodeIds.has(nodeId));
+    
+    let linestyle: EdgeLinestyle;
+    if (bothEndpointsWhite && endpoints.length === 2) {
+      // Check if this edge is in the spanning tree
+      const [source, target] = endpoints;
+      const edgeKey = source < target ? `${source}-${target}` : `${target}-${source}`;
+      linestyle = spanningTreeEdgeSet.has(edgeKey) ? "solid" : "dashed";
+    } else {
+      // Edge doesn't connect two different white nodes - set to dashed
+      linestyle = "dashed";
+    }
+    
+    newEdges.set(edgeId, { ...edge, data: { linestyle } });
+  }
+
+  return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
+}
 
 /**
  * ValidatedInput component for number inputs.
@@ -345,6 +531,8 @@ function LiftedGraphRenderer({
   fundamentalDomainSize,
   selectedVoltageKey,
   onNodeClick,
+  showDomains = true,
+  showDashedLines = true,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -353,6 +541,8 @@ function LiftedGraphRenderer({
   fundamentalDomainSize: number;
   selectedVoltageKey: string | null;
   onNodeClick: (liftedNodeId: string, voltageKey: string) => void;
+  showDomains?: boolean;
+  showDashedLines?: boolean;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
@@ -472,7 +662,7 @@ function LiftedGraphRenderer({
       style={{ border: "1px solid #ccc", borderRadius: "4px", backgroundColor: "#f8f9fa" }}
     >
       {/* Transformed fundamental domains (drawn first, behind everything) */}
-      {transformedDomains.map((domain) => {
+      {showDomains && transformedDomains.map((domain) => {
         const isSelected = domain.key === selectedVoltageKey;
         const points = domain.corners
           .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
@@ -498,7 +688,14 @@ function LiftedGraphRenderer({
         // Get linestyle from orbifold edge
         const orbifoldEdge = edge.orbifoldEdgeId ? orbifoldGrid.edges.get(edge.orbifoldEdgeId) : undefined;
         const linestyle = orbifoldEdge?.data?.linestyle ?? "solid";
-        const strokeDasharray = linestyle === "dashed" ? "4,3" : undefined;
+        
+        // Hide dashed lines if showDashedLines is false
+        if (linestyle === "dashed" && !showDashedLines) {
+          return null;
+        }
+        
+        // Solid lines: thick black paths; Dashed lines: thin gray dashed
+        const isSolid = linestyle === "solid";
         
         return (
           <line
@@ -507,9 +704,10 @@ function LiftedGraphRenderer({
             y1={toSvgY(posA.y)}
             x2={toSvgX(posB.x)}
             y2={toSvgY(posB.y)}
-            stroke="#bdc3c7"
-            strokeWidth={1}
-            strokeDasharray={strokeDasharray}
+            stroke={isSolid ? "#000000" : "#bdc3c7"}
+            strokeWidth={isSolid ? 3 : 1}
+            strokeDasharray={isSolid ? undefined : "4,3"}
+            strokeLinecap={isSolid ? "round" : undefined}
           />
         );
       })}
@@ -554,6 +752,9 @@ export function OrbifoldsExplorer() {
   const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
   const [useAxialTransform, setUseAxialTransform] = useState(false);
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
+  const [showDomains, setShowDomains] = useState(true);
+  const [showDashedLines, setShowDashedLines] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -636,6 +837,23 @@ export function OrbifoldsExplorer() {
   // Handle inspection
   const handleInspect = useCallback((info: InspectionInfo | null) => {
     setInspectionInfo(info);
+  }, []);
+
+  // Handle random spanning tree button click
+  const handleRandomSpanningTree = useCallback(() => {
+    try {
+      setErrorMessage(null); // Clear any previous error
+      setOrbifoldGrid((prev) => {
+        const newGrid = applyRandomSpanningTreeToWhiteNodes(prev);
+        return newGrid;
+      });
+      // Clear inspection info since edge linestyles have changed
+      setInspectionInfo(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "An unexpected error occurred";
+      setErrorMessage(`Random tree generation failed: ${message}`);
+      console.error("Random spanning tree error:", error);
+    }
   }, []);
 
   // Handle lifted node click (for domain highlighting)
@@ -723,6 +941,35 @@ export function OrbifoldsExplorer() {
         )}
       </div>
       
+      {/* Error message display */}
+      {errorMessage && (
+        <div style={{
+          padding: "12px 16px",
+          marginBottom: "20px",
+          backgroundColor: "#fee",
+          border: "1px solid #e74c3c",
+          borderRadius: "8px",
+          color: "#c0392b",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}>
+          <span>⚠️ {errorMessage}</span>
+          <button
+            onClick={() => setErrorMessage(null)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "16px",
+              color: "#c0392b",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      
       {/* Main content area */}
       <div style={{ display: "flex", gap: "40px", flexWrap: "wrap" }}>
         {/* Orbifold Grid Section */}
@@ -760,6 +1007,19 @@ export function OrbifoldsExplorer() {
               }}
             >
               🔍 Inspect
+            </button>
+            <button
+              onClick={handleRandomSpanningTree}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: "1px solid #27ae60",
+                backgroundColor: "#e8f6ef",
+                cursor: "pointer",
+              }}
+              title="Generate a random spanning tree of white nodes (solid = in tree, dashed = not in tree)"
+            >
+              🌲 Random Tree
             </button>
           </div>
           
@@ -876,6 +1136,32 @@ export function OrbifoldsExplorer() {
               </span>
             )}
           </p>
+          
+          {/* Display options */}
+          <div style={{ 
+            display: "flex", 
+            gap: "16px", 
+            marginBottom: "10px",
+            fontSize: "12px",
+          }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showDomains}
+                onChange={(e) => setShowDomains(e.target.checked)}
+              />
+              Show domains
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showDashedLines}
+                onChange={(e) => setShowDashedLines(e.target.checked)}
+              />
+              Show dashed lines
+            </label>
+          </div>
+          
           <LiftedGraphRenderer
             liftedGraph={liftedGraph}
             orbifoldGrid={orbifoldGrid}
@@ -884,6 +1170,8 @@ export function OrbifoldsExplorer() {
             fundamentalDomainSize={size}
             selectedVoltageKey={selectedVoltageKey}
             onNodeClick={handleLiftedNodeClick}
+            showDomains={showDomains}
+            showDashedLines={showDashedLines}
           />
           
           {/* Legend */}
@@ -942,4 +1230,15 @@ export function OrbifoldsExplorer() {
   );
 }
 
-export default OrbifoldsExplorer;
+/**
+ * Wrapped OrbifoldsExplorer with Error Boundary for graceful error handling.
+ */
+function OrbifoldsExplorerWithErrorBoundary() {
+  return (
+    <ErrorBoundary>
+      <OrbifoldsExplorer />
+    </ErrorBoundary>
+  );
+}
+
+export default OrbifoldsExplorerWithErrorBoundary;
