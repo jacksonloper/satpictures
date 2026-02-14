@@ -38,9 +38,10 @@ function getP4gNeighbor(
 ): NeighborResult {
   const maxOdd = 2 * n - 1;
   const fromId = nodeIdFromCoord([i, j]);
-  const isFirstSuperDiagonal = i === j + 2;
+  const isOnFirstSuperdiagonal = i === j + 2;
+  // With odd coordinates (2*col+1, 2*row+1), row = col - 1 maps to i = j + 2.
 
-  if (isFirstSuperDiagonal && (dir === "S" || dir === "W")) {
+  if (isOnFirstSuperdiagonal && (dir === "S" || dir === "W")) {
     if (dir === "W") {
       return null;
     }
@@ -94,6 +95,13 @@ function getP4gNeighbor(
   }
 }
 
+/**
+ * Create a P4g orbifold grid.
+ *
+ * P4g is P4 folded across the NW-SE diagonal; only nodes strictly above the
+ * diagonal are kept. The first superdiagonal receives a diagonal reflection
+ * self-loop to mirror across the excluded half. Requires n >= 4.
+ */
 export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
   if (n < 4) {
     throw new Error("P4g grid size n must be at least 4");

@@ -594,7 +594,7 @@ export function OrbifoldsExplorer() {
           <li><strong>pgg:</strong> Includes glide reflections at boundaries (no pure rotations)</li>
           <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
           <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
-          <li><strong>P4g:</strong> Like P4, but folded across the NW-SE diagonal (requires n ≥ 4)</li>
+          <li><strong>P4g:</strong> Like P4, but folded across the NW-SE diagonal (requires n &ge; 4)</li>
         </ul>
         <p style={{ marginTop: "8px" }}>
           Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
