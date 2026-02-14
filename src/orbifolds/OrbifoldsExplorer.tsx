@@ -639,7 +639,7 @@ export function OrbifoldsExplorer() {
         <ValidatedInput
           value={size}
           onChange={setSize}
-          min={1}
+          min={2}
           max={10}
           label="Size (n)"
         />
