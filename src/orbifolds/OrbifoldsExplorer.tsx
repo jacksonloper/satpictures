@@ -790,7 +790,7 @@ export function OrbifoldsExplorer() {
           <p style={{ fontSize: "13px", color: "#c0392b", marginBottom: "8px" }}>⚠️ {graphLiftError}</p>
         )}
 
-        {/* Result (totally disconnected from rest of page state) */}
+        {/* Result (persists independently; only replaced by a new solve) */}
         {graphLiftResult && (
           <div style={{
             marginTop: "12px",
