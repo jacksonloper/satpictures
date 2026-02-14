@@ -303,7 +303,7 @@ export function OrbifoldsExplorer() {
 
   return (
     <div className="orbifolds-explorer" style={{ padding: "20px" }}>
-      <h1 style={{ marginBottom: "20px" }}>�� Orbifolds Explorer</h1>
+      <h1 style={{ marginBottom: "20px" }}>🔮 Orbifolds Explorer</h1>
       
       {/* Controls */}
       <div style={{ 
