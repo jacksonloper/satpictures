@@ -457,6 +457,8 @@ function LiftedGraphRenderer({
   fundamentalDomainSize,
   selectedVoltageKey,
   onNodeClick,
+  showDomains = true,
+  showDashedLines = true,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -465,6 +467,8 @@ function LiftedGraphRenderer({
   fundamentalDomainSize: number;
   selectedVoltageKey: string | null;
   onNodeClick: (liftedNodeId: string, voltageKey: string) => void;
+  showDomains?: boolean;
+  showDashedLines?: boolean;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
@@ -584,7 +588,7 @@ function LiftedGraphRenderer({
       style={{ border: "1px solid #ccc", borderRadius: "4px", backgroundColor: "#f8f9fa" }}
     >
       {/* Transformed fundamental domains (drawn first, behind everything) */}
-      {transformedDomains.map((domain) => {
+      {showDomains && transformedDomains.map((domain) => {
         const isSelected = domain.key === selectedVoltageKey;
         const points = domain.corners
           .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
@@ -610,7 +614,14 @@ function LiftedGraphRenderer({
         // Get linestyle from orbifold edge
         const orbifoldEdge = edge.orbifoldEdgeId ? orbifoldGrid.edges.get(edge.orbifoldEdgeId) : undefined;
         const linestyle = orbifoldEdge?.data?.linestyle ?? "solid";
-        const strokeDasharray = linestyle === "dashed" ? "4,3" : undefined;
+        
+        // Hide dashed lines if showDashedLines is false
+        if (linestyle === "dashed" && !showDashedLines) {
+          return null;
+        }
+        
+        // Solid lines: thick black paths; Dashed lines: thin gray dashed
+        const isSolid = linestyle === "solid";
         
         return (
           <line
@@ -619,9 +630,10 @@ function LiftedGraphRenderer({
             y1={toSvgY(posA.y)}
             x2={toSvgX(posB.x)}
             y2={toSvgY(posB.y)}
-            stroke="#bdc3c7"
-            strokeWidth={1}
-            strokeDasharray={strokeDasharray}
+            stroke={isSolid ? "#000000" : "#bdc3c7"}
+            strokeWidth={isSolid ? 3 : 1}
+            strokeDasharray={isSolid ? undefined : "4,3"}
+            strokeLinecap={isSolid ? "round" : undefined}
           />
         );
       })}
@@ -666,6 +678,8 @@ export function OrbifoldsExplorer() {
   const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
   const [useAxialTransform, setUseAxialTransform] = useState(false);
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
+  const [showDomains, setShowDomains] = useState(true);
+  const [showDashedLines, setShowDashedLines] = useState(true);
   
   // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -1011,6 +1025,32 @@ export function OrbifoldsExplorer() {
               </span>
             )}
           </p>
+          
+          {/* Display options */}
+          <div style={{ 
+            display: "flex", 
+            gap: "16px", 
+            marginBottom: "10px",
+            fontSize: "12px",
+          }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showDomains}
+                onChange={(e) => setShowDomains(e.target.checked)}
+              />
+              Show domains
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showDashedLines}
+                onChange={(e) => setShowDashedLines(e.target.checked)}
+              />
+              Show dashed lines
+            </label>
+          </div>
+          
           <LiftedGraphRenderer
             liftedGraph={liftedGraph}
             orbifoldGrid={orbifoldGrid}
@@ -1019,6 +1059,8 @@ export function OrbifoldsExplorer() {
             fundamentalDomainSize={size}
             selectedVoltageKey={selectedVoltageKey}
             onNodeClick={handleLiftedNodeClick}
+            showDomains={showDomains}
+            showDashedLines={showDashedLines}
           />
           
           {/* Legend */}
