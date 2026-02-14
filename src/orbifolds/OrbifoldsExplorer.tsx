@@ -122,6 +122,7 @@ function ValidatedInput({
  * Edge info for inspection display.
  */
 interface EdgeInfo {
+  edgeId: string;
   targetNodeId: OrbifoldNodeId;
   targetCoord: readonly [number, number];
   voltage: Matrix3x3;
@@ -205,6 +206,7 @@ function OrbifoldGridTools({
           if (!targetNode) continue;
           
           edges.push({
+            edgeId,
             targetNodeId: halfEdge.to,
             targetCoord: targetNode.coord,
             voltage: halfEdge.voltage,
@@ -765,6 +767,7 @@ export function OrbifoldsExplorer() {
                       borderRadius: "4px",
                     }}
                   >
+                    <div><strong>Edge ID:</strong> <code style={{ backgroundColor: "#f0f0f0", padding: "1px 3px", fontSize: "11px" }}>{edge.edgeId}</code></div>
                     <div><strong>→ Target:</strong> {edge.targetNodeId} ({edge.targetCoord[0]},{edge.targetCoord[1]})</div>
                     <div><strong>Voltage:</strong></div>
                     {formatVoltageRows(edge.voltage).map((row, rowIdx) => (
