@@ -20,7 +20,6 @@ import {
   rootOfUnityOrder,
 } from "../orbifoldbasics";
 import {
-  getNodeColor,
   type ColorData,
   type EdgeStyleData,
 } from "../createOrbifolds";
@@ -99,6 +98,7 @@ export function LoopResultRenderer({
   rootNodeId,
   onAccept,
   onReject,
+  wallpaperGroup,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -107,9 +107,12 @@ export function LoopResultRenderer({
   rootNodeId: OrbifoldNodeId;
   onAccept: (selectedEdgeIds: string[]) => void;
   onReject: () => void;
+  wallpaperGroup?: string;
 }) {
   const cellSize = CELL_SIZE;
-  const width = n * cellSize + 2 * GRID_PADDING;
+  const isP4g = wallpaperGroup === "P4g";
+  const gridCols = isP4g ? n + 1 : n;
+  const width = gridCols * cellSize + 2 * GRID_PADDING;
   const height = n * cellSize + 2 * GRID_PADDING;
 
   const getOddCoord = (index: number): number => 2 * index + 1;
@@ -172,53 +175,97 @@ export function LoopResultRenderer({
         height={height}
         style={{ border: "1px solid #27ae60", borderRadius: "4px", marginBottom: "8px" }}
       >
-        {Array.from({ length: n }, (_, row) =>
-          Array.from({ length: n }, (_, col) => {
-            const x = GRID_PADDING + col * cellSize;
-            const y = GRID_PADDING + row * cellSize;
-            const i = getOddCoord(col);
-            const j = getOddCoord(row);
-            const nodeId = nodeIdFromCoord([i, j]);
-            const nodeExists = grid.nodes.has(nodeId);
-            const color = nodeExists ? getNodeColor(grid, row, col) : "white";
-            const stepIndex = nodeStep.get(nodeId);
-            const isInPath = stepIndex !== undefined;
-            const isRoot = nodeId === rootNodeId;
+        {isP4g
+          ? Array.from({ length: n }, (_, row) =>
+              Array.from({ length: n + 1 }, (_, col) => {
+                const x = GRID_PADDING + col * cellSize;
+                const y = GRID_PADDING + row * cellSize;
+                let nodeId: string;
+                let nodeExists: boolean;
 
-            return (
-              <g key={`${row}-${col}`}>
-                <rect
-                  x={x}
-                  y={y}
-                  width={cellSize}
-                  height={cellSize}
-                  fill={
-                    !nodeExists ? "#ecf0f1" :
-                    isInPath ? (isRoot ? "#f39c12" : "#27ae60") :
-                    (color === "black" ? "#2c3e50" : "white")
-                  }
-                  stroke={isInPath ? "#1a7a1a" : "#7f8c8d"}
-                  strokeWidth={isInPath ? 2 : 1}
-                />
-                {/* Step number */}
-                {isInPath && nodeExists && (
-                  <text
-                    x={x + cellSize / 2}
-                    y={y + cellSize / 2}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={14}
-                    fontWeight="bold"
-                    fill="white"
-                    style={{ pointerEvents: "none" }}
-                  >
-                    {stepIndex}
-                  </text>
-                )}
-              </g>
-            );
-          })
-        )}
+                if (col === 0) {
+                  const diagI = 4 * row + 3;
+                  const diagJ = 4 * row + 1;
+                  nodeId = nodeIdFromCoord([diagI, diagJ]);
+                  nodeExists = grid.nodes.has(nodeId);
+                } else {
+                  const gridCol = col;
+                  const gridI = 4 * gridCol + 2;
+                  const gridJ = 4 * row + 2;
+                  nodeId = nodeIdFromCoord([gridI, gridJ]);
+                  nodeExists = grid.nodes.has(nodeId);
+                }
+
+                const color = nodeExists ? (grid.nodes.get(nodeId)?.data?.color ?? "white") : "white";
+                const stepIndex = nodeStep.get(nodeId);
+                const isInPath = stepIndex !== undefined;
+                const isRoot = nodeId === rootNodeId;
+
+                return (
+                  <g key={`${row}-${col}`}>
+                    <rect
+                      x={x} y={y} width={cellSize} height={cellSize}
+                      fill={
+                        !nodeExists ? "#ecf0f1" :
+                        isInPath ? (isRoot ? "#f39c12" : "#27ae60") :
+                        (color === "black" ? "#2c3e50" : "white")
+                      }
+                      stroke={isInPath ? "#1a7a1a" : "#7f8c8d"}
+                      strokeWidth={isInPath ? 2 : 1}
+                    />
+                    {isInPath && nodeExists && (
+                      <text
+                        x={x + cellSize / 2} y={y + cellSize / 2}
+                        textAnchor="middle" dominantBaseline="middle"
+                        fontSize={14} fontWeight="bold" fill="white"
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {stepIndex}
+                      </text>
+                    )}
+                  </g>
+                );
+              })
+            )
+          : Array.from({ length: n }, (_, row) =>
+              Array.from({ length: n }, (_, col) => {
+                const x = GRID_PADDING + col * cellSize;
+                const y = GRID_PADDING + row * cellSize;
+                const i = getOddCoord(col);
+                const j = getOddCoord(row);
+                const nodeId = nodeIdFromCoord([i, j]);
+                const nodeExists = grid.nodes.has(nodeId);
+                const color = nodeExists ? (grid.nodes.get(nodeId)?.data?.color ?? "white") : "white";
+                const stepIndex = nodeStep.get(nodeId);
+                const isInPath = stepIndex !== undefined;
+                const isRoot = nodeId === rootNodeId;
+
+                return (
+                  <g key={`${row}-${col}`}>
+                    <rect
+                      x={x} y={y} width={cellSize} height={cellSize}
+                      fill={
+                        !nodeExists ? "#ecf0f1" :
+                        isInPath ? (isRoot ? "#f39c12" : "#27ae60") :
+                        (color === "black" ? "#2c3e50" : "white")
+                      }
+                      stroke={isInPath ? "#1a7a1a" : "#7f8c8d"}
+                      strokeWidth={isInPath ? 2 : 1}
+                    />
+                    {isInPath && nodeExists && (
+                      <text
+                        x={x + cellSize / 2} y={y + cellSize / 2}
+                        textAnchor="middle" dominantBaseline="middle"
+                        fontSize={14} fontWeight="bold" fill="white"
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {stepIndex}
+                      </text>
+                    )}
+                  </g>
+                );
+              })
+            )}
       </svg>
 
       {/* Multi-edge choice selectors */}
