@@ -33,7 +33,7 @@ function getP2Neighbor(
         const voltage = translationWith180(2 * n, 0);
         const toId = nodeIdFromCoord([reflectedI, 1]);
         const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-        return { coord: [reflectedI, 1] as const, voltage, edgeKey };
+        return { coord: [reflectedI, 1] as const, voltage, edgeKey, targetSide: 0 };
       }
       const toId = nodeIdFromCoord([i, j - 2]);
       const edgeKey = [fromId, toId].sort().join("|") + "|NS";
@@ -46,7 +46,7 @@ function getP2Neighbor(
         const voltage = translationWith180(2 * n, 4 * n);
         const toId = nodeIdFromCoord([reflectedI, maxOdd]);
         const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-        return { coord: [reflectedI, maxOdd] as const, voltage, edgeKey };
+        return { coord: [reflectedI, maxOdd] as const, voltage, edgeKey, targetSide: 2 };
       }
       const toId = nodeIdFromCoord([i, j + 2]);
       const edgeKey = [fromId, toId].sort().join("|") + "|NS";
@@ -59,7 +59,7 @@ function getP2Neighbor(
         const voltage = translationWith180(4 * n, 2 * n);
         const toId = nodeIdFromCoord([maxOdd, reflectedJ]);
         const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-        return { coord: [maxOdd, reflectedJ] as const, voltage, edgeKey };
+        return { coord: [maxOdd, reflectedJ] as const, voltage, edgeKey, targetSide: 1 };
       }
       const toId = nodeIdFromCoord([i + 2, j]);
       const edgeKey = [fromId, toId].sort().join("|") + "|EW";
@@ -72,7 +72,7 @@ function getP2Neighbor(
         const voltage = translationWith180(0, 2 * n);
         const toId = nodeIdFromCoord([1, reflectedJ]);
         const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-        return { coord: [1, reflectedJ] as const, voltage, edgeKey };
+        return { coord: [1, reflectedJ] as const, voltage, edgeKey, targetSide: 3 };
       }
       const toId = nodeIdFromCoord([i - 2, j]);
       const edgeKey = [fromId, toId].sort().join("|") + "|EW";

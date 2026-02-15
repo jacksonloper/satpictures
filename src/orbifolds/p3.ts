@@ -45,7 +45,7 @@ function getP3Neighbor(
         const edgeKey = (i === 1 && newI === maxOdd && newJ === maxOdd)
           ? [fromId, toId].sort().join("|") + "|NE"
           : [fromId, toId].sort().join("|");
-        return { coord: [newI, newJ] as const, voltage, edgeKey };
+        return { coord: [newI, newJ] as const, voltage, edgeKey, targetSide: 1 };
       }
       const toId = nodeIdFromCoord([i, j - 2]);
       const edgeKey = [fromId, toId].sort().join("|");
@@ -81,7 +81,7 @@ function getP3Neighbor(
         const edgeKey = (j === 1 && newI === maxOdd && newJ === maxOdd)
           ? [fromId, toId].sort().join("|") + "|SW"
           : [fromId, toId].sort().join("|");
-        return { coord: [newI, newJ] as const, voltage, edgeKey };
+        return { coord: [newI, newJ] as const, voltage, edgeKey, targetSide: 2 };
       }
       const toId = nodeIdFromCoord([i - 2, j]);
       const edgeKey = [fromId, toId].sort().join("|");
