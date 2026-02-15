@@ -1,5 +1,5 @@
 /**
- * Test for P4g orbifold structure.
+ * Test for P4g orbifold structure (doubled-scale version).
  *
  * Run with: npx tsx src/orbifolds/p4g-edge-distance.test.ts
  */
@@ -24,32 +24,56 @@ function testP4gStructure(n: number): { passed: boolean; failures: string[] } {
   buildAdjacency(grid);
 
   const failures: string[] = [];
-  const expectedNodeCount = (n * (n - 1)) / 2;
+
+  // Total nodes: n*(n-1)/2 regular + n diagonal = n*(n+1)/2
+  const expectedNodeCount = (n * (n + 1)) / 2;
   if (grid.nodes.size !== expectedNodeCount) {
     failures.push(`Expected ${expectedNodeCount} nodes, got ${grid.nodes.size}`);
   }
 
-  const expectedSelfLoopNodes = new Set<string>();
-  for (let row = 0; row < n - 1; row++) {
-    const col = row + 1;
-    const i = 2 * col + 1;
-    const j = 2 * row + 1;
-    expectedSelfLoopNodes.add(nodeIdFromCoord([i, j]));
-  }
-
+  // Check that regular nodes (row < col) exist at doubled coordinates
   for (let row = 0; row < n; row++) {
-    for (let col = 0; col < n; col++) {
-      const i = 2 * col + 1;
-      const j = 2 * row + 1;
+    for (let col = row + 1; col < n; col++) {
+      const i = 4 * col + 2;
+      const j = 4 * row + 2;
       const nodeId = nodeIdFromCoord([i, j]);
-      const exists = grid.nodes.has(nodeId);
-
-      if (row >= col && exists) {
-        failures.push(`Node ${nodeId} should not exist (on/below diagonal)`);
+      if (!grid.nodes.has(nodeId)) {
+        failures.push(`Regular node (row=${row}, col=${col}) at (${i},${j}) missing`);
       }
     }
   }
 
+  // Check that diagonal nodes (k=0..n-1) exist at (4*k+3, k+1)
+  const expectedSelfLoopNodes = new Set<string>();
+  for (let k = 0; k < n; k++) {
+    const i = 4 * k + 3;
+    const j = k + 1;
+    const nodeId = nodeIdFromCoord([i, j]);
+    if (!grid.nodes.has(nodeId)) {
+      failures.push(`Diagonal node k=${k} at (${i},${j}) missing`);
+    }
+    expectedSelfLoopNodes.add(nodeId);
+  }
+
+  // Check that first-superdiagonal nodes do NOT have self-loops
+  for (let row = 0; row < n - 1; row++) {
+    const col = row + 1;
+    const i = 4 * col + 2;
+    const j = 4 * row + 2;
+    const nodeId = nodeIdFromCoord([i, j]);
+    const edgeIds = grid.adjacency?.get(nodeId) ?? [];
+    const selfLoops = edgeIds.filter((edgeId) => {
+      const edge = grid.edges.get(edgeId);
+      return edge && edge.halfEdges.size === 1 && edge.halfEdges.has(nodeId);
+    });
+    if (selfLoops.length > 0) {
+      failures.push(
+        `First-superdiagonal node ${nodeId} at (${i},${j}) should NOT have self-loops, got ${selfLoops.length}`
+      );
+    }
+  }
+
+  // Check that diagonal nodes have exactly one diagonal reflection self-loop
   for (const nodeId of expectedSelfLoopNodes) {
     const edgeIds = grid.adjacency?.get(nodeId) ?? [];
     const matchingEdges = edgeIds.filter((edgeId) => {
@@ -62,14 +86,14 @@ function testP4gStructure(n: number): { passed: boolean; failures: string[] } {
     });
 
     if (matchingEdges.length !== 1) {
-      failures.push(`Node ${nodeId} should have one diagonal reflection self-loop`);
+      failures.push(`Diagonal node ${nodeId} should have one diagonal reflection self-loop, got ${matchingEdges.length}`);
     }
   }
 
   return { passed: failures.length === 0, failures };
 }
 
-console.log("=== P4g Orbifold Structure Test ===");
+console.log("=== P4g Orbifold Structure Test (doubled scale) ===");
 const result = testP4gStructure(4);
 
 if (result.failures.length > 0) {

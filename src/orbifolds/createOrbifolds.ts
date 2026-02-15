@@ -39,6 +39,8 @@ export function createOrbifoldGrid(
   }
 }
 
+export { p4gCoord } from "./p4g";
+
 export {
   coordToGridPos,
   getEdgeLinestyle,

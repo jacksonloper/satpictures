@@ -9,11 +9,12 @@ import {
   nodeIdFromCoord,
 } from "../orbifoldbasics";
 import {
-  getNodeColor,
   getEdgeLinestyle,
+  p4gCoord,
   type ColorData,
   type EdgeStyleData,
   type EdgeLinestyle,
+  type WallpaperGroupType,
 } from "../createOrbifolds";
 
 // Constants
@@ -42,10 +43,28 @@ export interface InspectionInfo {
   edges: EdgeInfo[];
 }
 
+/**
+ * Get the node coordinate for a given (row, col) cell, taking the
+ * wallpaper group into account.  Returns null when the cell has no node.
+ */
+function cellCoord(
+  row: number,
+  col: number,
+  wallpaperGroup: WallpaperGroupType,
+): readonly [number, number] | null {
+  if (wallpaperGroup === "P4g") {
+    return p4gCoord(row, col);
+  }
+  // All other groups use the standard odd-coordinate mapping and existence
+  // is determined externally (e.g. P4g previously excluded row >= col).
+  return [2 * col + 1, 2 * row + 1] as const;
+}
+
 export function OrbifoldGridTools({
   n,
   grid,
   tool,
+  wallpaperGroup,
   onColorToggle,
   onInspect,
   onSetRoot,
@@ -55,7 +74,8 @@ export function OrbifoldGridTools({
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
   tool: ToolType;
-  onColorToggle: (row: number, col: number) => void;
+  wallpaperGroup: WallpaperGroupType;
+  onColorToggle: (nodeId: OrbifoldNodeId) => void;
   onInspect: (info: InspectionInfo | null) => void;
   onSetRoot?: (nodeId: OrbifoldNodeId) => void;
   inspectedNodeId: OrbifoldNodeId | null;
@@ -64,9 +84,6 @@ export function OrbifoldGridTools({
   const cellSize = CELL_SIZE;
   const width = n * cellSize + 2 * GRID_PADDING;
   const height = n * cellSize + 2 * GRID_PADDING;
-
-  // Get odd coord from grid index
-  const getOddCoord = (index: number): number => 2 * index + 1;
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
@@ -78,19 +95,18 @@ export function OrbifoldGridTools({
     const row = Math.floor(y / cellSize);
     
     if (row >= 0 && row < n && col >= 0 && col < n) {
-      const i = getOddCoord(col);
-      const j = getOddCoord(row);
-      const nodeId = nodeIdFromCoord([i, j]);
+      const coord = cellCoord(row, col, wallpaperGroup);
+      if (!coord) return;
+      const nodeId = nodeIdFromCoord(coord);
       if (!grid.nodes.has(nodeId)) {
         return;
       }
       if (tool === "color") {
-        onColorToggle(row, col);
+        onColorToggle(nodeId);
       } else if (tool === "root") {
         onSetRoot?.(nodeId);
       } else {
         // Inspect tool
-        // Get edges for this node (adjacency is built during grid creation)
         const edgeIds = grid.adjacency?.get(nodeId) ?? [];
         const edges: EdgeInfo[] = [];
         
@@ -115,7 +131,7 @@ export function OrbifoldGridTools({
         
         onInspect({
           nodeId,
-          coord: [i, j],
+          coord,
           edges,
         });
       }
@@ -138,11 +154,11 @@ export function OrbifoldGridTools({
         Array.from({ length: n }, (_, col) => {
           const x = GRID_PADDING + col * cellSize;
           const y = GRID_PADDING + row * cellSize;
-          const i = getOddCoord(col);
-          const j = getOddCoord(row);
-          const nodeId = nodeIdFromCoord([i, j]);
-          const nodeExists = grid.nodes.has(nodeId);
-          const color = nodeExists ? getNodeColor(grid, row, col) : "white";
+          const coord = cellCoord(row, col, wallpaperGroup);
+          const nodeId = coord ? nodeIdFromCoord(coord) : null;
+          const node = nodeId ? grid.nodes.get(nodeId) : undefined;
+          const nodeExists = !!node;
+          const color = node?.data?.color ?? "white";
           const isInspected = nodeId === inspectedNodeId;
           const isRoot = nodeId === rootNodeId;
           
@@ -171,8 +187,8 @@ export function OrbifoldGridTools({
                   ◉
                 </text>
               )}
-              {/* Show coordinates when in inspect mode */}
-              {tool === "inspect" && nodeExists && (
+              {/* Show real coordinates when in inspect mode */}
+              {tool === "inspect" && nodeExists && coord && (
                 <text
                   x={x + cellSize / 2}
                   y={y + cellSize / 2}
@@ -182,7 +198,7 @@ export function OrbifoldGridTools({
                   fill={color === "black" ? "#ecf0f1" : "#2c3e50"}
                   fontFamily="monospace"
                 >
-                  {i},{j}
+                  {coord[0]},{coord[1]}
                 </text>
               )}
             </g>

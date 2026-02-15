@@ -15,8 +15,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   createOrbifoldGrid,
-  setNodeColor,
-  getNodeColor,
   type WallpaperGroupType,
   type ColorData,
   type EdgeStyleData,
@@ -109,9 +107,12 @@ export function OrbifoldsExplorer() {
     setPendingLoopResult(null);
   }, [wallpaperGroup, size]);
 
-  // Handle cell color toggle
-  const handleColorToggle = useCallback((row: number, col: number) => {
+  // Handle cell color toggle (by node id)
+  const handleColorToggle = useCallback((nodeId: OrbifoldNodeId) => {
     setOrbifoldGrid((prev) => {
+      const node = prev.nodes.get(nodeId);
+      if (!node) return prev;
+
       // Create a shallow copy of the grid
       const newGrid: OrbifoldGrid<ColorData, EdgeStyleData> = {
         nodes: new Map(prev.nodes),
@@ -119,10 +120,12 @@ export function OrbifoldsExplorer() {
         adjacency: prev.adjacency,
       };
       
-      // Toggle the color
-      const currentColor = getNodeColor(prev, row, col);
+      const currentColor = node.data?.color ?? "white";
       const newColor = currentColor === "black" ? "white" : "black";
-      setNodeColor(newGrid, row, col, newColor);
+      const newNode = newGrid.nodes.get(nodeId);
+      if (newNode) {
+        newNode.data = { color: newColor };
+      }
       
       return newGrid;
     });
@@ -703,6 +706,7 @@ export function OrbifoldsExplorer() {
               grid={orbifoldGrid}
               pathNodeIds={pendingLoopResult.pathNodeIds}
               rootNodeId={rootNodeId}
+              wallpaperGroup={wallpaperGroup}
               onAccept={handleAcceptLoop}
               onReject={handleRejectLoop}
             />
@@ -712,6 +716,7 @@ export function OrbifoldsExplorer() {
             n={size}
             grid={orbifoldGrid}
             tool={tool}
+            wallpaperGroup={wallpaperGroup}
             onColorToggle={handleColorToggle}
             onInspect={handleInspect}
             onSetRoot={handleSetRoot}

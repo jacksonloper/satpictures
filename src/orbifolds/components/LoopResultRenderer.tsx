@@ -20,9 +20,10 @@ import {
   rootOfUnityOrder,
 } from "../orbifoldbasics";
 import {
-  getNodeColor,
+  p4gCoord,
   type ColorData,
   type EdgeStyleData,
+  type WallpaperGroupType,
 } from "../createOrbifolds";
 
 // Constants (matching OrbifoldGridTools)
@@ -97,6 +98,7 @@ export function LoopResultRenderer({
   grid,
   pathNodeIds,
   rootNodeId,
+  wallpaperGroup,
   onAccept,
   onReject,
 }: {
@@ -105,6 +107,7 @@ export function LoopResultRenderer({
   /** Ordered node IDs in path (step 0 = root, last step = root) */
   pathNodeIds: string[];
   rootNodeId: OrbifoldNodeId;
+  wallpaperGroup: WallpaperGroupType;
   onAccept: (selectedEdgeIds: string[]) => void;
   onReject: () => void;
 }) {
@@ -112,7 +115,10 @@ export function LoopResultRenderer({
   const width = n * cellSize + 2 * GRID_PADDING;
   const height = n * cellSize + 2 * GRID_PADDING;
 
-  const getOddCoord = (index: number): number => 2 * index + 1;
+  const getCellCoord = (row: number, col: number): readonly [number, number] | null => {
+    if (wallpaperGroup === "P4g") return p4gCoord(row, col);
+    return [2 * col + 1, 2 * row + 1] as const;
+  };
 
   // Build step-edge info and identify choice points
   const steps = useMemo(
@@ -176,12 +182,12 @@ export function LoopResultRenderer({
           Array.from({ length: n }, (_, col) => {
             const x = GRID_PADDING + col * cellSize;
             const y = GRID_PADDING + row * cellSize;
-            const i = getOddCoord(col);
-            const j = getOddCoord(row);
-            const nodeId = nodeIdFromCoord([i, j]);
-            const nodeExists = grid.nodes.has(nodeId);
-            const color = nodeExists ? getNodeColor(grid, row, col) : "white";
-            const stepIndex = nodeStep.get(nodeId);
+            const coord = getCellCoord(row, col);
+            const nodeId = coord ? nodeIdFromCoord(coord) : null;
+            const node = nodeId ? grid.nodes.get(nodeId) : undefined;
+            const nodeExists = !!node;
+            const color = node?.data?.color ?? "white";
+            const stepIndex = nodeId ? nodeStep.get(nodeId) : undefined;
             const isInPath = stepIndex !== undefined;
             const isRoot = nodeId === rootNodeId;
 
