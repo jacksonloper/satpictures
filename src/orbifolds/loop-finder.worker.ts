@@ -36,6 +36,8 @@ export interface LoopFinderResponse {
   stats?: { numVars: number; numClauses: number };
   /** If SAT: edges in the loop (by edgeId) */
   loopEdgeIds?: string[];
+  /** If SAT: ordered path of node IDs (step 0 = root, step L-1 = root) */
+  pathNodeIds?: string[];
 }
 
 // ---- CaDiCaL WASM boilerplate (same pattern as other workers) ----
@@ -226,19 +228,24 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
     }
   }
 
-  // Non-self-intersecting: each non-root node used at most once across all steps.
+  // Non-self-intersecting: each node used at most once across intermediate steps.
   // Use Sinz encoding for efficiency.
-  // Root node doesn't need this (it appears at step 0 and step L-1).
+  // For non-root nodes, they are forced false at steps 0 and L-1, so at-most-one over [1, L-2].
+  // The root node is never a choice at intermediate steps — it appears only at
+  // step 0 and step L-1 (zero times during intermediate steps [1, L-2]).
   for (let v = 0; v < N; v++) {
-    if (v === rootIdx) continue;
-    // Collect all x[t][v] for t in [0, L-1]
-    // Actually root forces x[0][v]=false and x[L-1][v]=false for non-root v,
-    // so we only need t in [1, L-2]
     const lits: number[] = [];
     for (let t = 1; t < L - 1; t++) {
       lits.push(x[t][v]);
     }
-    addSinzAtMostOne(solver, lits);
+    if (v === rootIdx) {
+      // Root appears zero times at intermediate steps (it's never a choice)
+      for (const lit of lits) {
+        solver.addClause([-lit]);
+      }
+    } else {
+      addSinzAtMostOne(solver, lits);
+    }
   }
 
   // Send progress
@@ -286,7 +293,10 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
     }
   }
 
-  return { success: true, messageType: "result", loopEdgeIds };
+  // Convert path indices back to node IDs
+  const pathNodeIds = path.map(v => nodeIds[v]);
+
+  return { success: true, messageType: "result", loopEdgeIds, pathNodeIds };
 }
 
 // ---- Worker message handler ----

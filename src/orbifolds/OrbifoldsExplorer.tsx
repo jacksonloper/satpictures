@@ -39,6 +39,7 @@ import {
   ValidatedInput,
   LiftedGraphRenderer,
   OrbifoldGridTools,
+  LoopResultRenderer,
   type ToolType,
   type InspectionInfo,
 } from "./components";
@@ -68,6 +69,10 @@ export function OrbifoldsExplorer() {
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [loopSatStats, setLoopSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
+  const [pendingLoopResult, setPendingLoopResult] = useState<{
+    pathNodeIds: string[];
+    loopEdgeIds: string[];
+  } | null>(null);
   const loopWorkerRef = useRef<Worker | null>(null);
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
   
@@ -101,6 +106,7 @@ export function OrbifoldsExplorer() {
     setShowLoopFinder(false);
     setSolvingLoop(false);
     setLoopSatStats(null);
+    setPendingLoopResult(null);
   }, [wallpaperGroup, size]);
 
   // Handle cell color toggle
@@ -223,6 +229,7 @@ export function OrbifoldsExplorer() {
     setErrorMessage(null);
     setSolvingLoop(true);
     setLoopSatStats(null);
+    setPendingLoopResult(null);
 
     // Build adjacency data for the worker
     const grid = orbifoldGrid;
@@ -278,18 +285,12 @@ export function OrbifoldsExplorer() {
         return;
       }
 
-      if (response.success && response.loopEdgeIds) {
-        // Overwrite edge properties: solid for loop edges, dashed for others
-        const loopEdgeSet = new Set(response.loopEdgeIds);
-        setOrbifoldGrid((prev) => {
-          const newEdges = new Map(prev.edges);
-          for (const [edgeId, edge] of newEdges) {
-            const linestyle = loopEdgeSet.has(edgeId) ? "solid" : "dashed";
-            newEdges.set(edgeId, { ...edge, data: { linestyle } });
-          }
-          return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+      if (response.success && response.loopEdgeIds && response.pathNodeIds) {
+        // Store the result for user to accept/reject
+        setPendingLoopResult({
+          pathNodeIds: response.pathNodeIds,
+          loopEdgeIds: response.loopEdgeIds,
         });
-        setInspectionInfo(null);
         setErrorMessage(null);
       } else {
         setErrorMessage(response.error || "Loop search failed");
@@ -316,6 +317,69 @@ export function OrbifoldsExplorer() {
         loopWorkerRef.current = null;
       }
     };
+  }, []);
+
+  // Handle accepting the loop result: set loop edges as solid, others as dashed
+  // For multi-edges between the same pair of nodes, pick one randomly
+  const handleAcceptLoop = useCallback(() => {
+    if (!pendingLoopResult) return;
+    const { pathNodeIds, loopEdgeIds } = pendingLoopResult;
+
+    // Build the set of consecutive node pairs in the path
+    // For each pair, we need exactly one edge made solid (chosen randomly if multiple)
+    const pairToEdges = new Map<string, string[]>();
+    for (let t = 0; t < pathNodeIds.length - 1; t++) {
+      const a = pathNodeIds[t];
+      const b = pathNodeIds[t + 1];
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (!pairToEdges.has(key)) {
+        pairToEdges.set(key, []);
+      }
+    }
+
+    // Categorize loop edge IDs by which node pair they connect
+    const loopEdgeSet = new Set(loopEdgeIds);
+    setOrbifoldGrid((prev) => {
+      // Collect edges by node pair
+      for (const [edgeId, edge] of prev.edges) {
+        if (!loopEdgeSet.has(edgeId)) continue;
+        const endpoints = Array.from(edge.halfEdges.keys());
+        let a: string, b: string;
+        if (endpoints.length === 1) {
+          a = endpoints[0]; b = endpoints[0];
+        } else {
+          a = endpoints[0]; b = endpoints[1];
+        }
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        const arr = pairToEdges.get(key);
+        if (arr) arr.push(edgeId);
+      }
+
+      // For each pair, pick one edge randomly
+      const chosenEdges = new Set<string>();
+      for (const [, edgeIds] of pairToEdges) {
+        if (edgeIds.length > 0) {
+          const chosen = edgeIds[Math.floor(Math.random() * edgeIds.length)];
+          chosenEdges.add(chosen);
+        }
+      }
+
+      // Set chosen edges to solid, all others to dashed
+      const newEdges = new Map(prev.edges);
+      for (const [edgeId, edge] of newEdges) {
+        const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
+        newEdges.set(edgeId, { ...edge, data: { linestyle } });
+      }
+      return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+    });
+
+    setInspectionInfo(null);
+    setPendingLoopResult(null);
+  }, [pendingLoopResult]);
+
+  // Handle rejecting the loop result: keep original edge styles
+  const handleRejectLoop = useCallback(() => {
+    setPendingLoopResult(null);
   }, []);
 
   // Handle SVG export
@@ -622,6 +686,18 @@ export function OrbifoldsExplorer() {
                 </p>
               )}
             </div>
+          )}
+          
+          {/* Loop Result Preview (Accept/Reject) */}
+          {pendingLoopResult && rootNodeId && (
+            <LoopResultRenderer
+              n={size}
+              grid={orbifoldGrid}
+              pathNodeIds={pendingLoopResult.pathNodeIds}
+              rootNodeId={rootNodeId}
+              onAccept={handleAcceptLoop}
+              onReject={handleRejectLoop}
+            />
           )}
           
           <OrbifoldGridTools
