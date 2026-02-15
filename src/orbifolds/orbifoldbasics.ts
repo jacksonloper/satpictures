@@ -100,6 +100,20 @@ export function isInvolutive(M: Matrix3x3): boolean {
   return matEq(matMul(M, M), I3);
 }
 
+/**
+ * Check whether M is a root of unity, i.e. M^k = I for some positive integer k.
+ * Tests k = 1, 2, …, maxK (default 8).
+ * Returns the smallest such k, or null if none found.
+ */
+export function rootOfUnityOrder(M: Matrix3x3, maxK: number = 8): number | null {
+  let power: Matrix3x3 = I3;
+  for (let k = 1; k <= maxK; k++) {
+    power = matMul(power, M);
+    if (matEq(power, I3)) return k;
+  }
+  return null;
+}
+
 /////////////////////////////
 // IDs + canonical key helpers
 /////////////////////////////
