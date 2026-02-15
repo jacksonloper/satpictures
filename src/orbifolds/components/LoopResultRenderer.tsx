@@ -189,8 +189,7 @@ export function LoopResultRenderer({
                   nodeId = nodeIdFromCoord([diagI, diagJ]);
                   nodeExists = grid.nodes.has(nodeId);
                 } else {
-                  const gridCol = col;
-                  const gridI = 4 * gridCol + 2;
+                  const gridI = 4 * col + 2;
                   const gridJ = 4 * row + 2;
                   nodeId = nodeIdFromCoord([gridI, gridJ]);
                   nodeExists = grid.nodes.has(nodeId);

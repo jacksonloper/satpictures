@@ -25,6 +25,11 @@ const DIAGONAL_REFLECTION: Matrix3x3 = [
 /**
  * Helper to add an edge to the grid, avoiding duplicates.
  */
+/**
+ * Add an orbifold edge, skipping duplicates and non-existent target nodes.
+ * Edges between grid/diagonal nodes can be requested from both endpoints;
+ * the edgeKey deduplicates so each edge is created exactly once.
+ */
 function addEdge(
   edges: Map<OrbifoldEdgeId, OrbifoldEdge<EdgeStyleData>>,
   processedEdges: Set<string>,

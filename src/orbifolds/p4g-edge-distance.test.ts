@@ -134,7 +134,13 @@ function testP4gLiftedDistances(n: number, m: number): { passed: boolean; failur
   const failures: string[] = [];
   const TOLERANCE = 0.0001;
 
-  // Distances should be one of a few consistent values
+  // Distances should be one of a few consistent values.
+  // These arise from the non-uniform node placement:
+  // - 4.0: grid-to-grid (doubled from old step of 2)
+  // - √10 ≈ 3.16: grid-to-diagonal (e.g. (6,2)→(3,1))
+  // - 2√2 ≈ 2.83: diagonal reflection self-loop (e.g. (3,1)→(1,3))
+  // - 2.0: diagonal border crossing (e.g. diag(0) at (3,1)→diag(n-1)
+  //         whose absolute position after voltage is (3,-1), dist=2)
   const allowedDistances = [
     4.0,              // grid-to-grid
     Math.sqrt(10),    // grid-to-diagonal

@@ -91,10 +91,8 @@ export function OrbifoldGridTools({
         if (grid.nodes.has(nodeId)) return { nodeId, coord: [diagI, diagJ] };
         return null;
       } else {
-        // Grid node column: col index maps to grid col = col (col >= 1)
-        // Grid node at (4*gridCol+2, 4*row+2) where gridCol = col
-        const gridCol = col;
-        const gridI = 4 * gridCol + 2;
+        // Grid node column: col index directly maps to grid col (col >= 1)
+        const gridI = 4 * col + 2;
         const gridJ = 4 * row + 2;
         const nodeId = nodeIdFromCoord([gridI, gridJ]);
         if (grid.nodes.has(nodeId)) return { nodeId, coord: [gridI, gridJ] };
@@ -237,12 +235,11 @@ export function OrbifoldGridTools({
                 return renderCell(`diag-${row}`, x, y, cellSize, cellSize, nodeId, nodeExists, [diagI, diagJ]);
               } else {
                 // Grid node at (4*col+2, 4*row+2)
-                const gridCol = col;
-                const gridI = 4 * gridCol + 2;
+                const gridI = 4 * col + 2;
                 const gridJ = 4 * row + 2;
                 const nodeId = nodeIdFromCoord([gridI, gridJ]);
                 const nodeExists = grid.nodes.has(nodeId);
-                return renderCell(`grid-${row}-${gridCol}`, x, y, cellSize, cellSize, nodeId, nodeExists, [gridI, gridJ]);
+                return renderCell(`grid-${row}-${col}`, x, y, cellSize, cellSize, nodeId, nodeExists, [gridI, gridJ]);
               }
             })
           )
