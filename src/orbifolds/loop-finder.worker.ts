@@ -2,11 +2,13 @@
  * Web Worker for finding non-self-intersecting loops on orbifold graphs via CaDiCaL SAT solver.
  *
  * Encoding:
+ *   - loopLength = number of distinct nodes in the loop.
+ *   - Internally uses L = loopLength + 1 steps (step 0 = root, steps 1..L-2 = intermediate, step L-1 = root).
  *   - Variables: x[t][v] = "node v is visited at step t" (one-hot per step)
  *   - Step 0 and step (L-1) are deterministically the root node.
  *   - Adjacency: if at node A at step t, then at a neighbor of A at step t-1.
  *   - Sinz at-most-one encoding for each non-root node (each non-root node used at most once).
- *   - Root node has no usage constraint (it appears at first and last step).
+ *   - Root node appears zero times at intermediate steps (it's never a choice).
  *
  * The worker can be terminated by the main thread to cancel.
  */
@@ -17,7 +19,7 @@ import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
 
 export interface LoopFinderRequest {
-  /** Loop length (number of steps, including start=root and end=root) */
+  /** Loop length = number of distinct nodes in the loop */
   loopLength: number;
   /** The root node ID */
   rootNodeId: string;
@@ -166,7 +168,11 @@ function addSinzAtMostOne(solver: CadicalSolver, lits: number[]): void {
 }
 
 function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFinderResponse {
-  const { loopLength: L, rootNodeId, nodeIds, adjacency, edges } = req;
+  const { loopLength, rootNodeId, nodeIds, adjacency, edges } = req;
+  // loopLength = number of distinct nodes in the loop.
+  // Internally we need L = loopLength + 1 steps: steps 0..loopLength,
+  // where step 0 = root, steps 1..(loopLength-1) = intermediate, step loopLength = root.
+  const L = loopLength + 1;
   const N = nodeIds.length;
 
   // Map nodeId → index

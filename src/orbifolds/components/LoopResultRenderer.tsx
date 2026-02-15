@@ -57,7 +57,7 @@ export function LoopResultRenderer({
       border: "2px solid #27ae60",
     }}>
       <h4 style={{ marginBottom: "8px", color: "#27ae60" }}>
-        🔄 Loop Found (length {pathNodeIds.length})
+        🔄 Loop Found ({pathNodeIds.length - 1} nodes)
       </h4>
       <p style={{ fontSize: "12px", color: "#555", marginBottom: "8px" }}>
         Numbers show the visit order. Click Accept to apply (solid = loop edges, dashed = others) or Reject to keep current edge styles.

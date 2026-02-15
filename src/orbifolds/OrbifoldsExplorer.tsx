@@ -217,8 +217,8 @@ export function OrbifoldsExplorer() {
   // Handle loop finder solve
   const handleSolveLoop = useCallback(() => {
     const loopLength = parseInt(loopLengthInput, 10);
-    if (!Number.isFinite(loopLength) || loopLength < 3) {
-      setErrorMessage("Loop length must be a positive integer ≥ 3");
+    if (!Number.isFinite(loopLength) || loopLength < 2) {
+      setErrorMessage("Loop length must be a positive integer ≥ 2");
       return;
     }
     if (!rootNodeId) {
@@ -624,7 +624,7 @@ export function OrbifoldsExplorer() {
               border: "1px solid #8e44ad",
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <label style={{ fontSize: "13px" }}>Loop length:</label>
+                <label style={{ fontSize: "13px" }}>Nodes in loop:</label>
                 <input
                   type="text"
                   value={loopLengthInput}

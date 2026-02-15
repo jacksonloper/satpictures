@@ -5,8 +5,8 @@
  * Uses the DPLL solver (no WASM needed) to verify the encoding correctness.
  *
  * Key test: A 3×3 P1 grid has 9 nodes. A non-self-intersecting loop must visit
- * each node at most once (plus root at start/end). So the maximum loop length is
- * 9+1=10 (all 9 nodes visited, returning to root). Length 11+ should be UNSAT.
+ * each node at most once. So the maximum loop length (= number of distinct nodes)
+ * is 9 (Hamiltonian cycle). Length 10+ should be UNSAT.
  *
  * Run with: npx tsx src/orbifolds/loop-finder.test.ts
  */
@@ -44,6 +44,8 @@ function addSinzAtMostOne(solver: SATSolver, lits: number[]): void {
 
 /**
  * Core SAT encoding for loop finding (mirrors loop-finder.worker.ts).
+ * loopLength = number of distinct nodes in the loop.
+ * Internally uses L = loopLength + 1 steps.
  * Returns { satisfiable, path? } where path is the ordered node IDs if SAT.
  */
 function solveLoop(
@@ -52,7 +54,7 @@ function solveLoop(
   nodeIds: string[],
   adjacency: Record<string, string[]>,
 ): { satisfiable: boolean; pathNodeIds?: string[] } {
-  const L = loopLength;
+  const L = loopLength + 1;
   const N = nodeIds.length;
   const solver = new DPLLSolver();
 
@@ -187,6 +189,7 @@ function assert(condition: boolean, message: string): void {
 }
 
 console.log("=== Loop Finder SAT Encoding Test ===\n");
+console.log("loopLength = number of distinct nodes in the loop\n");
 
 // Build a P1 3×3 grid
 const grid = createOrbifoldGrid("P1", 3);
@@ -200,31 +203,29 @@ console.log(`Root: ${rootNodeId}`);
 console.log(`Node IDs: ${nodeIds.join(", ")}`);
 console.log();
 
-// Test 1: Loop of length 16 should be UNSAT on a 3×3 grid
-// 9 nodes total, root used at step 0 and L-1, 8 non-root nodes.
-// Max loop length = 8 intermediate + 2 root = 10.
-// Length 16 needs 14 intermediate slots but only 8 non-root nodes, so UNSAT.
-console.log("Test 1: Loop of length 16 on 3×3 P1 grid should be UNSAT");
+// Test 1: Loop of 16 nodes should be UNSAT on a 3×3 grid (only 9 nodes exist)
+console.log("Test 1: Loop of 16 nodes on 3×3 P1 grid should be UNSAT");
 {
   const result = solveLoop(16, rootNodeId, nodeIds, adj);
-  assert(!result.satisfiable, "Loop of length 16 is UNSAT");
+  assert(!result.satisfiable, "Loop of 16 nodes is UNSAT");
 }
 
-// Test 2: Loop of length 11 should also be UNSAT (needs 9 intermediate slots, only 8 non-root)
-console.log("\nTest 2: Loop of length 11 on 3×3 P1 grid should be UNSAT");
-{
-  const result = solveLoop(11, rootNodeId, nodeIds, adj);
-  assert(!result.satisfiable, "Loop of length 11 is UNSAT");
-}
-
-// Test 3: Loop of length 10 should be SAT (Hamiltonian cycle: visit all 9 nodes + return)
-// This is a Hamiltonian cycle on a 3×3 torus, which exists for P1.
-console.log("\nTest 3: Loop of length 10 on 3×3 P1 grid should be SAT (Hamiltonian cycle)");
+// Test 2: Loop of 10 nodes should also be UNSAT (only 9 nodes exist)
+console.log("\nTest 2: Loop of 10 nodes on 3×3 P1 grid should be UNSAT");
 {
   const result = solveLoop(10, rootNodeId, nodeIds, adj);
-  assert(result.satisfiable, "Loop of length 10 is SAT");
+  assert(!result.satisfiable, "Loop of 10 nodes is UNSAT");
+}
+
+// Test 3: Loop of 9 nodes should be SAT (Hamiltonian cycle: visit all 9 nodes)
+console.log("\nTest 3: Loop of 9 nodes on 3×3 P1 grid should be SAT (Hamiltonian cycle)");
+{
+  const result = solveLoop(9, rootNodeId, nodeIds, adj);
+  assert(result.satisfiable, "Loop of 9 nodes is SAT");
   if (result.pathNodeIds) {
     console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+    // Path has 10 steps (9 nodes + return to root)
+    assert(result.pathNodeIds.length === 10, "Path has 10 steps (9 nodes + return to root)");
     // Verify path properties
     assert(result.pathNodeIds[0] === rootNodeId, "Path starts at root");
     assert(result.pathNodeIds[result.pathNodeIds.length - 1] === rootNodeId, "Path ends at root");
@@ -234,31 +235,37 @@ console.log("\nTest 3: Loop of length 10 on 3×3 P1 grid should be SAT (Hamilton
     assert(uniqueIntermediate.size === intermediateNodes.length, "All intermediate nodes are unique");
     // Check root doesn't appear in intermediate nodes
     assert(!intermediateNodes.includes(rootNodeId), "Root does not appear in intermediate steps");
+    // Check number of distinct nodes = 9
+    const allDistinct = new Set(result.pathNodeIds);
+    assert(allDistinct.size === 9, "9 distinct nodes visited");
   }
 }
 
-// Test 4: Small valid loop (length 3 or 4)
-console.log("\nTest 4: Loop of length 3 on 3×3 P1 grid should be SAT");
+// Test 4: Smallest valid loop (2 nodes: root → neighbor → root)
+console.log("\nTest 4: Loop of 2 nodes on 3×3 P1 grid should be SAT");
 {
-  const result = solveLoop(3, rootNodeId, nodeIds, adj);
-  assert(result.satisfiable, "Loop of length 3 is SAT");
+  const result = solveLoop(2, rootNodeId, nodeIds, adj);
+  assert(result.satisfiable, "Loop of 2 nodes is SAT");
   if (result.pathNodeIds) {
     console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
-    assert(result.pathNodeIds.length === 3, "Path has 3 steps");
+    assert(result.pathNodeIds.length === 3, "Path has 3 steps (2 distinct nodes + return)");
     assert(result.pathNodeIds[0] === rootNodeId, "Path starts at root");
     assert(result.pathNodeIds[2] === rootNodeId, "Path ends at root");
     // The intermediate node must be a neighbor of root
     const intermediateNode = result.pathNodeIds[1];
     assert(adj[rootNodeId].includes(intermediateNode), "Intermediate node is neighbor of root");
     assert(adj[intermediateNode].includes(rootNodeId), "Root is neighbor of intermediate node");
+    // 2 distinct nodes
+    const allDistinct = new Set(result.pathNodeIds);
+    assert(allDistinct.size === 2, "2 distinct nodes visited");
   }
 }
 
-// Test 5: Verify path adjacency is correct for a found path
-console.log("\nTest 5: Verify all consecutive steps in path are adjacent (length 5)");
+// Test 5: Verify path adjacency is correct for a found path (4 nodes)
+console.log("\nTest 5: Verify all consecutive steps in path are adjacent (4 nodes)");
 {
-  const result = solveLoop(5, rootNodeId, nodeIds, adj);
-  assert(result.satisfiable, "Loop of length 5 is SAT");
+  const result = solveLoop(4, rootNodeId, nodeIds, adj);
+  assert(result.satisfiable, "Loop of 4 nodes is SAT");
   if (result.pathNodeIds) {
     console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
     let allAdjacent = true;
@@ -271,6 +278,9 @@ console.log("\nTest 5: Verify all consecutive steps in path are adjacent (length
       }
     }
     assert(allAdjacent, "All consecutive steps are adjacent");
+    // 4 distinct nodes
+    const allDistinct = new Set(result.pathNodeIds);
+    assert(allDistinct.size === 4, "4 distinct nodes visited");
   }
 }
 
