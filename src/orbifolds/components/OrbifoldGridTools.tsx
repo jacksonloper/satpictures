@@ -20,7 +20,7 @@ import {
 const CELL_SIZE = 40;
 const GRID_PADDING = 20;
 
-export type ToolType = "color" | "inspect";
+export type ToolType = "color" | "inspect" | "root";
 
 /**
  * Edge info for inspection display.
@@ -48,14 +48,18 @@ export function OrbifoldGridTools({
   tool,
   onColorToggle,
   onInspect,
+  onSetRoot,
   inspectedNodeId,
+  rootNodeId,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
   tool: ToolType;
   onColorToggle: (row: number, col: number) => void;
   onInspect: (info: InspectionInfo | null) => void;
+  onSetRoot?: (nodeId: OrbifoldNodeId) => void;
   inspectedNodeId: OrbifoldNodeId | null;
+  rootNodeId?: OrbifoldNodeId | null;
 }) {
   const cellSize = CELL_SIZE;
   const width = n * cellSize + 2 * GRID_PADDING;
@@ -82,6 +86,8 @@ export function OrbifoldGridTools({
       }
       if (tool === "color") {
         onColorToggle(row, col);
+      } else if (tool === "root") {
+        onSetRoot?.(nodeId);
       } else {
         // Inspect tool
         // Get edges for this node (adjacency is built during grid creation)
@@ -123,7 +129,7 @@ export function OrbifoldGridTools({
       style={{ 
         border: "1px solid #ccc", 
         borderRadius: "4px", 
-        cursor: tool === "color" ? "pointer" : "crosshair" 
+        cursor: tool === "color" ? "pointer" : tool === "root" ? "cell" : "crosshair" 
       }}
       onClick={handleSvgClick}
     >
@@ -138,6 +144,7 @@ export function OrbifoldGridTools({
           const nodeExists = grid.nodes.has(nodeId);
           const color = nodeExists ? getNodeColor(grid, row, col) : "white";
           const isInspected = nodeId === inspectedNodeId;
+          const isRoot = nodeId === rootNodeId;
           
           return (
             <g key={`${row}-${col}`}>
@@ -147,9 +154,23 @@ export function OrbifoldGridTools({
                 width={cellSize}
                 height={cellSize}
                 fill={nodeExists ? (color === "black" ? "#2c3e50" : "white") : "#ecf0f1"}
-                stroke={nodeExists ? (isInspected ? "#3498db" : "#7f8c8d") : "#bdc3c7"}
-                strokeWidth={isInspected ? 3 : 1}
+                stroke={nodeExists ? (isRoot ? "#e67e22" : isInspected ? "#3498db" : "#7f8c8d") : "#bdc3c7"}
+                strokeWidth={isRoot ? 3 : isInspected ? 3 : 1}
               />
+              {/* Root indicator */}
+              {isRoot && nodeExists && (
+                <text
+                  x={x + cellSize / 2}
+                  y={y + cellSize / 2}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={16}
+                  fill={color === "black" ? "#f39c12" : "#e67e22"}
+                  style={{ pointerEvents: "none" }}
+                >
+                  ◉
+                </text>
+              )}
               {/* Show coordinates when in inspect mode */}
               {tool === "inspect" && nodeExists && (
                 <text
