@@ -61,10 +61,11 @@ function getP4gNeighbor(
     return { coord: [i, j] as const, voltage: DIAGONAL_REFLECTION, edgeKey, fromPolygonEdgeIndex: P4G_DIAG_EDGE, toPolygonEdgeIndex: P4G_DIAG_EDGE };
   }
 
-  // For superdiagonal nodes (triangle), map N→0, E→(no W side, use square index 1 for E)
-  // For regular nodes (square), use standard direction mapping
+  // For superdiagonal nodes (triangle: edges 0=N, 1=diagonal, 2=W),
+  // only N and E directions reach here (S→self-loop, W→null above).
+  // For regular nodes (square: edges 0=N, 1=E, 2=S, 3=W), use standard mapping.
   const fromEdge = isOnFirstSuperdiagonal
-    ? (dir === "N" ? 0 : 1) // Triangle: 0=N, 1 not used for regular (only E possible beyond N)
+    ? (dir === "N" ? 0 : 1) // Triangle: N=0, E exits through diagonal=1
     : directionToPolygonEdge(dir);
 
   switch (dir) {
@@ -121,9 +122,9 @@ function getP4gNeighbor(
       }
       const toId = nodeIdFromCoord([i - 2, j]);
       const edgeKey = [fromId, toId].sort().join("|");
-      // Target is to the left, enters through its East edge
+      // Target is to the left, enters through its East edge (or diagonal edge for triangles)
       const targetIsTriangle = (i - 2) === j + 2;
-      const toEdge = targetIsTriangle ? 1 : directionToPolygonEdge("E"); // Wait, E would be index 1 anyway for square
+      const toEdge = targetIsTriangle ? 1 : directionToPolygonEdge("E");
       return { coord: [i - 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
   }
