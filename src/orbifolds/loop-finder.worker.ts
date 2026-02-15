@@ -29,6 +29,8 @@ export interface LoopFinderRequest {
   adjacency: Record<string, string[]>;
   /** All edge IDs with their endpoint node IDs (for result mapping) */
   edges: Array<{ edgeId: string; endpoints: [string, string] }>;
+  /** Node IDs that are black-colored and must be excluded from the path */
+  blackNodeIds?: string[];
 }
 
 export interface LoopFinderResponse {
@@ -168,12 +170,26 @@ function addSinzAtMostOne(solver: CadicalSolver, lits: number[]): void {
 }
 
 function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFinderResponse {
-  const { loopLength, rootNodeId, nodeIds, adjacency, edges } = req;
+  const { loopLength, rootNodeId, nodeIds, adjacency, edges, blackNodeIds } = req;
   // loopLength = number of distinct nodes in the loop.
   // Internally we need L = loopLength + 1 steps: steps 0..loopLength,
   // where step 0 = root, steps 1..(loopLength-1) = intermediate, step loopLength = root.
   const L = loopLength + 1;
   const N = nodeIds.length;
+
+  // Build set of black node indices (these must be excluded from the path)
+  const blackSet = new Set(blackNodeIds ?? []);
+
+  // Validate: there must be at least one non-black node
+  const hasNonBlack = nodeIds.some(id => !blackSet.has(id));
+  if (!hasNonBlack) {
+    return { success: false, error: "No non-black nodes available for the loop", messageType: "result" };
+  }
+
+  // Validate: root must not be black
+  if (blackSet.has(rootNodeId)) {
+    return { success: false, error: "Root node must not be black-colored", messageType: "result" };
+  }
 
   // Map nodeId → index
   const nodeIndex = new Map<string, number>();
@@ -239,17 +255,28 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
   // For non-root nodes, they are forced false at steps 0 and L-1, so at-most-one over [1, L-2].
   // The root node is never a choice at intermediate steps — it appears only at
   // step 0 and step L-1 (zero times during intermediate steps [1, L-2]).
+  // Black nodes are excluded entirely — they cannot appear at any step.
   for (let v = 0; v < N; v++) {
-    const lits: number[] = [];
-    for (let t = 1; t < L - 1; t++) {
-      lits.push(x[t][v]);
-    }
-    if (v === rootIdx) {
+    const isBlack = blackSet.has(nodeIds[v]);
+    if (isBlack) {
+      // Black nodes must not appear at any step
+      for (let t = 0; t < L; t++) {
+        solver.addClause([-x[t][v]]);
+      }
+    } else if (v === rootIdx) {
       // Root appears zero times at intermediate steps (it's never a choice)
+      const lits: number[] = [];
+      for (let t = 1; t < L - 1; t++) {
+        lits.push(x[t][v]);
+      }
       for (const lit of lits) {
         solver.addClause([-lit]);
       }
     } else {
+      const lits: number[] = [];
+      for (let t = 1; t < L - 1; t++) {
+        lits.push(x[t][v]);
+      }
       addSinzAtMostOne(solver, lits);
     }
   }

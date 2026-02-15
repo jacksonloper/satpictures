@@ -234,6 +234,50 @@ export function OrbifoldsExplorer() {
     // Build adjacency data for the worker
     const grid = orbifoldGrid;
     const nodeIds = Array.from(grid.nodes.keys());
+
+    // Collect black-colored node IDs
+    const blackNodeIds: string[] = [];
+    for (const [nodeId, node] of grid.nodes) {
+      if (node.data?.color === "black") {
+        blackNodeIds.push(nodeId);
+      }
+    }
+
+    // Validate: there must be at least one non-black node
+    const blackSet = new Set(blackNodeIds);
+    if (blackNodeIds.length >= nodeIds.length) {
+      setErrorMessage("No non-black nodes available for the loop");
+      setSolvingLoop(false);
+      return;
+    }
+
+    // If root is black, hop to a non-black neighbor
+    let effectiveRootNodeId = rootNodeId;
+    if (blackSet.has(effectiveRootNodeId)) {
+      const rootEdgeIds = grid.adjacency?.get(effectiveRootNodeId) ?? [];
+      let newRoot: string | null = null;
+      for (const edgeId of rootEdgeIds) {
+        const edge = grid.edges.get(edgeId);
+        if (!edge) continue;
+        const halfEdge = edge.halfEdges.get(effectiveRootNodeId);
+        if (!halfEdge) continue;
+        if (!blackSet.has(halfEdge.to)) {
+          newRoot = halfEdge.to;
+          break;
+        }
+      }
+      if (!newRoot) {
+        // Try any non-black node as root
+        newRoot = nodeIds.find(id => !blackSet.has(id)) ?? null;
+      }
+      if (!newRoot) {
+        setErrorMessage("No non-black nodes available for the loop");
+        setSolvingLoop(false);
+        return;
+      }
+      effectiveRootNodeId = newRoot;
+    }
+
     const adj: Record<string, string[]> = {};
     for (const nodeId of nodeIds) {
       const edgeIds = grid.adjacency?.get(nodeId) ?? [];
@@ -266,10 +310,11 @@ export function OrbifoldsExplorer() {
 
     const request: LoopFinderRequest = {
       loopLength,
-      rootNodeId,
+      rootNodeId: effectiveRootNodeId,
       nodeIds,
       adjacency: adj,
       edges: edgesData,
+      blackNodeIds,
     };
 
     const worker = new LoopFinderWorker();

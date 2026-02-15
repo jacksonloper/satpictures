@@ -53,10 +53,25 @@ function solveLoop(
   rootNodeId: string,
   nodeIds: string[],
   adjacency: Record<string, string[]>,
-): { satisfiable: boolean; pathNodeIds?: string[] } {
+  blackNodeIds?: string[],
+): { satisfiable: boolean; pathNodeIds?: string[]; error?: string } {
   const L = loopLength + 1;
   const N = nodeIds.length;
   const solver = new DPLLSolver();
+
+  // Build set of black node indices
+  const blackSet = new Set(blackNodeIds ?? []);
+
+  // Validate: there must be at least one non-black node
+  const hasNonBlack = nodeIds.some(id => !blackSet.has(id));
+  if (!hasNonBlack) {
+    return { satisfiable: false, error: "No non-black nodes available for the loop" };
+  }
+
+  // Validate: root must not be black
+  if (blackSet.has(rootNodeId)) {
+    return { satisfiable: false, error: "Root node must not be black-colored" };
+  }
 
   const nodeIndex = new Map<string, number>();
   for (let i = 0; i < N; i++) {
@@ -111,17 +126,28 @@ function solveLoop(
   }
 
   // Non-self-intersecting: each node used at most once across intermediate steps
+  // Black nodes are excluded entirely — they cannot appear at any step.
   for (let v = 0; v < N; v++) {
-    const lits: number[] = [];
-    for (let t = 1; t < L - 1; t++) {
-      lits.push(x[t][v]);
-    }
-    if (v === rootIdx) {
+    const isBlack = blackSet.has(nodeIds[v]);
+    if (isBlack) {
+      // Black nodes must not appear at any step
+      for (let t = 0; t < L; t++) {
+        solver.addClause([-x[t][v]]);
+      }
+    } else if (v === rootIdx) {
       // Root must NOT appear at any intermediate step
+      const lits: number[] = [];
+      for (let t = 1; t < L - 1; t++) {
+        lits.push(x[t][v]);
+      }
       for (const lit of lits) {
         solver.addClause([-lit]);
       }
     } else {
+      const lits: number[] = [];
+      for (let t = 1; t < L - 1; t++) {
+        lits.push(x[t][v]);
+      }
       addSinzAtMostOne(solver, lits);
     }
   }
@@ -281,6 +307,71 @@ console.log("\nTest 5: Verify all consecutive steps in path are adjacent (4 node
     // 4 distinct nodes
     const allDistinct = new Set(result.pathNodeIds);
     assert(allDistinct.size === 4, "4 distinct nodes visited");
+  }
+}
+
+// Test 6: Black nodes should not appear in the path
+console.log("\nTest 6: Black nodes should not appear in the path");
+{
+  // Mark 1,1's neighbor 3,1 as black
+  const blackNodes = ["3,1"];
+  const result = solveLoop(4, rootNodeId, nodeIds, adj, blackNodes);
+  assert(result.satisfiable, "Loop of 4 nodes with 1 black node is SAT");
+  if (result.pathNodeIds) {
+    console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+    const pathContainsBlack = result.pathNodeIds.some(id => blackNodes.includes(id));
+    assert(!pathContainsBlack, "No black node appears in the path");
+    // Still verify adjacency
+    let allAdjacent = true;
+    for (let i = 0; i < result.pathNodeIds.length - 1; i++) {
+      const from = result.pathNodeIds[i];
+      const to = result.pathNodeIds[i + 1];
+      if (!adj[from].includes(to)) {
+        allAdjacent = false;
+      }
+    }
+    assert(allAdjacent, "All consecutive steps are adjacent");
+  }
+}
+
+// Test 7: Black root node should return an error
+console.log("\nTest 7: Black root node should return error");
+{
+  const blackNodes = [rootNodeId];
+  const result = solveLoop(4, rootNodeId, nodeIds, adj, blackNodes);
+  assert(!result.satisfiable, "Black root returns UNSAT/error");
+  assert(result.error === "Root node must not be black-colored", "Error message mentions black root");
+}
+
+// Test 8: All nodes black should return error
+console.log("\nTest 8: All nodes black should return error");
+{
+  const result = solveLoop(2, rootNodeId, nodeIds, adj, [...nodeIds]);
+  assert(!result.satisfiable, "All black nodes returns UNSAT/error");
+  assert(result.error === "No non-black nodes available for the loop", "Error message mentions no non-black nodes");
+}
+
+// Test 9: Multiple black nodes reducing available path should make long loop UNSAT
+console.log("\nTest 9: Many black nodes making Hamiltonian cycle impossible");
+{
+  // With 5 black nodes out of 9, only 4 non-black remain (including root)
+  // A loop of 5 distinct nodes should be UNSAT
+  const blackNodes = ["3,1", "5,1", "5,3", "3,5", "5,5"];
+  const result = solveLoop(5, rootNodeId, nodeIds, adj, blackNodes);
+  assert(!result.satisfiable, "Loop of 5 nodes with only 4 non-black is UNSAT");
+}
+
+// Test 10: Loop with black nodes but still feasible short path
+console.log("\nTest 10: Short loop avoiding black nodes");
+{
+  // Black out all except root and its neighbor 1,3
+  const blackNodes = ["3,1", "5,1", "5,3", "3,3", "3,5", "5,5"];
+  const result = solveLoop(2, rootNodeId, nodeIds, adj, blackNodes);
+  assert(result.satisfiable, "Loop of 2 with restricted non-black nodes is SAT");
+  if (result.pathNodeIds) {
+    console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+    const pathContainsBlack = result.pathNodeIds.some(id => blackNodes.includes(id));
+    assert(!pathContainsBlack, "No black node in the path");
   }
 }
 
