@@ -243,12 +243,14 @@ export function OrbifoldsExplorer() {
       adj[nodeId] = neighbors;
     }
 
-    // Build edges data
+    // Build edges data for the worker.
+    // In orbifold half-edge representation, a self-edge (node connects to itself
+    // with a non-trivial voltage) has only 1 key in halfEdges, while a normal
+    // edge has 2 keys (one per endpoint).
     const edgesData: Array<{ edgeId: string; endpoints: [string, string] }> = [];
     for (const [edgeId, edge] of grid.edges) {
       const endpoints = Array.from(edge.halfEdges.keys());
       if (endpoints.length === 1) {
-        // Self-edge
         edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[0]] });
       } else {
         edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[1]] });

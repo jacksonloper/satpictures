@@ -63,17 +63,42 @@ class Cadical implements CadicalClass {
     this.release();
     this.solverPtr = this.module.ccall("ccadical_init", "number", [], []) as number;
   }
-  initPlain(): void { this.init(); for (const o of ["compact","decompose","deduplicate","elim","probe","subsume","ternary","transred","vivify"]) this.setOption(o,0); }
-  initSat(): void { this.init(); this.setOption("elimreleff",10); this.setOption("stabilizeonly",1); this.setOption("subsumereleff",60); }
-  initUnsat(): void { this.init(); this.setOption("stabilize",0); this.setOption("walk",0); }
-  release(): void { if (this.solverPtr !== undefined) this.module.ccall("ccadical_release", null, ["number"], [this.solverPtr]); this.solverPtr = undefined; }
+  initPlain(): void {
+    this.init();
+    for (const o of ["compact","decompose","deduplicate","elim","probe","subsume","ternary","transred","vivify"]) {
+      this.setOption(o, 0);
+    }
+  }
+  initSat(): void {
+    this.init();
+    this.setOption("elimreleff", 10);
+    this.setOption("stabilizeonly", 1);
+    this.setOption("subsumereleff", 60);
+  }
+  initUnsat(): void {
+    this.init();
+    this.setOption("stabilize", 0);
+    this.setOption("walk", 0);
+  }
+  release(): void {
+    if (this.solverPtr !== undefined) {
+      this.module.ccall("ccadical_release", null, ["number"], [this.solverPtr]);
+    }
+    this.solverPtr = undefined;
+  }
   signature(): string { return this.module.ccall("ccadical_signature", "string", [], []) as string; }
   add(litOrZero: number): void { this.module.ccall("ccadical_add", null, ["number","number"], [this.solverPtr, litOrZero]); }
   addClause(clause: number[]): void { for (const lit of clause) this.add(lit); this.add(0); }
   assume(lit: number): void { this.module.ccall("ccadical_assume", null, ["number","number"], [this.solverPtr, lit]); }
-  solve(): boolean | undefined { const r = this.module.ccall("ccadical_solve","number",["number"],[this.solverPtr]) as number; return r===10?true:r===20?false:undefined; }
-  value(lit: number): number { const v = this.module.ccall("ccadical_val","number",["number","number"],[this.solverPtr,lit]) as number; return v===0?lit:v; }
-  model(vars: number[]): number[] { return vars.map(v=>this.value(v)); }
+  solve(): boolean | undefined {
+    const r = this.module.ccall("ccadical_solve", "number", ["number"], [this.solverPtr]) as number;
+    return r === 10 ? true : r === 20 ? false : undefined;
+  }
+  value(lit: number): number {
+    const v = this.module.ccall("ccadical_val", "number", ["number","number"], [this.solverPtr, lit]) as number;
+    return v === 0 ? lit : v;
+  }
+  model(vars: number[]): number[] { return vars.map(v => this.value(v)); }
   constrain(litOrZero: number): void { this.module.ccall("ccadical_constrain", null, ["number","number"], [this.solverPtr, litOrZero]); }
   constrainClause(clause: number[]): void { for (const lit of clause) this.constrain(lit); this.constrain(0); }
   setOption(name: string, v: number): void { this.module.ccall("ccadical_set_option", null, ["number","string","number"], [this.solverPtr, name, v]); }
@@ -95,7 +120,10 @@ function loadCadicalModule(): Promise<CadicalModule> {
 }
 
 let modulePromise: Promise<CadicalModule> | null = null;
-function getModule(): Promise<CadicalModule> { if (!modulePromise) modulePromise = loadCadicalModule(); return modulePromise; }
+function getModule(): Promise<CadicalModule> {
+  if (!modulePromise) modulePromise = loadCadicalModule();
+  return modulePromise;
+}
 
 // ---- SAT encoding ----
 
