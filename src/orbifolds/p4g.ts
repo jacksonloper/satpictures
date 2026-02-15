@@ -64,9 +64,13 @@ function getP4gNeighbor(
   // For superdiagonal nodes (triangle: edges 0=N, 1=diagonal, 2=W),
   // only N and E directions reach here (S→self-loop, W→null above).
   // For regular nodes (square: edges 0=N, 1=E, 2=S, 3=W), use standard mapping.
-  const fromEdge = isOnFirstSuperdiagonal
-    ? (dir === "N" ? 0 : 1) // Triangle: N=0, E exits through diagonal=1
-    : directionToPolygonEdge(dir);
+  let fromEdge: number;
+  if (isOnFirstSuperdiagonal) {
+    // Triangle node: N exits through top edge (0), E exits through diagonal (1)
+    fromEdge = dir === "N" ? 0 : 1;
+  } else {
+    fromEdge = directionToPolygonEdge(dir);
+  }
 
   switch (dir) {
     case "N": {
@@ -93,7 +97,7 @@ function getP4gNeighbor(
       const toId = nodeIdFromCoord([i, j + 2]);
       const edgeKey = [fromId, toId].sort().join("|");
       // Target is below, so enters through its North edge
-      const targetIsTriangle = i === (j + 2) + 2;
+      const targetIsTriangle = i === j + 4;
       const toEdge = targetIsTriangle ? 0 : directionToPolygonEdge("N");
       return { coord: [i, j + 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
