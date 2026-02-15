@@ -5,6 +5,8 @@ import {
   createSquareOrbifoldGrid,
   translationWith90CCW,
   translationWith90CW,
+  directionToPolygonEdge,
+  oppositePolygonEdge,
 } from "./orbifoldShared";
 
 /**
@@ -27,59 +29,58 @@ function getP4Neighbor(
 ): NeighborResult {
   const maxOdd = 2 * n - 1;
   const fromId = nodeIdFromCoord([i, j]);
+  const fromEdge = directionToPolygonEdge(dir);
 
   switch (dir) {
     case "N": {
       if (j === 1) {
         // North border: heading north from (i, 1) wraps to orbifold node (maxOdd, maxOdd + 1 - i)
+        // P4 boundary: N(0)→W(3)
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
         const voltage = translationWith90CCW(2 * n, -2 * n);
         const toId = nodeIdFromCoord([newI, newJ]);
-        // Special case: (1,1) -> (maxOdd, maxOdd) is the NE edge
         const edgeKey = (i === 1 && newI === maxOdd && newJ === maxOdd)
           ? [fromId, toId].sort().join("|") + "|NE"
           : [fromId, toId].sort().join("|");
-        return { coord: [newI, newJ] as const, voltage, edgeKey };
+        return { coord: [newI, newJ] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: directionToPolygonEdge("W") };
       }
       const toId = nodeIdFromCoord([i, j - 2]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
     case "S": {
       if (j === maxOdd) {
-        // South border: return null - this edge is created by N from the other side
         return null;
       }
       const toId = nodeIdFromCoord([i, j + 2]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
     case "E": {
       if (i === maxOdd) {
-        // East border: return null - this edge is created by W from the other side
         return null;
       }
       const toId = nodeIdFromCoord([i + 2, j]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
     case "W": {
       if (i === 1) {
         // West border: heading west from (1, j) wraps to orbifold node (maxOdd + 1 - j, maxOdd)
+        // P4 boundary: W(3)→N(0)
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
         const voltage = translationWith90CW(-2 * n, 2 * n);
         const toId = nodeIdFromCoord([newI, newJ]);
-        // Special case: W from (1, 1) goes to (maxOdd, maxOdd) - this is the SW edge
         const edgeKey = (j === 1 && newI === maxOdd && newJ === maxOdd)
           ? [fromId, toId].sort().join("|") + "|SW"
           : [fromId, toId].sort().join("|");
-        return { coord: [newI, newJ] as const, voltage, edgeKey };
+        return { coord: [newI, newJ] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: directionToPolygonEdge("N") };
       }
       const toId = nodeIdFromCoord([i - 2, j]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
   }
 }

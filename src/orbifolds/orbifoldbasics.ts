@@ -150,12 +150,34 @@ export type ExtraData = Record<string, unknown>;
 export interface OrbifoldNode<D extends ExtraData = ExtraData> {
   id: OrbifoldNodeId;
   coord: readonly [Int, Int];
+  /**
+   * Closed polygon defining the geometry of this node.
+   * A sequence of 2D floating-point coordinates representing the vertices
+   * of the polygon in order. The polygon is implicitly closed (the last
+   * vertex connects back to the first).
+   *
+   * Polygon edges are numbered 0, 1, 2, ... where edge i connects
+   * vertex i to vertex (i+1) % N.
+   *
+   * For most orbifold types (P1, P2, P3, P4, pgg) the polygon is a unit
+   * square with vertices at (i-1,j-1), (i+1,j-1), (i+1,j+1), (i-1,j+1)
+   * giving edges: 0=North, 1=East, 2=South, 3=West.
+   *
+   * For P4g, nodes on the superdiagonal are right triangles.
+   */
+  polygon: readonly (readonly [number, number])[];
   data?: D;
 }
 
 export interface OrbifoldHalfEdge {
   to: OrbifoldNodeId;
   voltage: Matrix3x3;
+  /**
+   * Which edge of the source node's polygon this half-edge uses.
+   * An integer index into the polygon edge list (edge i connects
+   * vertex i to vertex (i+1) % N of the node's polygon).
+   */
+  polygonEdgeIndex: number;
 }
 
 export interface OrbifoldEdge<E extends ExtraData = ExtraData> {

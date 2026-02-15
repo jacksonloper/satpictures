@@ -4,6 +4,8 @@ import {
   type NeighborResult,
   createSquareOrbifoldGrid,
   translationWith180,
+  directionToPolygonEdge,
+  oppositePolygonEdge,
 } from "./orbifoldShared";
 
 /**
@@ -22,61 +24,64 @@ function getP2Neighbor(
 ): NeighborResult {
   const maxOdd = 2 * n - 1;
   const fromId = nodeIdFromCoord([i, j]);
+  const fromEdge = directionToPolygonEdge(dir);
 
   switch (dir) {
     case "N": {
       if (j === 1) {
         // North border: wrap with 180° rotation
-        // When going N from north edge, we flip to the opposite side with 180° rotation
-        // The reflected coordinate is (maxOdd + 1 - i) for i, staying on north edge
+        // P2 boundary: same side (N→N)
         const reflectedI = maxOdd + 1 - i;
         const voltage = translationWith180(2 * n, 0);
         const toId = nodeIdFromCoord([reflectedI, 1]);
         const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-        return { coord: [reflectedI, 1] as const, voltage, edgeKey };
+        return { coord: [reflectedI, 1] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: fromEdge };
       }
       const toId = nodeIdFromCoord([i, j - 2]);
       const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
     case "S": {
       if (j === maxOdd) {
         // South border: wrap with 180° rotation
+        // P2 boundary: same side (S→S)
         const reflectedI = maxOdd + 1 - i;
         const voltage = translationWith180(2 * n, 4 * n);
         const toId = nodeIdFromCoord([reflectedI, maxOdd]);
         const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-        return { coord: [reflectedI, maxOdd] as const, voltage, edgeKey };
+        return { coord: [reflectedI, maxOdd] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: fromEdge };
       }
       const toId = nodeIdFromCoord([i, j + 2]);
       const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
     case "E": {
       if (i === maxOdd) {
         // East border: wrap with 180° rotation
+        // P2 boundary: same side (E→E)
         const reflectedJ = maxOdd + 1 - j;
         const voltage = translationWith180(4 * n, 2 * n);
         const toId = nodeIdFromCoord([maxOdd, reflectedJ]);
         const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-        return { coord: [maxOdd, reflectedJ] as const, voltage, edgeKey };
+        return { coord: [maxOdd, reflectedJ] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: fromEdge };
       }
       const toId = nodeIdFromCoord([i + 2, j]);
       const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
     case "W": {
       if (i === 1) {
         // West border: wrap with 180° rotation
+        // P2 boundary: same side (W→W)
         const reflectedJ = maxOdd + 1 - j;
         const voltage = translationWith180(0, 2 * n);
         const toId = nodeIdFromCoord([1, reflectedJ]);
         const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-        return { coord: [1, reflectedJ] as const, voltage, edgeKey };
+        return { coord: [1, reflectedJ] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: fromEdge };
       }
       const toId = nodeIdFromCoord([i - 2, j]);
       const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(fromEdge) };
     }
   }
 }

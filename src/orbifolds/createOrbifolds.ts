@@ -41,10 +41,12 @@ export function createOrbifoldGrid(
 
 export {
   coordToGridPos,
+  directionToPolygonEdge,
   getEdgeLinestyle,
   getNodeColor,
   glideReflectionX,
   glideReflectionY,
+  oppositePolygonEdge,
   REFLECTION_X,
   REFLECTION_Y,
   ROTATION_120_CCW,
@@ -54,6 +56,7 @@ export {
   ROTATION_90_CW,
   setEdgeLinestyle,
   setNodeColor,
+  squarePolygon,
   translationMatrix,
   translationWith120CCW,
   translationWith120CW,

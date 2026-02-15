@@ -4,6 +4,8 @@ import {
   type NeighborResult,
   createSquareOrbifoldGrid,
   translationMatrix,
+  directionToPolygonEdge,
+  oppositePolygonEdge,
 } from "./orbifoldShared";
 
 /**
@@ -57,6 +59,8 @@ function getP1Neighbor(
   n: Int
 ): NeighborResult {
   const fromId = nodeIdFromCoord([i, j]);
+  const fromEdge = directionToPolygonEdge(dir);
+  const toEdge = oppositePolygonEdge(fromEdge);
 
   switch (dir) {
     case "N": {
@@ -66,7 +70,7 @@ function getP1Neighbor(
       const voltage = wrapped ? translationMatrix(0, -2 * n) : I3;
       const toId = nodeIdFromCoord([i, newCoord]);
       const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-      return { coord: [i, newCoord] as const, voltage, edgeKey };
+      return { coord: [i, newCoord] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
     case "S": {
       const { newCoord, wrapped } = getNeighborCoord(j, "S", n);
@@ -74,7 +78,7 @@ function getP1Neighbor(
       const voltage = wrapped ? translationMatrix(0, 2 * n) : I3;
       const toId = nodeIdFromCoord([i, newCoord]);
       const edgeKey = [fromId, toId].sort().join("|") + "|NS";
-      return { coord: [i, newCoord] as const, voltage, edgeKey };
+      return { coord: [i, newCoord] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
     case "E": {
       const { newCoord, wrapped } = getNeighborCoord(i, "E", n);
@@ -82,7 +86,7 @@ function getP1Neighbor(
       const voltage = wrapped ? translationMatrix(2 * n, 0) : I3;
       const toId = nodeIdFromCoord([newCoord, j]);
       const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-      return { coord: [newCoord, j] as const, voltage, edgeKey };
+      return { coord: [newCoord, j] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
     case "W": {
       const { newCoord, wrapped } = getNeighborCoord(i, "W", n);
@@ -90,7 +94,7 @@ function getP1Neighbor(
       const voltage = wrapped ? translationMatrix(-2 * n, 0) : I3;
       const toId = nodeIdFromCoord([newCoord, j]);
       const edgeKey = [fromId, toId].sort().join("|") + "|EW";
-      return { coord: [newCoord, j] as const, voltage, edgeKey };
+      return { coord: [newCoord, j] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
   }
 }

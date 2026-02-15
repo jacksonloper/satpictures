@@ -5,6 +5,7 @@ import {
   nodeIdFromCoord,
   matInvUnimodular,
   type OrbifoldNodeId,
+  type OrbifoldHalfEdge,
   type OrbifoldEdgeId,
   type OrbifoldNode,
   type OrbifoldEdge,
@@ -17,6 +18,9 @@ import {
   type EdgeStyleData,
   translationWith90CCW,
   translationWith90CW,
+  squarePolygon,
+  directionToPolygonEdge,
+  oppositePolygonEdge,
 } from "./orbifoldShared";
 
 const DIAGONAL_REFLECTION: Matrix3x3 = [
@@ -24,6 +28,13 @@ const DIAGONAL_REFLECTION: Matrix3x3 = [
   [1, 0, 0],
   [0, 0, 1],
 ] as const;
+
+/**
+ * P4g triangle polygon edge index for the diagonal/hypotenuse edge.
+ * Triangle vertices: (i-1,j-1), (i+1,j-1), (i-1,j+1)
+ * Edge 0 (N): top, Edge 1: diagonal/hypotenuse, Edge 2 (W): left
+ */
+const P4G_DIAG_EDGE = 1;
 
 /**
  * Get the neighbor node for P4g wallpaper group.
@@ -39,29 +50,40 @@ function getP4gNeighbor(
   const maxOdd = 2 * n - 1;
   const fromId = nodeIdFromCoord([i, j]);
   const isOnFirstSuperdiagonal = i === j + 2;
-  // With odd coordinates (2*col+1, 2*row+1), row = col - 1 maps to i = j + 2.
 
   if (isOnFirstSuperdiagonal && (dir === "S" || dir === "W")) {
     if (dir === "W") {
       return null;
     }
+    // S direction on superdiagonal → self-loop with diagonal reflection
+    // Uses the diagonal/hypotenuse edge (edge 1) of the triangle polygon
     const edgeKey = `${fromId}|DIAG`;
-    return { coord: [i, j] as const, voltage: DIAGONAL_REFLECTION, edgeKey };
+    return { coord: [i, j] as const, voltage: DIAGONAL_REFLECTION, edgeKey, fromPolygonEdgeIndex: P4G_DIAG_EDGE, toPolygonEdgeIndex: P4G_DIAG_EDGE };
   }
+
+  // For superdiagonal nodes (triangle), map N→0, E→(no W side, use square index 1 for E)
+  // For regular nodes (square), use standard direction mapping
+  const fromEdge = isOnFirstSuperdiagonal
+    ? (dir === "N" ? 0 : 1) // Triangle: 0=N, 1 not used for regular (only E possible beyond N)
+    : directionToPolygonEdge(dir);
 
   switch (dir) {
     case "N": {
       if (j === 1) {
+        // North border: P4g boundary N(0)→W(3) for square targets, or W(2) for triangle targets
         const newI = maxOdd;
         const newJ = maxOdd + 1 - i;
         const voltage = translationWith90CCW(2 * n, -2 * n);
         const toId = nodeIdFromCoord([newI, newJ]);
         const edgeKey = [fromId, toId].sort().join("|");
-        return { coord: [newI, newJ] as const, voltage, edgeKey };
+        // Target's polygon edge depends on whether the target is a triangle or square
+        const targetIsTriangle = newI === newJ + 2;
+        const toEdge = targetIsTriangle ? 2 : directionToPolygonEdge("W");
+        return { coord: [newI, newJ] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
       }
       const toId = nodeIdFromCoord([i, j - 2]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i, j - 2] as const, voltage: I3, edgeKey };
+      return { coord: [i, j - 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: oppositePolygonEdge(directionToPolygonEdge("N")) };
     }
     case "S": {
       if (j === maxOdd) {
@@ -69,7 +91,10 @@ function getP4gNeighbor(
       }
       const toId = nodeIdFromCoord([i, j + 2]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i, j + 2] as const, voltage: I3, edgeKey };
+      // Target is below, so enters through its North edge
+      const targetIsTriangle = i === (j + 2) + 2;
+      const toEdge = targetIsTriangle ? 0 : directionToPolygonEdge("N");
+      return { coord: [i, j + 2] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
     case "E": {
       if (i === maxOdd) {
@@ -77,20 +102,29 @@ function getP4gNeighbor(
       }
       const toId = nodeIdFromCoord([i + 2, j]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i + 2, j] as const, voltage: I3, edgeKey };
+      // Target is to the right, enters through its West edge
+      const targetIsTriangle = (i + 2) === j + 2;
+      const toEdge = targetIsTriangle ? 2 : directionToPolygonEdge("W");
+      return { coord: [i + 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
     case "W": {
       if (i === 1) {
+        // West border: P4g boundary W(3)→N(0) for square targets, or N(0) for triangle targets
         const newI = maxOdd + 1 - j;
         const newJ = maxOdd;
         const voltage = translationWith90CW(-2 * n, 2 * n);
         const toId = nodeIdFromCoord([newI, newJ]);
         const edgeKey = [fromId, toId].sort().join("|");
-        return { coord: [newI, newJ] as const, voltage, edgeKey };
+        const targetIsTriangle = newI === newJ + 2;
+        const toEdge = targetIsTriangle ? 0 : directionToPolygonEdge("N");
+        return { coord: [newI, newJ] as const, voltage, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
       }
       const toId = nodeIdFromCoord([i - 2, j]);
       const edgeKey = [fromId, toId].sort().join("|");
-      return { coord: [i - 2, j] as const, voltage: I3, edgeKey };
+      // Target is to the left, enters through its East edge
+      const targetIsTriangle = (i - 2) === j + 2;
+      const toEdge = targetIsTriangle ? 1 : directionToPolygonEdge("E"); // Wait, E would be index 1 anyway for square
+      return { coord: [i - 2, j] as const, voltage: I3, edgeKey, fromPolygonEdgeIndex: fromEdge, toPolygonEdgeIndex: toEdge };
     }
   }
 }
@@ -101,6 +135,11 @@ function getP4gNeighbor(
  * P4g is P4 folded across the NW-SE diagonal; only nodes strictly above the
  * diagonal are kept. The first superdiagonal receives a diagonal reflection
  * self-loop to mirror across the excluded half. Requires n >= 4.
+ *
+ * Nodes on the superdiagonal (i = j + 2) have a right triangle polygon:
+ *   vertices: (i-1,j-1), (i+1,j-1), (i-1,j+1)
+ *   edges: 0=North (top), 1=diagonal (hypotenuse), 2=West (left)
+ * All other nodes have a standard square polygon.
  */
 export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
   if (n < 4) {
@@ -122,9 +161,17 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
       const id = nodeIdFromCoord(coord);
       const color = initialColors?.[row]?.[col] ?? "white";
 
+      // Nodes on the first superdiagonal get a right triangle polygon;
+      // all others get a standard square polygon.
+      const isOnFirstSuperdiagonal = i === j + 2;
+      const polygon: readonly (readonly [number, number])[] = isOnFirstSuperdiagonal
+        ? [[i - 1, j - 1], [i + 1, j - 1], [i - 1, j + 1]] as const
+        : squarePolygon(i, j);
+
       nodes.set(id, {
         id,
         coord,
+        polygon,
         data: { color },
       });
     }
@@ -145,7 +192,7 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
           continue;
         }
 
-        const { coord: toCoord, voltage, edgeKey } = result;
+        const { coord: toCoord, voltage, edgeKey, fromPolygonEdgeIndex, toPolygonEdgeIndex } = result;
         const toId = nodeIdFromCoord(toCoord);
 
         if (!nodes.has(toId)) {
@@ -160,8 +207,8 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
         const edgeId = edgeKey.replace(/\|/g, "--");
 
         if (fromId === toId) {
-          const halfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3 }>();
-          halfEdges.set(fromId, { to: fromId, voltage });
+          const halfEdges = new Map<OrbifoldNodeId, OrbifoldHalfEdge>();
+          halfEdges.set(fromId, { to: fromId, voltage, polygonEdgeIndex: fromPolygonEdgeIndex });
 
           edges.set(edgeId, {
             id: edgeId,
@@ -170,9 +217,9 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
           });
         } else {
           const inverseVoltage = matInvUnimodular(voltage);
-          const halfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3 }>();
-          halfEdges.set(fromId, { to: toId, voltage });
-          halfEdges.set(toId, { to: fromId, voltage: inverseVoltage });
+          const halfEdges = new Map<OrbifoldNodeId, OrbifoldHalfEdge>();
+          halfEdges.set(fromId, { to: toId, voltage, polygonEdgeIndex: fromPolygonEdgeIndex });
+          halfEdges.set(toId, { to: fromId, voltage: inverseVoltage, polygonEdgeIndex: toPolygonEdgeIndex });
 
           edges.set(edgeId, {
             id: edgeId,
