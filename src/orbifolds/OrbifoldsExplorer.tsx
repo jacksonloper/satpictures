@@ -791,55 +791,94 @@ export function OrbifoldsExplorer() {
         )}
 
         {/* Result (persists independently; only replaced by a new solve) */}
-        {graphLiftResult && (
+        {graphLiftResult && graphLiftRoot && graphLiftTarget && (
           <div style={{
             marginTop: "12px",
             padding: "12px",
             backgroundColor: "#fff",
             borderRadius: "6px",
             border: "1px solid #d5dbdb",
-            maxHeight: "400px",
-            overflowY: "auto",
           }}>
             <h5 style={{ marginBottom: "8px" }}>Arborescence Result</h5>
-            <table style={{ fontSize: "12px", borderCollapse: "collapse", width: "100%" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Lifted Node</th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Depth</th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Parent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from(graphLiftResult.liftedDepth.entries())
-                  .sort((a, b) => a[1] - b[1])
-                  .map(([nodeId, depth]) => {
-                    const parent = graphLiftResult.liftedParent.get(nodeId);
-                    return (
-                      <tr key={nodeId}>
-                        <td style={{
-                          padding: "3px 8px",
-                          fontFamily: "monospace",
-                          fontSize: "11px",
-                          backgroundColor: nodeId === graphLiftRoot ? "#e8f6ef" : nodeId === graphLiftTarget ? "#fef9e7" : undefined,
-                        }}>
-                          {nodeId}
-                          {nodeId === graphLiftRoot && " (root)"}
-                          {nodeId === graphLiftTarget && " (target)"}
-                        </td>
-                        <td style={{ padding: "3px 8px" }}>{depth}</td>
-                        <td style={{ padding: "3px 8px", fontFamily: "monospace", fontSize: "11px" }}>
-                          {parent ?? "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-            <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-              Orbifold edge choices:{" "}
-              {Array.from(graphLiftResult.orbifoldParentEdge.entries()).map(([n, e]) => `${n}→${e}`).join(", ")}
-            </p>
+
+            {/* Visual rendering of arborescence on lifted graph */}
+            <LiftedGraphRenderer
+              liftedGraph={liftedGraph}
+              orbifoldGrid={orbifoldGrid}
+              useAxialTransform={wallpaperGroup === "P3" && useAxialTransform}
+              fundamentalDomainSize={size}
+              selectedVoltageKey={null}
+              onNodeClick={handleLiftedNodeClick}
+              showDomains={showDomains}
+              showDashedLines={showDashedLines}
+              showNodes={false}
+              arborescence={{
+                liftedParent: graphLiftResult.liftedParent,
+                liftedDepth: graphLiftResult.liftedDepth,
+                rootId: graphLiftRoot,
+                targetId: graphLiftTarget,
+              }}
+            />
+
+            {/* Depth legend */}
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+              <span style={{ color: "hsl(120,80%,45%)" }}>●</span> Root (depth 0)
+              <span style={{ marginLeft: "12px", color: "hsl(0,80%,45%)" }}>●</span> Deepest
+              <span style={{ marginLeft: "12px" }}>
+                <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #e67e22", borderRadius: "50%", verticalAlign: "middle" }} /> Target
+              </span>
+              <span style={{ marginLeft: "12px" }}>
+                <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #000", borderRadius: "50%", verticalAlign: "middle" }} /> Root
+              </span>
+              {" "}— Numbers show depth from root
+            </div>
+
+            {/* Table details */}
+            <details style={{ marginTop: "12px" }}>
+              <summary style={{ cursor: "pointer", fontSize: "13px", color: "#555" }}>
+                Show table ({graphLiftResult.liftedDepth.size} nodes)
+              </summary>
+              <div style={{ maxHeight: "300px", overflowY: "auto", marginTop: "8px" }}>
+                <table style={{ fontSize: "12px", borderCollapse: "collapse", width: "100%" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Lifted Node</th>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Depth</th>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" }}>Parent</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from(graphLiftResult.liftedDepth.entries())
+                      .sort((a, b) => a[1] - b[1])
+                      .map(([nodeId, depth]) => {
+                        const parent = graphLiftResult.liftedParent.get(nodeId);
+                        return (
+                          <tr key={nodeId}>
+                            <td style={{
+                              padding: "3px 8px",
+                              fontFamily: "monospace",
+                              fontSize: "11px",
+                              backgroundColor: nodeId === graphLiftRoot ? "#e8f6ef" : nodeId === graphLiftTarget ? "#fef9e7" : undefined,
+                            }}>
+                              {nodeId}
+                              {nodeId === graphLiftRoot && " (root)"}
+                              {nodeId === graphLiftTarget && " (target)"}
+                            </td>
+                            <td style={{ padding: "3px 8px" }}>{depth}</td>
+                            <td style={{ padding: "3px 8px", fontFamily: "monospace", fontSize: "11px" }}>
+                              {parent ?? "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                Orbifold edge choices:{" "}
+                {Array.from(graphLiftResult.orbifoldParentEdge.entries()).map(([n, e]) => `${n}→${e}`).join(", ")}
+              </p>
+            </details>
           </div>
         )}
       </div>

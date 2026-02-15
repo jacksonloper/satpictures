@@ -47,6 +47,14 @@ function colorFromVoltageKey(key: string, alpha: number = 0.15): string {
   return `hsla(${hue}, 70%, 50%, ${alpha})`;
 }
 
+/** Optional arborescence overlay: parent map + depth map + root/target IDs */
+export interface ArborescenceOverlay {
+  liftedParent: Map<string, string | null>;
+  liftedDepth: Map<string, number>;
+  rootId: string;
+  targetId: string;
+}
+
 export function LiftedGraphRenderer({
   liftedGraph,
   orbifoldGrid,
@@ -59,6 +67,7 @@ export function LiftedGraphRenderer({
   showDashedLines = true,
   showNodes = false,
   svgRef,
+  arborescence,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -71,6 +80,7 @@ export function LiftedGraphRenderer({
   showDashedLines?: boolean;
   showNodes?: boolean;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  arborescence?: ArborescenceOverlay;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
@@ -323,6 +333,86 @@ export function LiftedGraphRenderer({
           />
         );
       })}
+      {/* Arborescence overlay: directed tree edges and depth-colored nodes */}
+      {arborescence && (() => {
+        const maxDepth = Math.max(1, ...Array.from(arborescence.liftedDepth.values()));
+        // Color by depth: root is green, deep nodes go toward red/orange
+        const depthColor = (d: number) => {
+          const t = maxDepth > 0 ? d / maxDepth : 0;
+          const h = 120 - t * 120; // 120=green → 0=red
+          return `hsl(${h}, 80%, 45%)`;
+        };
+
+        return (
+          <>
+            {/* Tree edges: child → parent */}
+            {Array.from(arborescence.liftedParent.entries()).map(([childId, parentId]) => {
+              if (!parentId) return null;
+              const posChild = positions.get(childId);
+              const posParent = positions.get(parentId);
+              if (!posChild || !posParent) return null;
+              const childDepth = arborescence.liftedDepth.get(childId) ?? 0;
+
+              return (
+                <line
+                  key={`arb-edge-${childId}`}
+                  x1={toSvgX(posChild.x)}
+                  y1={toSvgY(posChild.y)}
+                  x2={toSvgX(posParent.x)}
+                  y2={toSvgY(posParent.y)}
+                  stroke={depthColor(childDepth)}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                  opacity={0.8}
+                />
+              );
+            })}
+
+            {/* Arborescence nodes with depth coloring */}
+            {Array.from(arborescence.liftedDepth.entries()).map(([nodeId, depth]) => {
+              const pos = positions.get(nodeId);
+              if (!pos) return null;
+              const isRoot = nodeId === arborescence.rootId;
+              const isTarget = nodeId === arborescence.targetId;
+              const r = isRoot || isTarget ? cellSize * 0.6 : cellSize / 3;
+
+              return (
+                <circle
+                  key={`arb-node-${nodeId}`}
+                  cx={toSvgX(pos.x)}
+                  cy={toSvgY(pos.y)}
+                  r={r}
+                  fill={depthColor(depth)}
+                  stroke={isRoot ? "#000" : isTarget ? "#e67e22" : depthColor(depth)}
+                  strokeWidth={isRoot || isTarget ? 3 : 1}
+                  opacity={0.9}
+                />
+              );
+            })}
+
+            {/* Depth labels on arborescence nodes */}
+            {Array.from(arborescence.liftedDepth.entries()).map(([nodeId, depth]) => {
+              const pos = positions.get(nodeId);
+              if (!pos) return null;
+              return (
+                <text
+                  key={`arb-label-${nodeId}`}
+                  x={toSvgX(pos.x)}
+                  y={toSvgY(pos.y)}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={9}
+                  fontWeight="bold"
+                  fill="white"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {depth}
+                </text>
+              );
+            })}
+          </>
+        );
+      })()}
     </svg>
   );
 }
