@@ -136,15 +136,11 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
         const voltage = translationWith90CCW(4 * n, -4 * n);
         addEdge(edges, processedEdges, fromId, toId, voltage, pairKey(fromId, toId));
       } else {
-        // Interior N: row-1 >= 0 and row-1 < col (since row < col → row-1 < col-1 < col when row>0)
+        // Interior N: row-1 >= 0 and row-1 < col (since row < col → row-1 < col when row>0)
         const tRow = row - 1;
-        if (tRow === col) {
-          // impossible as shown above, but guard
-        } else if (tRow < col) {
-          const toCoord = tRow === col ? p4gDiagonalCoord(tRow) : p4gRegularCoord(tRow, col);
-          const toId = nodeIdFromCoord(toCoord);
-          addEdge(edges, processedEdges, fromId, toId, I3, pairKey(fromId, toId));
-        }
+        const toCoord = p4gRegularCoord(tRow, col);
+        const toId = nodeIdFromCoord(toCoord);
+        addEdge(edges, processedEdges, fromId, toId, I3, pairKey(fromId, toId));
       }
 
       // S: row+1, same col
