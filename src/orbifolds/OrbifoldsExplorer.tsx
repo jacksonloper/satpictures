@@ -7,6 +7,8 @@
  * - Set an expansion count m (how many times to expand the lifted graph)
  * - Color in the grid cells (black/white) using "color" tool
  * - Inspect nodes to see coordinates, edges, and voltages using "inspect" tool
+ * - Set a root node using the "root" tool
+ * - Find non-self-intersecting loops of a given length via SAT solving
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
@@ -27,8 +29,11 @@ import {
   formatVoltageRows,
   type OrbifoldGrid,
   type OrbifoldEdgeId,
+  type OrbifoldNodeId,
 } from "./orbifoldbasics";
 import { applyRandomSpanningTreeToWhiteNodes } from "./spanningTree";
+import LoopFinderWorker from "./loop-finder.worker?worker";
+import type { LoopFinderRequest, LoopFinderResponse } from "./loop-finder.worker";
 import {
   ErrorBoundary,
   ValidatedInput,
@@ -58,6 +63,12 @@ export function OrbifoldsExplorer() {
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(null);
+  const [loopLengthInput, setLoopLengthInput] = useState("");
+  const [showLoopFinder, setShowLoopFinder] = useState(false);
+  const [solvingLoop, setSolvingLoop] = useState(false);
+  const [loopSatStats, setLoopSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
+  const loopWorkerRef = useRef<Worker | null>(null);
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
   
   // Ref for SVG export
@@ -84,6 +95,12 @@ export function OrbifoldsExplorer() {
     setOrbifoldGrid(grid);
     setInspectionInfo(null); // Clear inspection when grid changes
     setSelectedVoltageKey(null); // Clear voltage selection when grid changes
+    // Set default root to first node
+    const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
+    setRootNodeId(firstNodeId ?? null);
+    setShowLoopFinder(false);
+    setSolvingLoop(false);
+    setLoopSatStats(null);
   }, [wallpaperGroup, size]);
 
   // Handle cell color toggle
@@ -168,6 +185,135 @@ export function OrbifoldsExplorer() {
       setErrorMessage(`Random tree generation failed: ${message}`);
       console.error("Random spanning tree error:", error);
     }
+  }, []);
+
+  // Handle root node setting
+  const handleSetRoot = useCallback((nodeId: OrbifoldNodeId) => {
+    setRootNodeId(nodeId);
+  }, []);
+
+  // Handle loop finder toggle
+  const handleToggleLoopFinder = useCallback(() => {
+    setShowLoopFinder(prev => !prev);
+    setErrorMessage(null);
+  }, []);
+
+  // Handle loop finder cancel
+  const handleCancelLoopFind = useCallback(() => {
+    if (loopWorkerRef.current) {
+      loopWorkerRef.current.terminate();
+      loopWorkerRef.current = null;
+      setSolvingLoop(false);
+      setErrorMessage("Loop search cancelled");
+    }
+  }, []);
+
+  // Handle loop finder solve
+  const handleSolveLoop = useCallback(() => {
+    const loopLength = parseInt(loopLengthInput, 10);
+    if (!Number.isFinite(loopLength) || loopLength < 3) {
+      setErrorMessage("Loop length must be a positive integer ≥ 3");
+      return;
+    }
+    if (!rootNodeId) {
+      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
+      return;
+    }
+
+    setErrorMessage(null);
+    setSolvingLoop(true);
+    setLoopSatStats(null);
+
+    // Build adjacency data for the worker
+    const grid = orbifoldGrid;
+    const nodeIds = Array.from(grid.nodes.keys());
+    const adj: Record<string, string[]> = {};
+    for (const nodeId of nodeIds) {
+      const edgeIds = grid.adjacency?.get(nodeId) ?? [];
+      const neighbors: string[] = [];
+      for (const edgeId of edgeIds) {
+        const edge = grid.edges.get(edgeId);
+        if (!edge) continue;
+        const halfEdge = edge.halfEdges.get(nodeId);
+        if (!halfEdge) continue;
+        if (!neighbors.includes(halfEdge.to)) {
+          neighbors.push(halfEdge.to);
+        }
+      }
+      adj[nodeId] = neighbors;
+    }
+
+    // Build edges data
+    const edgesData: Array<{ edgeId: string; endpoints: [string, string] }> = [];
+    for (const [edgeId, edge] of grid.edges) {
+      const endpoints = Array.from(edge.halfEdges.keys());
+      if (endpoints.length === 1) {
+        // Self-edge
+        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[0]] });
+      } else {
+        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[1]] });
+      }
+    }
+
+    const request: LoopFinderRequest = {
+      loopLength,
+      rootNodeId,
+      nodeIds,
+      adjacency: adj,
+      edges: edgesData,
+    };
+
+    const worker = new LoopFinderWorker();
+    loopWorkerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<LoopFinderResponse>) => {
+      const response = event.data;
+
+      if (response.messageType === "progress") {
+        if (response.stats) {
+          setLoopSatStats(response.stats);
+        }
+        return;
+      }
+
+      if (response.success && response.loopEdgeIds) {
+        // Overwrite edge properties: solid for loop edges, dashed for others
+        const loopEdgeSet = new Set(response.loopEdgeIds);
+        setOrbifoldGrid((prev) => {
+          const newEdges = new Map(prev.edges);
+          for (const [edgeId, edge] of newEdges) {
+            const linestyle = loopEdgeSet.has(edgeId) ? "solid" : "dashed";
+            newEdges.set(edgeId, { ...edge, data: { linestyle } });
+          }
+          return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+        });
+        setInspectionInfo(null);
+        setErrorMessage(null);
+      } else {
+        setErrorMessage(response.error || "Loop search failed");
+      }
+
+      setSolvingLoop(false);
+      loopWorkerRef.current = null;
+    };
+
+    worker.onerror = (error) => {
+      setErrorMessage(`Worker error: ${error.message}`);
+      setSolvingLoop(false);
+      loopWorkerRef.current = null;
+    };
+
+    worker.postMessage(request);
+  }, [loopLengthInput, rootNodeId, orbifoldGrid]);
+
+  // Cleanup worker on unmount
+  useEffect(() => {
+    return () => {
+      if (loopWorkerRef.current) {
+        loopWorkerRef.current.terminate();
+        loopWorkerRef.current = null;
+      }
+    };
   }, []);
 
   // Handle SVG export
@@ -355,6 +501,20 @@ export function OrbifoldsExplorer() {
               🔍 Inspect
             </button>
             <button
+              onClick={() => setTool("root")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: tool === "root" ? "2px solid #e67e22" : "1px solid #ccc",
+                backgroundColor: tool === "root" ? "#fef5e7" : "white",
+                cursor: "pointer",
+                fontWeight: tool === "root" ? "bold" : "normal",
+              }}
+              title="Click a node to set it as the root for loop finding"
+            >
+              📌 Root
+            </button>
+            <button
               onClick={handleRandomSpanningTree}
               style={{
                 padding: "6px 12px",
@@ -367,13 +527,100 @@ export function OrbifoldsExplorer() {
             >
               🌲 Random Tree
             </button>
+            <button
+              onClick={handleToggleLoopFinder}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: showLoopFinder ? "2px solid #8e44ad" : "1px solid #8e44ad",
+                backgroundColor: showLoopFinder ? "#f4ecf7" : "#faf5ff",
+                cursor: "pointer",
+                fontWeight: showLoopFinder ? "bold" : "normal",
+              }}
+              title="Find a non-self-intersecting loop of given length via SAT solver"
+            >
+              🔄 Find Loop
+            </button>
           </div>
           
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             {tool === "color" 
               ? "Click cells to toggle black/white" 
+              : tool === "root"
+              ? "Click a node to set it as root"
               : "Click cells to inspect node info and voltages"}
           </p>
+          
+          {/* Loop Finder Panel */}
+          {showLoopFinder && (
+            <div style={{
+              marginBottom: "10px",
+              padding: "10px",
+              backgroundColor: "#f4ecf7",
+              borderRadius: "8px",
+              border: "1px solid #8e44ad",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <label style={{ fontSize: "13px" }}>Loop length:</label>
+                <input
+                  type="text"
+                  value={loopLengthInput}
+                  onChange={(e) => setLoopLengthInput(e.target.value)}
+                  disabled={solvingLoop}
+                  style={{
+                    width: "60px",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                    fontSize: "13px",
+                  }}
+                  placeholder="e.g. 5"
+                />
+                <button
+                  onClick={handleSolveLoop}
+                  disabled={solvingLoop}
+                  style={{
+                    padding: "4px 12px",
+                    borderRadius: "4px",
+                    border: "1px solid #8e44ad",
+                    backgroundColor: solvingLoop ? "#d5d8dc" : "#e8daef",
+                    cursor: solvingLoop ? "not-allowed" : "pointer",
+                    fontSize: "13px",
+                  }}
+                >
+                  {solvingLoop ? "Solving…" : "Solve"}
+                </button>
+                <button
+                  onClick={handleCancelLoopFind}
+                  style={{
+                    padding: "4px 12px",
+                    borderRadius: "4px",
+                    border: "1px solid #e74c3c",
+                    backgroundColor: "#fadbd8",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {loopSatStats && (
+                <p style={{ fontSize: "11px", color: "#666", marginTop: "6px" }}>
+                  SAT: {loopSatStats.numVars} vars, {loopSatStats.numClauses} clauses
+                </p>
+              )}
+              {rootNodeId && (
+                <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+                  Root: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{rootNodeId}</code>
+                </p>
+              )}
+              {!rootNodeId && (
+                <p style={{ fontSize: "11px", color: "#e74c3c", marginTop: "4px" }}>
+                  ⚠️ Set a root node first (use 📌 Root tool)
+                </p>
+              )}
+            </div>
+          )}
           
           <OrbifoldGridTools
             n={size}
@@ -381,7 +628,9 @@ export function OrbifoldsExplorer() {
             tool={tool}
             onColorToggle={handleColorToggle}
             onInspect={handleInspect}
+            onSetRoot={handleSetRoot}
             inspectedNodeId={inspectionInfo?.nodeId ?? null}
+            rootNodeId={rootNodeId}
           />
           
           {/* Stats */}
