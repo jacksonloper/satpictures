@@ -17,6 +17,7 @@ import {
   matMul,
   I3,
   formatVoltage,
+  rootOfUnityOrder,
 } from "../orbifoldbasics";
 import {
   getNodeColor,
@@ -128,6 +129,13 @@ export function LoopResultRenderer({
   const loopVoltage = useMemo(
     () => computeLoopVoltage(steps, selections, grid),
     [steps, selections, grid],
+  );
+
+  // Check whether the voltage is a root of unity (V^k = I for small k)
+  const MAX_ROOT_CHECK = 8;
+  const unityOrder = useMemo(
+    () => rootOfUnityOrder(loopVoltage, MAX_ROOT_CHECK),
+    [loopVoltage],
   );
 
   // Steps that have more than one edge option (choice points)
@@ -260,6 +268,11 @@ export function LoopResultRenderer({
       }}>
         <span style={{ fontWeight: "bold" }}>Final voltage: </span>
         {formatVoltage(loopVoltage)}
+        <br />
+        {unityOrder !== null
+          ? <span style={{ color: "#27ae60" }}>voltage^{unityOrder} = I</span>
+          : <span style={{ color: "#e67e22" }}>voltage^k ≠ I for any positive integer k ≤ {MAX_ROOT_CHECK}</span>
+        }
       </div>
 
       <div style={{ display: "flex", gap: "8px" }}>
