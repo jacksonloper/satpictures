@@ -122,8 +122,8 @@ export function OrbifoldGridTools({
    */
   const pointInPolygon = (px: number, py: number, polygon: NodePolygon): boolean => {
     let inside = false;
-    const n2 = polygon.length;
-    for (let i = 0, j = n2 - 1; i < n2; j = i++) {
+    const numVertices = polygon.length;
+    for (let i = 0, j = numVertices - 1; i < numVertices; j = i++) {
       const [xi, yi] = polygon[i];
       const [xj, yj] = polygon[j];
       if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {

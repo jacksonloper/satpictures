@@ -243,7 +243,8 @@ export function validateOrbifoldEdge(edge: OrbifoldEdge): void {
 /**
  * Validates the polygon-side invariant for an orbifold grid:
  * Every polygon side of every node must be associated with exactly one orbifold edge.
- * A self-edge may cover 1 or 2 polygon sides.
+ * A self-edge may cover 1 or 2 polygon sides (2 sides when a self-edge connects
+ * different polygon sides of the same node, e.g. a corner node with rotational wrapping).
  *
  * Throws on any violation.
  */

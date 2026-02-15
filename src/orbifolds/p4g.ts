@@ -77,7 +77,8 @@ function p4gSquarePolygon(i: Int, j: Int): readonly (readonly [number, number])[
 
 /**
  * Build a triangle polygon (clockwise: NW, NE, SE) for a P4g diagonal node.
- * The triangle is the upper-right half of the diagonal square cut by the NW-SE diagonal.
+ * The triangle is the upper-right half of the square from (base, base) to (base+4, base+4),
+ * cut by the NW-SE diagonal, where base = 4*k.
  * Side 0 (NW→NE) = North, Side 1 (NE→SE) = East, Side 2 (SE→NW) = Diagonal (hypotenuse)
  */
 function p4gTrianglePolygon(k: Int): readonly (readonly [number, number])[] {

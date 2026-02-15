@@ -356,12 +356,12 @@ export function createSquareOrbifoldGrid(
             const existingSides = selfEdgeSides.get(edgeKey);
             if (existingSides && !existingSides.includes(fromSide)) {
               existingSides.push(fromSide);
-              // Update the half-edge's polygonSides
+              // Update the half-edge's polygonSides (shares the same array reference)
               const edgeId = edgeKey.replace(/\|/g, "--");
               const edge = edges.get(edgeId);
               if (edge) {
                 const half = edge.halfEdges.get(fromId);
-                if (half && !half.polygonSides.includes(fromSide)) {
+                if (half) {
                   half.polygonSides.push(fromSide);
                 }
               }
