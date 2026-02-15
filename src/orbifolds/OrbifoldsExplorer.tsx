@@ -364,48 +364,14 @@ export function OrbifoldsExplorer() {
     };
   }, []);
 
-  // Handle accepting the loop result: set loop edges as solid, others as dashed
-  // For multi-edges between the same pair of nodes, pick one randomly
-  const handleAcceptLoop = useCallback(() => {
+  // Handle accepting the loop result: set selected loop edges as solid, others as dashed.
+  // `selectedEdgeIds` is the per-step edge selection made by the user in the LoopResultRenderer.
+  const handleAcceptLoop = useCallback((selectedEdgeIds: string[]) => {
     if (!pendingLoopResult) return;
-    const { pathNodeIds, loopEdgeIds } = pendingLoopResult;
 
-    // Build the set of consecutive node pairs in the path
-    // For each pair, we need exactly one edge made solid (chosen randomly if multiple)
-    const pairToEdges = new Map<string, string[]>();
-    for (let t = 0; t < pathNodeIds.length - 1; t++) {
-      const a = pathNodeIds[t];
-      const b = pathNodeIds[t + 1];
-      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-      if (!pairToEdges.has(key)) {
-        pairToEdges.set(key, []);
-      }
-    }
+    const chosenEdges = new Set(selectedEdgeIds);
 
-    // Categorize loop edge IDs by which node pair they connect
-    const loopEdgeSet = new Set(loopEdgeIds);
     setOrbifoldGrid((prev) => {
-      // Collect edges by node pair
-      for (const [edgeId, edge] of prev.edges) {
-        if (!loopEdgeSet.has(edgeId)) continue;
-        const endpoints = Array.from(edge.halfEdges.keys());
-        // Self-loop edges have 1 key; normal edges have 2 keys
-        const a = endpoints[0];
-        const b = endpoints.length === 1 ? endpoints[0] : endpoints[1];
-        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-        const arr = pairToEdges.get(key);
-        if (arr) arr.push(edgeId);
-      }
-
-      // For each pair, pick one edge randomly
-      const chosenEdges = new Set<string>();
-      for (const [, edgeIds] of pairToEdges) {
-        if (edgeIds.length > 0) {
-          const chosen = edgeIds[Math.floor(Math.random() * edgeIds.length)];
-          chosenEdges.add(chosen);
-        }
-      }
-
       // Set chosen edges to solid, all others to dashed
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
