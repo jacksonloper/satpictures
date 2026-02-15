@@ -4,6 +4,9 @@
  * Colors each node using the ExtraData color from the orbifold node.
  * Highlights nodes whose orbifold node matches the inspected node.
  * 
+ * Domains and node coloring are rendered using each orbifold node's polygon
+ * geometry, transformed by the voltage matrix.
+ * 
  * For P3 (axial coordinates), an optional transform can be applied to convert
  * axial coordinates to Cartesian for better visualization.
  */
@@ -52,7 +55,6 @@ export function LiftedGraphRenderer({
   orbifoldGrid,
   highlightOrbifoldNodeId,
   useAxialTransform = false,
-  fundamentalDomainSize,
   selectedVoltageKey,
   onNodeClick,
   showDomains = true,
@@ -64,7 +66,6 @@ export function LiftedGraphRenderer({
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
   highlightOrbifoldNodeId?: OrbifoldNodeId | null;
   useAxialTransform?: boolean;
-  fundamentalDomainSize: number;
   selectedVoltageKey: string | null;
   onNodeClick: (liftedNodeId: string, voltageKey: string) => void;
   showDomains?: boolean;
@@ -74,8 +75,8 @@ export function LiftedGraphRenderer({
 }) {
   const cellSize = LIFTED_CELL_SIZE;
   
-  // Compute positions, bounds, and collect unique voltages
-  const { nodePositions, uniqueVoltages } = useMemo(() => {
+  // Compute positions and bounds
+  const nodePositions = useMemo(() => {
     const positions = new Map<string, { 
       x: number; 
       y: number; 
@@ -83,18 +84,13 @@ export function LiftedGraphRenderer({
       orbifoldNodeId: OrbifoldNodeId;
       voltageKey: string;
     }>();
-    const voltages = new Map<string, Matrix3x3>();
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     
     for (const [id, node] of liftedGraph.nodes) {
       const orbNode = orbifoldGrid.nodes.get(node.orbifoldNode);
       if (!orbNode) continue;
       
-      // Track unique voltages
       const voltageKey = voltageToKey(node.voltage);
-      if (!voltages.has(voltageKey)) {
-        voltages.set(voltageKey, node.voltage);
-      }
       
       // Position = voltage × orbifold node coordinates
       const [ox, oy] = orbNode.coord;
@@ -114,95 +110,50 @@ export function LiftedGraphRenderer({
       positions.set(id, { x: pos.x, y: pos.y, color, orbifoldNodeId: node.orbifoldNode, voltageKey });
     }
     
-    return { 
-      nodePositions: { positions, minX, maxX, minY, maxY },
-      uniqueVoltages: voltages,
-    };
+    return { positions, minX, maxX, minY, maxY };
   }, [liftedGraph, orbifoldGrid, useAxialTransform]);
 
   const { positions, minX, maxX, minY, maxY } = nodePositions;
   
-  // Compute transformed fundamental domains for each unique voltage
-  const transformedDomains = useMemo(() => {
-    const domains: Array<{
-      key: string;
+  // Compute per-lifted-node polygon geometry by transforming each orbifold
+  // node's polygon vertices through the voltage matrix.
+  const liftedNodePolygons = useMemo(() => {
+    const polys: Array<{
+      id: string;
       corners: Array<{ x: number; y: number }>;
-      color: string;
+      color: "black" | "white";
+      voltageKey: string;
     }> = [];
     
-    // The fundamental domain corners: (0, 0), (2n, 0), (2n, 2n), (0, 2n)
-    const domainSize = fundamentalDomainSize * 2; // 2n
-    const originalCorners = [
-      { x: 0, y: 0 },
-      { x: domainSize, y: 0 },
-      { x: domainSize, y: domainSize },
-      { x: 0, y: domainSize },
-    ];
-    
-    for (const [key, voltage] of uniqueVoltages) {
-      const transformedCorners = originalCorners.map(corner => {
-        let pos = applyMatrix(voltage, corner.x, corner.y);
+    for (const [id, node] of liftedGraph.nodes) {
+      const orbNode = orbifoldGrid.nodes.get(node.orbifoldNode);
+      if (!orbNode) continue;
+      
+      const transformedCorners = orbNode.polygon.map(([px, py]) => {
+        let pos = applyMatrix(node.voltage, px, py);
         if (useAxialTransform) {
           pos = axialToCartesian(pos.x, pos.y);
         }
         return pos;
       });
       
-      domains.push({
-        key,
-        corners: transformedCorners,
-        color: colorFromVoltageKey(key),
-      });
-    }
-    
-    return domains;
-  }, [uniqueVoltages, fundamentalDomainSize, useAxialTransform]);
-  
-  // Compute shading quadrilaterals for black nodes
-  // For each black orbifold node, create the (i-1,i+1)×(j-1,j+1) square
-  // transformed by voltage and optional axial transform
-  const blackNodeShadings = useMemo(() => {
-    const shadings: Array<{
-      id: string;
-      corners: Array<{ x: number; y: number }>;
-    }> = [];
-    
-    for (const [id, node] of liftedGraph.nodes) {
-      const orbNode = orbifoldGrid.nodes.get(node.orbifoldNode);
-      if (!orbNode || orbNode.data?.color !== "black") continue;
-      
-      // Create the (i-1,i+1)×(j-1,j+1) square around the node
-      const [ox, oy] = orbNode.coord;
-      const squareCorners = [
-        { x: ox - 1, y: oy - 1 },
-        { x: ox + 1, y: oy - 1 },
-        { x: ox + 1, y: oy + 1 },
-        { x: ox - 1, y: oy + 1 },
-      ];
-      
-      // Apply voltage transform
-      const transformedCorners = squareCorners.map(corner => {
-        let transformedCorner = applyMatrix(node.voltage, corner.x, corner.y);
-        if (useAxialTransform) {
-          transformedCorner = axialToCartesian(transformedCorner.x, transformedCorner.y);
-        }
-        return transformedCorner;
-      });
-      
-      shadings.push({
+      const voltageKey = voltageToKey(node.voltage);
+      polys.push({
         id,
         corners: transformedCorners,
+        color: orbNode.data?.color ?? "white",
+        voltageKey,
       });
     }
     
-    return shadings;
+    return polys;
   }, [liftedGraph, orbifoldGrid, useAxialTransform]);
   
-  // Compute SVG dimensions with padding - include domain corners in bounds
+  // Compute SVG dimensions with padding - include polygon corners in bounds
   const allBounds = useMemo(() => {
     let bMinX = minX, bMaxX = maxX, bMinY = minY, bMaxY = maxY;
-    for (const domain of transformedDomains) {
-      for (const corner of domain.corners) {
+    for (const poly of liftedNodePolygons) {
+      for (const corner of poly.corners) {
         bMinX = Math.min(bMinX, corner.x);
         bMaxX = Math.max(bMaxX, corner.x);
         bMinY = Math.min(bMinY, corner.y);
@@ -210,7 +161,7 @@ export function LiftedGraphRenderer({
       }
     }
     return { minX: bMinX, maxX: bMaxX, minY: bMinY, maxY: bMaxY };
-  }, [minX, maxX, minY, maxY, transformedDomains]);
+  }, [minX, maxX, minY, maxY, liftedNodePolygons]);
   
   const padding = GRID_PADDING * 2;
   const rangeX = allBounds.maxX - allBounds.minX || 1;
@@ -230,39 +181,41 @@ export function LiftedGraphRenderer({
       height={Math.max(height, 200)}
       style={{ border: "1px solid #ccc", borderRadius: "4px", backgroundColor: "#f8f9fa" }}
     >
-      {/* Transformed fundamental domains (drawn first, behind everything) */}
-      {showDomains && transformedDomains.map((domain) => {
-        const isSelected = domain.key === selectedVoltageKey;
-        const points = domain.corners
+      {/* Node polygon domains (drawn first, behind everything) */}
+      {showDomains && liftedNodePolygons.map((poly) => {
+        const isSelected = poly.voltageKey === selectedVoltageKey;
+        const points = poly.corners
           .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
           .join(' ');
         
         return (
           <polygon
-            key={`domain-${domain.key}`}
+            key={`domain-${poly.id}`}
             points={points}
-            fill={isSelected ? colorFromVoltageKey(domain.key, 0.4) : domain.color}
-            stroke={isSelected ? colorFromVoltageKey(domain.key, 1.0) : colorFromVoltageKey(domain.key, 0.5)}
+            fill={isSelected ? colorFromVoltageKey(poly.voltageKey, 0.4) : colorFromVoltageKey(poly.voltageKey)}
+            stroke={isSelected ? colorFromVoltageKey(poly.voltageKey, 1.0) : colorFromVoltageKey(poly.voltageKey, 0.5)}
             strokeWidth={isSelected ? 3 : 1}
           />
         );
       })}
       
       {/* Black node shadings (drawn after domains, before edges) */}
-      {blackNodeShadings.map((shading) => {
-        const points = shading.corners
-          .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
-          .join(' ');
-        
-        return (
-          <polygon
-            key={`shading-${shading.id}`}
-            points={points}
-            fill="rgba(0, 0, 0, 0.5)"
-            stroke="none"
-          />
-        );
-      })}
+      {liftedNodePolygons
+        .filter(poly => poly.color === "black")
+        .map((poly) => {
+          const points = poly.corners
+            .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
+            .join(' ');
+          
+          return (
+            <polygon
+              key={`shading-${poly.id}`}
+              points={points}
+              fill="rgba(0, 0, 0, 0.5)"
+              stroke="none"
+            />
+          );
+        })}
       
       {/* Edges */}
       {Array.from(liftedGraph.edges.values()).map((edge) => {

@@ -873,7 +873,6 @@ export function OrbifoldsExplorer() {
             orbifoldGrid={orbifoldGrid}
             highlightOrbifoldNodeId={inspectionInfo?.nodeId}
             useAxialTransform={wallpaperGroup === "P3" && useAxialTransform}
-            fundamentalDomainSize={size}
             selectedVoltageKey={selectedVoltageKey}
             onNodeClick={handleLiftedNodeClick}
             showDomains={showDomains}
