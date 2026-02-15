@@ -344,12 +344,9 @@ export function OrbifoldsExplorer() {
       for (const [edgeId, edge] of prev.edges) {
         if (!loopEdgeSet.has(edgeId)) continue;
         const endpoints = Array.from(edge.halfEdges.keys());
-        let a: string, b: string;
-        if (endpoints.length === 1) {
-          a = endpoints[0]; b = endpoints[0];
-        } else {
-          a = endpoints[0]; b = endpoints[1];
-        }
+        // Self-loop edges have 1 key; normal edges have 2 keys
+        const a = endpoints[0];
+        const b = endpoints.length === 1 ? endpoints[0] : endpoints[1];
         const key = a < b ? `${a}|${b}` : `${b}|${a}`;
         const arr = pairToEdges.get(key);
         if (arr) arr.push(edgeId);
