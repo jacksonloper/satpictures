@@ -245,7 +245,7 @@ export function OrbifoldsExplorer() {
 
     // Validate: there must be at least one non-black node
     const blackSet = new Set(blackNodeIds);
-    if (blackNodeIds.length >= nodeIds.length) {
+    if (blackNodeIds.length === nodeIds.length) {
       setErrorMessage("No non-black nodes available for the loop");
       setSolvingLoop(false);
       return;
