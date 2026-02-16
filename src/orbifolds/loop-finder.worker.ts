@@ -640,14 +640,16 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
   }
 
   // Extract per-step voltages from the SAT assignment
-  const pathVoltages: number[] = []; // voltage index at each non-null step
+  const pathVoltages: (number | undefined)[] = []; // voltage index at each non-null step
   for (let t = 0; t < path.length; t++) {
+    let found: number | undefined;
     for (let k = 0; k < totalVoltages; k++) {
       if (assignment.get(volt[t][k])) {
-        pathVoltages.push(k);
+        found = k;
         break;
       }
     }
+    pathVoltages.push(found);
   }
 
   // Determine per-step edge IDs by matching voltage transitions
@@ -657,8 +659,10 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
   for (let t = 0; t < path.length - 1; t++) {
     const fromNode = nodeIds[path[t]];
     const toNode = nodeIds[path[t + 1]];
-    const voltBefore = pathVoltages[t] !== undefined ? allVoltages[pathVoltages[t]].matrix : IDENTITY_MATRIX;
-    const voltAfter = pathVoltages[t + 1] !== undefined ? allVoltages[pathVoltages[t + 1]].matrix : IDENTITY_MATRIX;
+    const vt = pathVoltages[t];
+    const vt1 = pathVoltages[t + 1];
+    const voltBefore = (vt !== undefined && vt < allVoltages.length) ? allVoltages[vt].matrix : IDENTITY_MATRIX;
+    const voltAfter = (vt1 !== undefined && vt1 < allVoltages.length) ? allVoltages[vt1].matrix : IDENTITY_MATRIX;
     const voltAfterKey = voltageKeyFromMatrix(voltAfter);
 
     // Find the edge that produces this voltage transition
