@@ -19,7 +19,7 @@ import {
   applyMatrix,
   axialToCartesian,
 } from "../orbifoldbasics";
-import { type ColorData, type EdgeStyleData } from "../createOrbifolds";
+import { getEdgeLinestyle, type ColorData, type EdgeStyleData } from "../createOrbifolds";
 
 // Constants
 const LIFTED_CELL_SIZE = 16;
@@ -60,6 +60,7 @@ export function LiftedGraphRenderer({
   showDomains = true,
   showDashedLines = true,
   showNodes = false,
+  showWalls = false,
   svgRef,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
@@ -71,6 +72,7 @@ export function LiftedGraphRenderer({
   showDomains?: boolean;
   showDashedLines?: boolean;
   showNodes?: boolean;
+  showWalls?: boolean;
   svgRef?: React.RefObject<SVGSVGElement | null>;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
@@ -149,6 +151,57 @@ export function LiftedGraphRenderer({
     return polys;
   }, [liftedGraph, orbifoldGrid, useAxialTransform]);
   
+  // Collect dashed-edge polygon sides from the orbifold grid (walls).
+  // For each orbifold node, gather the set of polygon side indices that
+  // correspond to "dashed" edges — same logic as OrbifoldGridTools.
+  const dashedSidesPerOrbifoldNode = useMemo(() => {
+    const dashedSides = new Map<OrbifoldNodeId, Set<number>>();
+    for (const edge of orbifoldGrid.edges.values()) {
+      const linestyle = getEdgeLinestyle(orbifoldGrid, edge.id);
+      if (linestyle !== "dashed") continue;
+      for (const [nodeId, halfEdge] of edge.halfEdges) {
+        let set = dashedSides.get(nodeId);
+        if (!set) {
+          set = new Set();
+          dashedSides.set(nodeId, set);
+        }
+        for (const side of halfEdge.polygonSides) {
+          set.add(side);
+        }
+      }
+    }
+    return dashedSides;
+  }, [orbifoldGrid]);
+
+  // Build wall segments for the lifted view: for each lifted node, find which
+  // polygon sides are walls (dashed) and emit the transformed line segments.
+  const liftedWallSegments = useMemo(() => {
+    const segments: Array<{
+      key: string;
+      x1: number; y1: number;
+      x2: number; y2: number;
+    }> = [];
+    
+    for (const poly of liftedNodePolygons) {
+      const liftedNode = liftedGraph.nodes.get(poly.id);
+      if (!liftedNode) continue;
+      const sides = dashedSidesPerOrbifoldNode.get(liftedNode.orbifoldNode);
+      if (!sides) continue;
+      
+      for (const sideIdx of sides) {
+        const p1 = poly.corners[sideIdx];
+        const p2 = poly.corners[(sideIdx + 1) % poly.corners.length];
+        segments.push({
+          key: `wall-${poly.id}-${sideIdx}`,
+          x1: p1.x, y1: p1.y,
+          x2: p2.x, y2: p2.y,
+        });
+      }
+    }
+    
+    return segments;
+  }, [liftedNodePolygons, liftedGraph, dashedSidesPerOrbifoldNode]);
+
   // Compute SVG dimensions with padding - include polygon corners in bounds
   const allBounds = useMemo(() => {
     let bMinX = minX, bMaxX = maxX, bMinY = minY, bMaxY = maxY;
@@ -217,8 +270,8 @@ export function LiftedGraphRenderer({
           );
         })}
       
-      {/* Edges */}
-      {Array.from(liftedGraph.edges.values()).map((edge) => {
+      {/* Edges (hidden when showWalls is active) */}
+      {!showWalls && Array.from(liftedGraph.edges.values()).map((edge) => {
         const posA = positions.get(edge.a);
         const posB = positions.get(edge.b);
         if (!posA || !posB) return null;
@@ -250,6 +303,20 @@ export function LiftedGraphRenderer({
           />
         );
       })}
+      
+      {/* Walls: thick black lines on polygon sides with dashed edges */}
+      {showWalls && liftedWallSegments.map((seg) => (
+        <line
+          key={seg.key}
+          x1={toSvgX(seg.x1)}
+          y1={toSvgY(seg.y1)}
+          x2={toSvgX(seg.x2)}
+          y2={toSvgY(seg.y2)}
+          stroke="black"
+          strokeWidth={3}
+          strokeLinecap="round"
+        />
+      ))}
       
       {/* Nodes (optional, off by default) */}
       {showNodes && Array.from(positions.entries()).map(([id, pos]) => {

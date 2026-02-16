@@ -61,6 +61,7 @@ export function OrbifoldsExplorer() {
   const [showDomains, setShowDomains] = useState(true);
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
+  const [showWalls, setShowWalls] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(null);
   const [loopLengthInput, setLoopLengthInput] = useState("");
@@ -852,6 +853,14 @@ export function OrbifoldsExplorer() {
               />
               Show nodes
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showWalls}
+                onChange={(e) => setShowWalls(e.target.checked)}
+              />
+              Show walls
+            </label>
             <button
               onClick={handleExportSvg}
               style={{
@@ -878,6 +887,7 @@ export function OrbifoldsExplorer() {
             showDomains={showDomains}
             showDashedLines={showDashedLines}
             showNodes={showNodes}
+            showWalls={showWalls}
             svgRef={liftedGraphSvgRef}
           />
           
