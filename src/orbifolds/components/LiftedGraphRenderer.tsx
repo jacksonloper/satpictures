@@ -51,6 +51,65 @@ function colorFromVoltageKey(key: string, alpha: number = 0.15): string {
   return `hsla(${hue}, 70%, 50%, ${alpha})`;
 }
 
+export type BackgroundMode = "none" | "domain" | "component";
+
+/**
+ * Compute connected components of the lifted graph using only non-dashed (solid) edges.
+ * Uses BFS from random unvisited nodes, assigning a component id to each lifted node.
+ */
+function computeConnectedComponents(
+  liftedGraph: LiftedGraph<ColorData, EdgeStyleData>,
+  orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>,
+): Map<string, number> {
+  const componentMap = new Map<string, number>();
+  
+  // Build adjacency on solid edges only
+  const adjacency = new Map<string, string[]>();
+  for (const id of liftedGraph.nodes.keys()) {
+    adjacency.set(id, []);
+  }
+  for (const edge of liftedGraph.edges.values()) {
+    // Check if the orbifold edge is solid (non-dashed)
+    const orbifoldEdge = edge.orbifoldEdgeId ? orbifoldGrid.edges.get(edge.orbifoldEdgeId) : undefined;
+    const linestyle = orbifoldEdge?.data?.linestyle ?? "solid";
+    if (linestyle === "dashed") continue;
+    
+    adjacency.get(edge.a)?.push(edge.b);
+    adjacency.get(edge.b)?.push(edge.a);
+  }
+  
+  let componentId = 0;
+  for (const nodeId of liftedGraph.nodes.keys()) {
+    if (componentMap.has(nodeId)) continue;
+    
+    // BFS from this node
+    const queue = [nodeId];
+    componentMap.set(nodeId, componentId);
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
+      for (const neighbor of (adjacency.get(current) ?? [])) {
+        if (!componentMap.has(neighbor)) {
+          componentMap.set(neighbor, componentId);
+          queue.push(neighbor);
+        }
+      }
+    }
+    componentId++;
+  }
+  
+  return componentMap;
+}
+
+/**
+ * Generate a color from a component id for connected component visualization.
+ */
+function colorFromComponentId(componentId: number, alpha: number = 0.15): string {
+  // Use golden ratio to spread hues evenly
+  const hue = (componentId * 137.508) % 360;
+  return `hsla(${hue}, 70%, 50%, ${alpha})`;
+}
+
 export function LiftedGraphRenderer({
   liftedGraph,
   orbifoldGrid,
@@ -58,7 +117,7 @@ export function LiftedGraphRenderer({
   useAxialTransform = false,
   selectedVoltageKey,
   onNodeClick,
-  showDomains = true,
+  showDomains = "domain",
   showDashedLines = true,
   showNodes = false,
   showWalls = false,
@@ -70,7 +129,7 @@ export function LiftedGraphRenderer({
   useAxialTransform?: boolean;
   selectedVoltageKey: string | null;
   onNodeClick: (liftedNodeId: string, voltageKey: string) => void;
-  showDomains?: boolean;
+  showDomains?: BackgroundMode;
   showDashedLines?: boolean;
   showNodes?: boolean;
   showWalls?: boolean;
@@ -151,6 +210,12 @@ export function LiftedGraphRenderer({
     
     return polys;
   }, [liftedGraph, orbifoldGrid, useAxialTransform]);
+
+  // Compute connected components on non-dashed edges (for "component" background mode)
+  const connectedComponents = useMemo(() => {
+    if (showDomains !== "component") return new Map<string, number>();
+    return computeConnectedComponents(liftedGraph, orbifoldGrid);
+  }, [liftedGraph, orbifoldGrid, showDomains]);
   
   // Collect dashed-edge polygon sides from the orbifold grid (walls).
   // For each orbifold node, gather the set of polygon side indices that
@@ -236,18 +301,29 @@ export function LiftedGraphRenderer({
       style={{ border: "1px solid #ccc", borderRadius: "4px", backgroundColor: "#f8f9fa" }}
     >
       {/* Node polygon domains (drawn first, behind everything) */}
-      {showDomains && liftedNodePolygons.map((poly) => {
+      {showDomains !== "none" && liftedNodePolygons.map((poly) => {
         const isSelected = poly.voltageKey === selectedVoltageKey;
         const points = poly.corners
           .map(c => `${toSvgX(c.x)},${toSvgY(c.y)}`)
           .join(' ');
         
+        let fillColor: string;
+        let strokeColor: string;
+        if (showDomains === "component") {
+          const compId = connectedComponents.get(poly.id) ?? 0;
+          fillColor = isSelected ? colorFromComponentId(compId, 0.4) : colorFromComponentId(compId);
+          strokeColor = isSelected ? colorFromComponentId(compId, 1.0) : colorFromComponentId(compId, 0.5);
+        } else {
+          fillColor = isSelected ? colorFromVoltageKey(poly.voltageKey, 0.4) : colorFromVoltageKey(poly.voltageKey);
+          strokeColor = isSelected ? colorFromVoltageKey(poly.voltageKey, 1.0) : colorFromVoltageKey(poly.voltageKey, 0.5);
+        }
+        
         return (
           <polygon
             key={`domain-${poly.id}`}
             points={points}
-            fill={isSelected ? colorFromVoltageKey(poly.voltageKey, 0.4) : colorFromVoltageKey(poly.voltageKey)}
-            stroke={isSelected ? colorFromVoltageKey(poly.voltageKey, 1.0) : colorFromVoltageKey(poly.voltageKey, 0.5)}
+            fill={fillColor}
+            stroke={strokeColor}
             strokeWidth={isSelected ? 3 : 1}
           />
         );
