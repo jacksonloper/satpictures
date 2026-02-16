@@ -105,7 +105,7 @@ function computeConnectedComponents(
  * Generate a color from a component id for connected component visualization.
  */
 function colorFromComponentId(componentId: number, alpha: number = 0.15): string {
-  // Use golden ratio to spread hues evenly
+  // Use golden angle (~137.508°) to spread hues evenly across the color wheel
   const hue = (componentId * 137.508) % 360;
   return `hsla(${hue}, 70%, 50%, ${alpha})`;
 }
