@@ -29,7 +29,7 @@ import {
   type OrbifoldEdgeId,
   type OrbifoldNodeId,
 } from "./orbifoldbasics";
-import { applyRandomSpanningTreeToWhiteNodes } from "./spanningTree";
+import { applyRandomSpanningTreeToWhiteNodes, findRandomLoop } from "./spanningTree";
 import LoopFinderWorker from "./loop-finder.worker?worker";
 import type { LoopFinderRequest, LoopFinderResponse } from "./loop-finder.worker";
 import {
@@ -196,6 +196,26 @@ export function OrbifoldsExplorer() {
       console.error("Random spanning tree error:", error);
     }
   }, []);
+
+  // Handle random loop button click
+  const handleRandomLoop = useCallback(() => {
+    try {
+      setErrorMessage(null);
+      const result = findRandomLoop(orbifoldGrid);
+      if (!result) {
+        setErrorMessage("No random loop found (need at least 2 white nodes with a cycle)");
+        return;
+      }
+      setPendingLoopResult({
+        pathNodeIds: result.pathNodeIds,
+        loopEdgeIds: [], // edges will be resolved by LoopResultRenderer
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "An unexpected error occurred";
+      setErrorMessage(`Random loop generation failed: ${message}`);
+      console.error("Random loop error:", error);
+    }
+  }, [orbifoldGrid]);
 
   // Handle root node setting
   const handleSetRoot = useCallback((nodeId: OrbifoldNodeId) => {
@@ -644,6 +664,19 @@ export function OrbifoldsExplorer() {
               🔄 Find Loop
             </button>
             <button
+              onClick={handleRandomLoop}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: "1px solid #8e44ad",
+                backgroundColor: "#faf5ff",
+                cursor: "pointer",
+              }}
+              title="Generate a random loop via spanning tree (pick a random wall and find the cycle it creates)"
+            >
+              🎲 Random Loop
+            </button>
+            <button
               onClick={handleClear}
               style={{
                 padding: "6px 12px",
@@ -738,12 +771,12 @@ export function OrbifoldsExplorer() {
           )}
           
           {/* Loop Result Preview (Accept/Reject) */}
-          {pendingLoopResult && rootNodeId && (
+          {pendingLoopResult && (rootNodeId || pendingLoopResult.pathNodeIds.length > 0) && (
             <LoopResultRenderer
               n={size}
               grid={orbifoldGrid}
               pathNodeIds={pendingLoopResult.pathNodeIds}
-              rootNodeId={rootNodeId}
+              rootNodeId={rootNodeId ?? pendingLoopResult.pathNodeIds[0]}
               onAccept={handleAcceptLoop}
               onReject={handleRejectLoop}
               wallpaperGroup={wallpaperGroup}

@@ -16,6 +16,12 @@ import type {
   OrbifoldEdgeId,
 } from "./orbifoldbasics";
 
+/** Result of findRandomLoop: the ordered path of node IDs forming a loop. */
+export interface RandomLoopResult {
+  /** Ordered node IDs: first and last are the same (the loop closes). */
+  pathNodeIds: string[];
+}
+
 type WeightedEdge = {
   source: OrbifoldNodeId;
   target: OrbifoldNodeId;
@@ -201,4 +207,120 @@ export function applyRandomSpanningTreeToWhiteNodes(
   }
 
   return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
+}
+
+/**
+ * Find a random loop in the orbifold graph using the spanning tree approach:
+ * 1. Build a random spanning tree of white nodes
+ * 2. Pick a random "wall" (an edge between two white nodes NOT in the spanning tree)
+ * 3. Find the unique path between the wall's endpoints through the tree (BFS)
+ * 4. Return the loop: tree path + the wall edge (closing the loop)
+ *
+ * @returns A RandomLoopResult with the ordered path, or null if no loop is possible
+ */
+export function findRandomLoop(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>
+): RandomLoopResult | null {
+  // Get all white nodes
+  const whiteNodeIds = new Set<OrbifoldNodeId>();
+  for (const [nodeId, node] of grid.nodes) {
+    if (node.data?.color === "white") {
+      whiteNodeIds.add(nodeId);
+    }
+  }
+
+  if (whiteNodeIds.size < 2) return null;
+
+  // Find edges that connect two white nodes (excluding self-loops)
+  const edgePairToOrbifoldEdges = new Map<string, OrbifoldEdgeId[]>();
+  const addedEdgePairs = new Set<string>();
+  const weightedEdges: WeightedEdge[] = [];
+
+  for (const [edgeId, edge] of grid.edges) {
+    const endpoints = Array.from(edge.halfEdges.keys());
+    if (!endpoints.every(nodeId => whiteNodeIds.has(nodeId))) continue;
+
+    const [source, target] = endpoints.length === 1
+      ? [endpoints[0], endpoints[0]]
+      : endpoints;
+
+    if (source === target) continue; // skip self-loops
+
+    const edgePairKey = source < target ? `${source}-${target}` : `${target}-${source}`;
+
+    if (!edgePairToOrbifoldEdges.has(edgePairKey)) {
+      edgePairToOrbifoldEdges.set(edgePairKey, []);
+    }
+    edgePairToOrbifoldEdges.get(edgePairKey)!.push(edgeId);
+
+    if (!addedEdgePairs.has(edgePairKey)) {
+      addedEdgePairs.add(edgePairKey);
+      weightedEdges.push({ source, target, weight: Math.random() });
+    }
+  }
+
+  // Build spanning tree
+  const spanningTreeEdgeSet = buildSpanningTreeEdgeSet(whiteNodeIds, weightedEdges);
+  if (!spanningTreeEdgeSet) return null; // graph not connected
+
+  // Collect wall edges: edge pairs NOT in the spanning tree
+  const wallEdgePairs: string[] = [];
+  for (const edgePairKey of addedEdgePairs) {
+    if (!spanningTreeEdgeSet.has(edgePairKey)) {
+      wallEdgePairs.push(edgePairKey);
+    }
+  }
+
+  if (wallEdgePairs.length === 0) return null; // tree has no cycles possible
+
+  // Pick a random wall
+  const wallKey = wallEdgePairs[Math.floor(Math.random() * wallEdgePairs.length)];
+  const [wallNodeA, wallNodeB] = wallKey.split("-");
+
+  // Build tree adjacency for BFS (only tree edges)
+  const treeAdj = new Map<OrbifoldNodeId, OrbifoldNodeId[]>();
+  for (const nodeId of whiteNodeIds) {
+    treeAdj.set(nodeId, []);
+  }
+  for (const edgePairKey of spanningTreeEdgeSet) {
+    const [a, b] = edgePairKey.split("-");
+    treeAdj.get(a)!.push(b);
+    treeAdj.get(b)!.push(a);
+  }
+
+  // BFS from wallNodeA to wallNodeB through the tree
+  const parent = new Map<OrbifoldNodeId, OrbifoldNodeId | null>();
+  parent.set(wallNodeA, null);
+  const queue: OrbifoldNodeId[] = [wallNodeA];
+  let found = false;
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === wallNodeB) {
+      found = true;
+      break;
+    }
+    for (const neighbor of treeAdj.get(current) ?? []) {
+      if (!parent.has(neighbor)) {
+        parent.set(neighbor, current);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  if (!found) return null; // shouldn't happen if tree is connected
+
+  // Reconstruct tree path from wallNodeA to wallNodeB
+  const treePath: OrbifoldNodeId[] = [];
+  let cur: OrbifoldNodeId | null = wallNodeB;
+  while (cur !== null) {
+    treePath.push(cur);
+    cur = parent.get(cur) ?? null;
+  }
+  treePath.reverse(); // now goes wallNodeA -> ... -> wallNodeB
+
+  // Close the loop: add wallNodeA at the end (going back through the wall)
+  treePath.push(wallNodeA);
+
+  return { pathNodeIds: treePath };
 }
