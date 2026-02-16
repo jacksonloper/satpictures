@@ -412,7 +412,7 @@ export function OrbifoldsExplorer() {
       }
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
-        newEdges.set(edgeId, { ...edge, data: { linestyle: "solid" } });
+        newEdges.set(edgeId, { ...edge, data: { ...edge.data, linestyle: "solid" } });
       }
       return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
     });
