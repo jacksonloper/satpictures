@@ -23,7 +23,6 @@ import {
   processAllNonInteriorOnce,
   buildAdjacency,
   nodeIdFromCoord,
-  applyMatrix,
   getLiftedNodeAbsolutePosition,
   distance,
   formatVoltage,
@@ -108,7 +107,6 @@ function testPggBoundaryWrapping(n: number): { passed: boolean; details: string[
   
   const details: string[] = [];
   const maxOdd = 2 * n - 1;
-  const L = 2 * n;
   
   console.log(`\n=== Testing pgg boundary wrapping (n=${n}) ===`);
   

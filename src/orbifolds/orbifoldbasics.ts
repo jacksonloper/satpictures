@@ -371,7 +371,7 @@ export function constructLiftedGraphFromOrbifold<
  * Creates it as non-interior if missing.
  */
 export function getOrCreateLiftedNode<LND extends ExtraData>(
-  g: LiftedGraph<any, any, LND, any>,
+  g: LiftedGraph<ExtraData, ExtraData, LND, ExtraData>,
   orbifoldNode: OrbifoldNodeId,
   voltage: Matrix3x3,
   initData?: LND
@@ -388,7 +388,7 @@ export function getOrCreateLiftedNode<LND extends ExtraData>(
  * Returns edge id.
  */
 export function addLiftedEdge<LED extends ExtraData>(
-  g: LiftedGraph<any, any, any, LED>,
+  g: LiftedGraph<ExtraData, ExtraData, ExtraData, LED>,
   a: LiftedNodeId,
   b: LiftedNodeId,
   orbifoldEdgeId?: OrbifoldEdgeId,
