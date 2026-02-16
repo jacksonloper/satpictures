@@ -44,8 +44,8 @@ import {
 import "../App.css";
 
 // Constants
-const DEFAULT_SIZE = 3;
-const DEFAULT_EXPANSION = 2;
+const DEFAULT_SIZE = 4;
+const DEFAULT_EXPANSION = 10;
 
 /**
  * Main Orbifolds Explorer component.
@@ -58,7 +58,7 @@ export function OrbifoldsExplorer() {
   const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
   const [useAxialTransform, setUseAxialTransform] = useState(false);
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
-  const [showDomains, setShowDomains] = useState(true);
+  const [backgroundMode, setBackgroundMode] = useState<"none" | "domain" | "component">("domain");
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [showWalls, setShowWalls] = useState(false);
@@ -833,14 +833,23 @@ export function OrbifoldsExplorer() {
             fontSize: "12px",
             alignItems: "center",
           }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={showDomains}
-                onChange={(e) => setShowDomains(e.target.checked)}
-              />
-              Show domains
-            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <label>Background:</label>
+              <select
+                value={backgroundMode}
+                onChange={(e) => setBackgroundMode(e.target.value as "none" | "domain" | "component")}
+                style={{
+                  padding: "2px 4px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                  fontSize: "12px",
+                }}
+              >
+                <option value="none">No background</option>
+                <option value="domain">Color by fundamental domain</option>
+                <option value="component">Color by connected component</option>
+              </select>
+            </div>
             <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
               <input
                 type="checkbox"
@@ -888,7 +897,7 @@ export function OrbifoldsExplorer() {
             useAxialTransform={wallpaperGroup === "P3" && useAxialTransform}
             selectedVoltageKey={selectedVoltageKey}
             onNodeClick={handleLiftedNodeClick}
-            showDomains={showDomains}
+            showDomains={backgroundMode}
             showDashedLines={showDashedLines}
             showNodes={showNodes}
             showWalls={showWalls}
