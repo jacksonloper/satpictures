@@ -28,6 +28,7 @@ const GRID_PADDING = 20;
 // Edge widths (doubled from original 3/1 to 6/2)
 const SOLID_EDGE_WIDTH = 6;
 const DASHED_EDGE_WIDTH = 2;
+const WALL_STROKE_WIDTH = 3;
 
 /**
  * Serialize a voltage matrix to a string key for uniqueness comparison.
@@ -153,7 +154,7 @@ export function LiftedGraphRenderer({
   
   // Collect dashed-edge polygon sides from the orbifold grid (walls).
   // For each orbifold node, gather the set of polygon side indices that
-  // correspond to "dashed" edges — same logic as OrbifoldGridTools.
+  // correspond to "dashed" edges (same logic as in OrbifoldGridTools.tsx).
   const dashedSidesPerOrbifoldNode = useMemo(() => {
     const dashedSides = new Map<OrbifoldNodeId, Set<number>>();
     for (const edge of orbifoldGrid.edges.values()) {
@@ -313,7 +314,7 @@ export function LiftedGraphRenderer({
           x2={toSvgX(seg.x2)}
           y2={toSvgY(seg.y2)}
           stroke="black"
-          strokeWidth={3}
+          strokeWidth={WALL_STROKE_WIDTH}
           strokeLinecap="round"
         />
       ))}
