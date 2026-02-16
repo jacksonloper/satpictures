@@ -164,7 +164,7 @@ function testP3LiftedGraphStructure(
   // For P3, not all nodes may be reachable with identity voltage due to the 3-fold
   // symmetry structure. We just check that a reasonable number are reachable.
   let identityNodeCount = 0;
-  for (const [id, node] of lifted.nodes) {
+  for (const node of lifted.nodes.values()) {
     const isIdentity = node.voltage[0][0] === 1 && node.voltage[0][1] === 0 && node.voltage[0][2] === 0 &&
                        node.voltage[1][0] === 0 && node.voltage[1][1] === 1 && node.voltage[1][2] === 0 &&
                        node.voltage[2][0] === 0 && node.voltage[2][1] === 0 && node.voltage[2][2] === 1;
@@ -204,12 +204,12 @@ function testP3BoundaryWrapping(n: number): { passed: boolean; details: string[]
   const p3EdgeKeys = new Set<string>();
   const p4EdgeKeys = new Set<string>();
   
-  for (const [edgeId, edge] of gridP3.edges) {
+  for (const edge of gridP3.edges.values()) {
     const nodeIds = Array.from(edge.halfEdges.keys()).sort();
     p3EdgeKeys.add(nodeIds.join("-"));
   }
   
-  for (const [edgeId, edge] of gridP4.edges) {
+  for (const edge of gridP4.edges.values()) {
     const nodeIds = Array.from(edge.halfEdges.keys()).sort();
     p4EdgeKeys.add(nodeIds.join("-"));
   }
@@ -232,8 +232,8 @@ function testP3BoundaryWrapping(n: number): { passed: boolean; details: string[]
   let p3BorderEdges = 0;
   let p4BorderEdges = 0;
   
-  for (const [edgeId, edge] of gridP3.edges) {
-    for (const [nodeId, halfEdge] of edge.halfEdges) {
+  for (const edge of gridP3.edges.values()) {
+    for (const halfEdge of edge.halfEdges.values()) {
       const v = halfEdge.voltage;
       const isIdentity = v[0][0] === 1 && v[0][1] === 0 && v[0][2] === 0 &&
                         v[1][0] === 0 && v[1][1] === 1 && v[1][2] === 0;
@@ -244,8 +244,8 @@ function testP3BoundaryWrapping(n: number): { passed: boolean; details: string[]
     }
   }
   
-  for (const [edgeId, edge] of gridP4.edges) {
-    for (const [nodeId, halfEdge] of edge.halfEdges) {
+  for (const edge of gridP4.edges.values()) {
+    for (const halfEdge of edge.halfEdges.values()) {
       const v = halfEdge.voltage;
       const isIdentity = v[0][0] === 1 && v[0][1] === 0 && v[0][2] === 0 &&
                         v[1][0] === 0 && v[1][1] === 1 && v[1][2] === 0;

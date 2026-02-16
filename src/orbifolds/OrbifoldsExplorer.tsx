@@ -85,28 +85,32 @@ export function OrbifoldsExplorer() {
     return grid;
   });
 
-  const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    if (nextGroup === "P4g" && size < 4) {
-      setSize(4);
-    }
-    setWallpaperGroup(nextGroup);
-  };
-
-  // Recreate grid when wallpaper group or size changes
-  useEffect(() => {
-    const grid = createOrbifoldGrid(wallpaperGroup, size);
+  // Recreate grid and reset dependent state when wallpaper group or size changes
+  const resetGrid = useCallback((nextGroup: WallpaperGroupType, nextSize: number) => {
+    const grid = createOrbifoldGrid(nextGroup, nextSize);
     buildAdjacency(grid);
     setOrbifoldGrid(grid);
-    setInspectionInfo(null); // Clear inspection when grid changes
-    setSelectedVoltageKey(null); // Clear voltage selection when grid changes
-    // Set default root to first node
+    setInspectionInfo(null);
+    setSelectedVoltageKey(null);
     const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
     setRootNodeId(firstNodeId ?? null);
     setShowLoopFinder(false);
     setSolvingLoop(false);
     setLoopSatStats(null);
     setPendingLoopResult(null);
-  }, [wallpaperGroup, size]);
+  }, []);
+
+  const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
+    const nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    if (nextSize !== size) setSize(nextSize);
+    setWallpaperGroup(nextGroup);
+    resetGrid(nextGroup, nextSize);
+  };
+
+  const handleSizeChange = useCallback((nextSize: number) => {
+    setSize(nextSize);
+    resetGrid(wallpaperGroup, nextSize);
+  }, [wallpaperGroup, resetGrid]);
 
   // Handle cell color toggle (by node ID)
   const handleColorToggle = useCallback((nodeId: OrbifoldNodeId) => {
@@ -477,7 +481,7 @@ export function OrbifoldsExplorer() {
         {/* Size Input */}
         <ValidatedInput
           value={size}
-          onChange={setSize}
+          onChange={handleSizeChange}
           min={minSize}
           max={10}
           label="Size (n)"
