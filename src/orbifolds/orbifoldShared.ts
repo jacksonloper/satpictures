@@ -25,6 +25,12 @@ export interface EdgeStyleData extends ExtraData {
 
 export type Direction = "N" | "S" | "E" | "W";
 
+/** Map direction to square polygon side index (clockwise: N=0, E=1, S=2, W=3). */
+export const DIRECTION_TO_SIDE: Record<Direction, number> = { N: 0, E: 1, S: 2, W: 3 };
+
+/** Map direction to opposite direction. */
+const OPPOSITE_DIR: Record<Direction, Direction> = { N: "S", S: "N", E: "W", W: "E" };
+
 /**
  * Result from a getNeighbor function.
  * Returns null if this direction should not create an edge (e.g., P3/P4 S/E on border).
@@ -33,6 +39,11 @@ export type NeighborResult = {
   coord: readonly [Int, Int];
   voltage: Matrix3x3;
   edgeKey: string;
+  /**
+   * Which polygon side of the target node this edge arrives at.
+   * If not specified, defaults to the opposite direction's side.
+   */
+  targetSide?: number;
 } | null;
 
 export type NeighborFunction = (i: Int, j: Int, dir: Direction, n: Int) => NeighborResult;
@@ -263,6 +274,18 @@ function getIndexFromOddCoord(coord: Int): Int {
 }
 
 /**
+ * Build a square polygon (clockwise: NW, NE, SE, SW) for a node at (i, j).
+ */
+function squarePolygon(i: Int, j: Int): readonly (readonly [number, number])[] {
+  return [
+    [i - 1, j - 1], // NW (side 0 = North: NW→NE)
+    [i + 1, j - 1], // NE (side 1 = East:  NE→SE)
+    [i + 1, j + 1], // SE (side 2 = South: SE→SW)
+    [i - 1, j + 1], // SW (side 3 = West:  SW→NW)
+  ] as const;
+}
+
+/**
  * Create an orbifold grid for n×n nodes where each node has N/S/E/W neighbors.
  */
 export function createSquareOrbifoldGrid(
@@ -291,6 +314,7 @@ export function createSquareOrbifoldGrid(
       nodes.set(id, {
         id,
         coord,
+        polygon: squarePolygon(i, j),
         data: { color },
       });
     }
@@ -300,6 +324,10 @@ export function createSquareOrbifoldGrid(
   // The getNeighbor functions provide edge keys and may return null
   // to indicate that an edge should not be created (e.g., P3/P4 S/E on border)
   const processedEdges = new Set<string>();
+
+  // Track which polygon sides have been assigned per half-edge for self-edges
+  // that may be created from two directions (e.g. P2 center node self-loops)
+  const selfEdgeSides = new Map<string, number[]>();
 
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
@@ -316,11 +344,29 @@ export function createSquareOrbifoldGrid(
           continue;
         }
 
-        const { coord: toCoord, voltage, edgeKey } = result;
+        const { coord: toCoord, voltage, edgeKey, targetSide } = result;
         const toId = nodeIdFromCoord(toCoord);
+        const fromSide = DIRECTION_TO_SIDE[dir];
+        const toSide = targetSide ?? DIRECTION_TO_SIDE[OPPOSITE_DIR[dir]];
 
         // Skip if this edge has already been created (either by a previous direction or by the other endpoint)
         if (processedEdges.has(edgeKey)) {
+          // But for self-edges, we may need to add another polygon side
+          if (fromId === toId) {
+            const existingSides = selfEdgeSides.get(edgeKey);
+            if (existingSides && !existingSides.includes(fromSide)) {
+              existingSides.push(fromSide);
+              // Update the half-edge's polygonSides (shares the same array reference)
+              const edgeId = edgeKey.replace(/\|/g, "--");
+              const edge = edges.get(edgeId);
+              if (edge) {
+                const half = edge.halfEdges.get(fromId);
+                if (half) {
+                  half.polygonSides.push(fromSide);
+                }
+              }
+            }
+          }
           continue;
         }
         processedEdges.add(edgeKey);
@@ -331,8 +377,14 @@ export function createSquareOrbifoldGrid(
         // Check if this is a self-loop (same node)
         if (fromId === toId) {
           // Self-loop: single half-edge with involutive voltage
-          const halfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3 }>();
-          halfEdges.set(fromId, { to: fromId, voltage });
+          // Both fromSide and toSide belong to this node's polygon
+          const sides = [fromSide];
+          if (toSide !== fromSide) {
+            sides.push(toSide);
+          }
+          selfEdgeSides.set(edgeKey, sides);
+          const halfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+          halfEdges.set(fromId, { to: fromId, voltage, polygonSides: sides });
 
           edges.set(edgeId, {
             id: edgeId,
@@ -343,9 +395,9 @@ export function createSquareOrbifoldGrid(
           // Regular edge: two half-edges with inverse voltages
           const inverseVoltage = matInvUnimodular(voltage);
 
-          const halfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3 }>();
-          halfEdges.set(fromId, { to: toId, voltage });
-          halfEdges.set(toId, { to: fromId, voltage: inverseVoltage });
+          const halfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+          halfEdges.set(fromId, { to: toId, voltage, polygonSides: [fromSide] });
+          halfEdges.set(toId, { to: fromId, voltage: inverseVoltage, polygonSides: [toSide] });
 
           edges.set(edgeId, {
             id: edgeId,

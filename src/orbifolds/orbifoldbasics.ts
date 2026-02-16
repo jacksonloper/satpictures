@@ -147,15 +147,28 @@ export function liftedEdgeId(a: LiftedNodeId, b: LiftedNodeId): LiftedEdgeId {
 
 export type ExtraData = Record<string, unknown>;
 
+/**
+ * A closed polygon defined as a clockwise sequence of 2D floating-point coordinates.
+ * For a square node this has 4 vertices; for a triangle (P4g diagonal) it has 3.
+ */
+export type NodePolygon = readonly (readonly [number, number])[];
+
 export interface OrbifoldNode<D extends ExtraData = ExtraData> {
   id: OrbifoldNodeId;
   coord: readonly [Int, Int];
+  /** Closed polygon geometry for this node (clockwise vertex sequence). */
+  polygon: NodePolygon;
   data?: D;
 }
 
 export interface OrbifoldHalfEdge {
   to: OrbifoldNodeId;
   voltage: Matrix3x3;
+  /**
+   * Which polygon side(s) of this node the edge uses.
+   * Typically a single index, but a self-edge may use two sides.
+   */
+  polygonSides: number[];
 }
 
 export interface OrbifoldEdge<E extends ExtraData = ExtraData> {
@@ -225,6 +238,61 @@ export function validateOrbifoldEdge(edge: OrbifoldEdge): void {
 
   const inv1 = matInvUnimodular(h1.voltage);
   if (!matEq(inv1, h2.voltage)) throw new Error(`Edge ${edge.id} voltages must be inverses`);
+}
+
+/**
+ * Validates the polygon-side invariant for an orbifold grid:
+ * Every polygon side of every node must be associated with exactly one orbifold edge.
+ * A self-edge may cover 1 or 2 polygon sides (2 sides when a self-edge connects
+ * different polygon sides of the same node, e.g. a corner node with rotational wrapping).
+ *
+ * Throws on any violation.
+ */
+export function validatePolygonSideInvariant(grid: OrbifoldGrid): void {
+  // For each node, collect all polygon sides claimed by edges
+  const nodeSideCounts = new Map<OrbifoldNodeId, Map<number, OrbifoldEdgeId>>();
+
+  for (const node of grid.nodes.values()) {
+    nodeSideCounts.set(node.id, new Map());
+  }
+
+  for (const edge of grid.edges.values()) {
+    for (const [nodeId, halfEdge] of edge.halfEdges.entries()) {
+      const sideMap = nodeSideCounts.get(nodeId);
+      if (!sideMap) {
+        throw new Error(`Edge ${edge.id} references unknown node ${nodeId}`);
+      }
+      for (const side of halfEdge.polygonSides) {
+        if (sideMap.has(side)) {
+          throw new Error(
+            `Node ${nodeId} polygon side ${side} is claimed by both edge ${sideMap.get(side)} and edge ${edge.id}`
+          );
+        }
+        sideMap.set(side, edge.id);
+      }
+    }
+  }
+
+  // Check that every side of every node is covered
+  for (const node of grid.nodes.values()) {
+    const numSides = node.polygon.length;
+    const sideMap = nodeSideCounts.get(node.id)!;
+    for (let s = 0; s < numSides; s++) {
+      if (!sideMap.has(s)) {
+        throw new Error(
+          `Node ${node.id} polygon side ${s} is not associated with any orbifold edge (polygon has ${numSides} sides)`
+        );
+      }
+    }
+    // Also check no extra sides beyond the polygon
+    for (const s of sideMap.keys()) {
+      if (s < 0 || s >= numSides) {
+        throw new Error(
+          `Node ${node.id} has edge claiming side ${s} but polygon only has ${numSides} sides`
+        );
+      }
+    }
+  }
 }
 
 /////////////////////////////

@@ -1,12 +1,14 @@
 /**
  * Orbifold Grid Tools component - supports both color and inspect tools.
+ * Renders nodes as polygons using their geometry, with thick black borders
+ * for "dashed" edge style sides (walls).
  */
 import {
   type OrbifoldGrid,
   type OrbifoldNodeId,
   type OrbifoldEdgeId,
   type Matrix3x3,
-  nodeIdFromCoord,
+  type NodePolygon,
 } from "../orbifoldbasics";
 import {
   getEdgeLinestyle,
@@ -41,8 +43,17 @@ export interface InspectionInfo {
   edges: EdgeInfo[];
 }
 
+/** Compute centroid of a polygon. */
+function polygonCentroid(polygon: NodePolygon): { x: number; y: number } {
+  let cx = 0, cy = 0;
+  for (const [x, y] of polygon) {
+    cx += x;
+    cy += y;
+  }
+  return { x: cx / polygon.length, y: cy / polygon.length };
+}
+
 export function OrbifoldGridTools({
-  n,
   grid,
   tool,
   onColorToggle,
@@ -50,7 +61,6 @@ export function OrbifoldGridTools({
   onSetRoot,
   inspectedNodeId,
   rootNodeId,
-  wallpaperGroup,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -62,61 +72,90 @@ export function OrbifoldGridTools({
   rootNodeId?: OrbifoldNodeId | null;
   wallpaperGroup?: string;
 }) {
-  const cellSize = CELL_SIZE;
-  const isP4g = wallpaperGroup === "P4g";
+  // Compute bounding box of all polygon vertices
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const node of grid.nodes.values()) {
+    for (const [x, y] of node.polygon) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const bboxW = maxX - minX;
+  const bboxH = maxY - minY;
 
-  // For P4g, the grid is (n+1) cells wide and (n) cells tall to accommodate
-  // the upper triangle grid nodes plus diagonal half-triangle nodes.
-  const gridCols = isP4g ? n + 1 : n;
-  const gridRows = n;
-  const width = gridCols * cellSize + 2 * GRID_PADDING;
-  const height = gridRows * cellSize + 2 * GRID_PADDING;
+  // Scale so the grid fits within a reasonable size
+  // Use CELL_SIZE per 2 coordinate units (matching the standard square node size)
+  const scale = CELL_SIZE / 2;
+  const svgW = bboxW * scale + 2 * GRID_PADDING;
+  const svgH = bboxH * scale + 2 * GRID_PADDING;
+
+  // Transform orbifold coords to SVG coords
+  const toSvgX = (x: number) => (x - minX) * scale + GRID_PADDING;
+  const toSvgY = (y: number) => (y - minY) * scale + GRID_PADDING;
+
+  // Build polygon SVG points string
+  const polygonPoints = (polygon: NodePolygon): string =>
+    polygon.map(([x, y]) => `${toSvgX(x)},${toSvgY(y)}`).join(" ");
+
+  // Collect dashed-edge polygon sides:
+  // For each node, gather the set of polygon side indices that have "dashed" edge style
+  const dashedSides = new Map<OrbifoldNodeId, Set<number>>();
+  for (const edge of grid.edges.values()) {
+    const linestyle = getEdgeLinestyle(grid, edge.id);
+    if (linestyle !== "dashed") continue;
+    for (const [nodeId, halfEdge] of edge.halfEdges) {
+      let set = dashedSides.get(nodeId);
+      if (!set) {
+        set = new Set();
+        dashedSides.set(nodeId, set);
+      }
+      for (const side of halfEdge.polygonSides) {
+        set.add(side);
+      }
+    }
+  }
 
   /**
-   * Find which node (if any) was clicked at (pixelX, pixelY) relative to the SVG padding.
-   * For P4g, col=0 contains diagonal half-triangle nodes, cols 1..n contain grid nodes.
-   * For other groups, standard n×n grid with odd coordinates.
+   * Point-in-polygon test for click detection.
    */
-  const findClickedNode = (pixelX: number, pixelY: number): { nodeId: OrbifoldNodeId; coord: readonly [number, number] } | null => {
-    if (isP4g) {
-      const col = Math.floor(pixelX / cellSize);
-      const row = Math.floor(pixelY / cellSize);
-      if (row < 0 || row >= n || col < 0 || col >= n + 1) return null;
-
-      if (col === 0) {
-        // Diagonal half-triangle column: node k=row at (4*row+3, 4*row+1)
-        const diagI = 4 * row + 3;
-        const diagJ = 4 * row + 1;
-        const nodeId = nodeIdFromCoord([diagI, diagJ]);
-        if (grid.nodes.has(nodeId)) return { nodeId, coord: [diagI, diagJ] };
-        return null;
-      } else {
-        // Grid node column: col index directly maps to grid col (col >= 1)
-        const gridI = 4 * col + 2;
-        const gridJ = 4 * row + 2;
-        const nodeId = nodeIdFromCoord([gridI, gridJ]);
-        if (grid.nodes.has(nodeId)) return { nodeId, coord: [gridI, gridJ] };
-        return null;
+  const pointInPolygon = (px: number, py: number, polygon: NodePolygon): boolean => {
+    let inside = false;
+    const numVertices = polygon.length;
+    for (let i = 0, j = numVertices - 1; i < numVertices; j = i++) {
+      const [xi, yi] = polygon[i];
+      const [xj, yj] = polygon[j];
+      if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+        inside = !inside;
       }
-    } else {
-      const col = Math.floor(pixelX / cellSize);
-      const row = Math.floor(pixelY / cellSize);
-      if (row < 0 || row >= n || col < 0 || col >= n) return null;
-      const i = 2 * col + 1;
-      const j = 2 * row + 1;
-      const nodeId = nodeIdFromCoord([i, j]);
-      if (grid.nodes.has(nodeId)) return { nodeId, coord: [i, j] };
-      return null;
     }
+    return inside;
+  };
+
+  /**
+   * Find which node was clicked at SVG coordinates.
+   */
+  const findClickedNode = (svgX: number, svgY: number): { nodeId: OrbifoldNodeId; coord: readonly [number, number] } | null => {
+    // Convert SVG coords back to orbifold coords
+    const ox = (svgX - GRID_PADDING) / scale + minX;
+    const oy = (svgY - GRID_PADDING) / scale + minY;
+
+    for (const node of grid.nodes.values()) {
+      if (pointInPolygon(ox, oy, node.polygon)) {
+        return { nodeId: node.id, coord: node.coord };
+      }
+    }
+    return null;
   };
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
-    const pixelX = e.clientX - rect.left - GRID_PADDING;
-    const pixelY = e.clientY - rect.top - GRID_PADDING;
+    const svgX = e.clientX - rect.left;
+    const svgY = e.clientY - rect.top;
 
-    const hit = findClickedNode(pixelX, pixelY);
+    const hit = findClickedNode(svgX, svgY);
     if (!hit) return;
 
     const { nodeId, coord } = hit;
@@ -150,68 +189,10 @@ export function OrbifoldGridTools({
     }
   };
 
-  /**
-   * Render a single cell (rect + optional labels) for a given node.
-   */
-  const renderCell = (
-    key: string,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    nodeId: OrbifoldNodeId | null,
-    nodeExists: boolean,
-    coord: readonly [number, number] | null,
-  ) => {
-    const color = nodeExists && nodeId ? (grid.nodes.get(nodeId)?.data?.color ?? "white") : "white";
-    const isInspected = nodeId === inspectedNodeId;
-    const isRoot = nodeId === rootNodeId;
-
-    return (
-      <g key={key}>
-        <rect
-          x={x}
-          y={y}
-          width={w}
-          height={h}
-          fill={nodeExists ? (color === "black" ? "#2c3e50" : "white") : "#ecf0f1"}
-          stroke={nodeExists ? (isRoot ? "#e67e22" : isInspected ? "#3498db" : "#7f8c8d") : "#bdc3c7"}
-          strokeWidth={isRoot ? 3 : isInspected ? 3 : 1}
-        />
-        {isRoot && nodeExists && (
-          <text
-            x={x + w / 2}
-            y={y + h / 2}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={16}
-            fill={color === "black" ? "#f39c12" : "#e67e22"}
-            style={{ pointerEvents: "none" }}
-          >
-            ◉
-          </text>
-        )}
-        {tool === "inspect" && nodeExists && coord && (
-          <text
-            x={x + w / 2}
-            y={y + h / 2}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={w < cellSize ? 8 : 10}
-            fill={color === "black" ? "#ecf0f1" : "#2c3e50"}
-            fontFamily="monospace"
-          >
-            {coord[0]},{coord[1]}
-          </text>
-        )}
-      </g>
-    );
-  };
-
   return (
     <svg
-      width={width}
-      height={height}
+      width={svgW}
+      height={svgH}
       style={{
         border: "1px solid #ccc",
         borderRadius: "4px",
@@ -219,42 +200,72 @@ export function OrbifoldGridTools({
       }}
       onClick={handleSvgClick}
     >
-      {isP4g
-        ? /* P4g layout: col 0 = diagonal nodes, cols 1..n = grid nodes */
-          Array.from({ length: n }, (_, row) =>
-            Array.from({ length: n + 1 }, (_, col) => {
-              const x = GRID_PADDING + col * cellSize;
-              const y = GRID_PADDING + row * cellSize;
+      {/* Render node polygons */}
+      {Array.from(grid.nodes.values()).map((node) => {
+        const color = node.data?.color ?? "white";
+        const isInspected = node.id === inspectedNodeId;
+        const isRoot = node.id === rootNodeId;
+        const centroid = polygonCentroid(node.polygon);
+        const cx = toSvgX(centroid.x);
+        const cy = toSvgY(centroid.y);
 
-              if (col === 0) {
-                // Diagonal half-triangle node
-                const diagI = 4 * row + 3;
-                const diagJ = 4 * row + 1;
-                const nodeId = nodeIdFromCoord([diagI, diagJ]);
-                const nodeExists = grid.nodes.has(nodeId);
-                return renderCell(`diag-${row}`, x, y, cellSize, cellSize, nodeId, nodeExists, [diagI, diagJ]);
-              } else {
-                // Grid node at (4*col+2, 4*row+2)
-                const gridI = 4 * col + 2;
-                const gridJ = 4 * row + 2;
-                const nodeId = nodeIdFromCoord([gridI, gridJ]);
-                const nodeExists = grid.nodes.has(nodeId);
-                return renderCell(`grid-${row}-${col}`, x, y, cellSize, cellSize, nodeId, nodeExists, [gridI, gridJ]);
-              }
-            })
-          )
-        : /* Standard n×n grid layout */
-          Array.from({ length: n }, (_, row) =>
-            Array.from({ length: n }, (_, col) => {
-              const x = GRID_PADDING + col * cellSize;
-              const y = GRID_PADDING + row * cellSize;
-              const i = 2 * col + 1;
-              const j = 2 * row + 1;
-              const nodeId = nodeIdFromCoord([i, j]);
-              const nodeExists = grid.nodes.has(nodeId);
-              return renderCell(`${row}-${col}`, x, y, cellSize, cellSize, nodeId, nodeExists, [i, j]);
-            })
-          )}
+        return (
+          <g key={node.id}>
+            {/* Polygon fill with faint gray outline */}
+            <polygon
+              points={polygonPoints(node.polygon)}
+              fill={color === "black" ? "#999" : "#eee"}
+              stroke={isRoot ? "#e67e22" : isInspected ? "#3498db" : "#ddd"}
+              strokeWidth={isRoot || isInspected ? 2 : 0.5}
+            />
+            {/* Thick black lines for dashed-edge polygon sides (walls) */}
+            {dashedSides.has(node.id) &&
+              Array.from(dashedSides.get(node.id)!).map((sideIdx) => {
+                const p1 = node.polygon[sideIdx];
+                const p2 = node.polygon[(sideIdx + 1) % node.polygon.length];
+                return (
+                  <line
+                    key={`wall-${node.id}-${sideIdx}`}
+                    x1={toSvgX(p1[0])}
+                    y1={toSvgY(p1[1])}
+                    x2={toSvgX(p2[0])}
+                    y2={toSvgY(p2[1])}
+                    stroke="black"
+                    strokeWidth={3}
+                    strokeLinecap="round"
+                  />
+                );
+              })}
+            {/* Root marker */}
+            {isRoot && (
+              <text
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={16}
+                fill={color === "black" ? "#f39c12" : "#e67e22"}
+                style={{ pointerEvents: "none" }}
+              >
+                ◉
+              </text>
+            )}
+            {/* Coordinate label (inspect mode or always visible) */}
+            <text
+              x={cx}
+              y={cy}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={node.polygon.length < 4 ? 8 : 10}
+              fill={color === "black" ? "#ddd" : "#999"}
+              fontFamily="monospace"
+              style={{ pointerEvents: "none" }}
+            >
+              {node.coord[0]},{node.coord[1]}
+            </text>
+          </g>
+        );
+      })}
     </svg>
   );
 }
