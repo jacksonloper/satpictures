@@ -8,7 +8,8 @@
  * - Color in the grid cells (black/white) using "color" tool
  * - Inspect nodes to see coordinates, edges, and voltages using "inspect" tool
  * - Set a root node using the "root" tool
- * - Find non-self-intersecting loops of a given length via SAT solving
+ * - Find non-self-intersecting loops with target voltage via SAT solving
+ *   (uses BFS to compute reachable voltages, then SAT with variable-length paths)
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
@@ -31,7 +32,7 @@ import {
 } from "./orbifoldbasics";
 import { applyRandomSpanningTreeToWhiteNodes } from "./spanningTree";
 import LoopFinderWorker from "./loop-finder.worker?worker";
-import type { LoopFinderRequest, LoopFinderResponse } from "./loop-finder.worker";
+import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 import {
   ErrorBoundary,
   ValidatedInput,
@@ -64,13 +65,17 @@ export function OrbifoldsExplorer() {
   const [showWalls, setShowWalls] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(null);
-  const [loopLengthInput, setLoopLengthInput] = useState("");
+  const [maxLengthInput, setMaxLengthInput] = useState("");
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
+  const [computingVoltages, setComputingVoltages] = useState(false);
   const [loopSatStats, setLoopSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
+  const [reachableVoltages, setReachableVoltages] = useState<Array<{ key: string; matrix: VoltageMatrix }>>([]);
+  const [selectedTargetVoltageKey, setSelectedTargetVoltageKey] = useState<string | null>(null);
   const [pendingLoopResult, setPendingLoopResult] = useState<{
     pathNodeIds: string[];
     loopEdgeIds: string[];
+    pathEdgeIds?: string[];
   } | null>(null);
   const loopWorkerRef = useRef<Worker | null>(null);
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
@@ -96,7 +101,10 @@ export function OrbifoldsExplorer() {
     setRootNodeId(firstNodeId ?? null);
     setShowLoopFinder(false);
     setSolvingLoop(false);
+    setComputingVoltages(false);
     setLoopSatStats(null);
+    setReachableVoltages([]);
+    setSelectedTargetVoltageKey(null);
     setPendingLoopResult(null);
   }, []);
 
@@ -214,48 +222,38 @@ export function OrbifoldsExplorer() {
       loopWorkerRef.current.terminate();
       loopWorkerRef.current = null;
       setSolvingLoop(false);
+      setComputingVoltages(false);
       setErrorMessage("Loop search cancelled");
     }
   }, []);
 
-  // Handle loop finder solve
-  const handleSolveLoop = useCallback(() => {
-    const loopLength = parseInt(loopLengthInput, 10);
-    if (!Number.isFinite(loopLength) || loopLength < 2) {
-      setErrorMessage("Loop length must be a positive integer ≥ 2");
-      return;
-    }
-    if (!rootNodeId) {
-      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
-      return;
-    }
-
-    setErrorMessage(null);
-    setSolvingLoop(true);
-    setLoopSatStats(null);
-    setPendingLoopResult(null);
-
-    // Build adjacency data for the worker
-    const grid = orbifoldGrid;
-    const nodeIds = Array.from(grid.nodes.keys());
-
-    // Collect black-colored node IDs
-    const blackNodeIds: string[] = [];
-    for (const [nodeId, node] of grid.nodes) {
-      if (node.data?.color === "black") {
-        blackNodeIds.push(nodeId);
+  // Helper: build edge data with voltages for the worker
+  const buildWorkerEdgeData = useCallback((grid: OrbifoldGrid<ColorData, EdgeStyleData>) => {
+    const edgesData: Array<{
+      edgeId: string;
+      endpoints: [string, string];
+      halfEdgeVoltages: Record<string, readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]]>;
+    }> = [];
+    for (const [edgeId, edge] of grid.edges) {
+      const endpoints = Array.from(edge.halfEdges.keys());
+      const halfEdgeVoltages: Record<string, readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]]> = {};
+      for (const [nodeId, halfEdge] of edge.halfEdges) {
+        halfEdgeVoltages[nodeId] = halfEdge.voltage;
+      }
+      if (endpoints.length === 1) {
+        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[0]], halfEdgeVoltages });
+      } else {
+        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[1]], halfEdgeVoltages });
       }
     }
+    return edgesData;
+  }, []);
 
-    // Validate: there must be at least one non-black node
+  // Helper: resolve effective root and validate
+  const resolveEffectiveRoot = useCallback((grid: OrbifoldGrid<ColorData, EdgeStyleData>, nodeIds: string[], blackNodeIds: string[]): string | null => {
+    if (!rootNodeId) return null;
+
     const blackSet = new Set(blackNodeIds);
-    if (blackNodeIds.length === nodeIds.length) {
-      setErrorMessage("No non-black nodes available for the loop");
-      setSolvingLoop(false);
-      return;
-    }
-
-    // If root is black, hop to a non-black neighbor
     let effectiveRootNodeId = rootNodeId;
     if (blackSet.has(effectiveRootNodeId)) {
       const rootEdgeIds = grid.adjacency?.get(effectiveRootNodeId) ?? [];
@@ -271,15 +269,54 @@ export function OrbifoldsExplorer() {
         }
       }
       if (!newRoot) {
-        // Try any non-black node as root
         newRoot = nodeIds.find(id => !blackSet.has(id)) ?? null;
       }
-      if (!newRoot) {
-        setErrorMessage("No non-black nodes available for the loop");
-        setSolvingLoop(false);
-        return;
-      }
+      if (!newRoot) return null;
       effectiveRootNodeId = newRoot;
+    }
+    return effectiveRootNodeId;
+  }, [rootNodeId]);
+
+  // Phase 1: Compute reachable voltages via BFS
+  const handleComputeVoltages = useCallback(() => {
+    const maxLength = parseInt(maxLengthInput, 10);
+    if (!Number.isFinite(maxLength) || maxLength < 2) {
+      setErrorMessage("Max length must be a positive integer ≥ 2");
+      return;
+    }
+    if (!rootNodeId) {
+      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
+      return;
+    }
+
+    setErrorMessage(null);
+    setComputingVoltages(true);
+    setReachableVoltages([]);
+    setSelectedTargetVoltageKey(null);
+    setLoopSatStats(null);
+    setPendingLoopResult(null);
+
+    const grid = orbifoldGrid;
+    const nodeIds = Array.from(grid.nodes.keys());
+
+    const blackNodeIds: string[] = [];
+    for (const [, node] of grid.nodes) {
+      if (node.data?.color === "black") {
+        blackNodeIds.push(node.id);
+      }
+    }
+
+    if (blackNodeIds.length === nodeIds.length) {
+      setErrorMessage("No non-black nodes available for the loop");
+      setComputingVoltages(false);
+      return;
+    }
+
+    const effectiveRootNodeId = resolveEffectiveRoot(grid, nodeIds, blackNodeIds);
+    if (!effectiveRootNodeId) {
+      setErrorMessage("No non-black nodes available for the loop");
+      setComputingVoltages(false);
+      return;
     }
 
     const adj: Record<string, string[]> = {};
@@ -298,27 +335,128 @@ export function OrbifoldsExplorer() {
       adj[nodeId] = neighbors;
     }
 
-    // Build edges data for the worker.
-    // In orbifold half-edge representation, a self-edge (node connects to itself
-    // with a non-trivial voltage) has only 1 key in halfEdges, while a normal
-    // edge has 2 keys (one per endpoint).
-    const edgesData: Array<{ edgeId: string; endpoints: [string, string] }> = [];
-    for (const [edgeId, edge] of grid.edges) {
-      const endpoints = Array.from(edge.halfEdges.keys());
-      if (endpoints.length === 1) {
-        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[0]] });
-      } else {
-        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[1]] });
-      }
-    }
+    const edgesData = buildWorkerEdgeData(grid);
 
     const request: LoopFinderRequest = {
-      loopLength,
+      mode: "computeVoltages",
+      maxLength,
       rootNodeId: effectiveRootNodeId,
       nodeIds,
       adjacency: adj,
       edges: edgesData,
       blackNodeIds,
+    };
+
+    const worker = new LoopFinderWorker();
+    loopWorkerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<LoopFinderResponse>) => {
+      const response = event.data;
+
+      if (response.success && response.reachableVoltages) {
+        setReachableVoltages(response.reachableVoltages);
+        if (response.reachableVoltages.length > 0) {
+          setSelectedTargetVoltageKey(response.reachableVoltages[0].key);
+        }
+        if (response.reachableVoltages.length === 0) {
+          setErrorMessage("No reachable voltages found for this max length");
+        }
+      } else {
+        setErrorMessage(response.error || "Voltage computation failed");
+      }
+
+      setComputingVoltages(false);
+      loopWorkerRef.current = null;
+    };
+
+    worker.onerror = (error) => {
+      setErrorMessage(`Worker error: ${error.message}`);
+      setComputingVoltages(false);
+      loopWorkerRef.current = null;
+    };
+
+    worker.postMessage(request);
+  }, [maxLengthInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
+
+  // Phase 2: Solve for a loop with the selected target voltage
+  const handleSolveLoop = useCallback(() => {
+    const maxLength = parseInt(maxLengthInput, 10);
+    if (!Number.isFinite(maxLength) || maxLength < 2) {
+      setErrorMessage("Max length must be a positive integer ≥ 2");
+      return;
+    }
+    if (!rootNodeId) {
+      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
+      return;
+    }
+    if (!selectedTargetVoltageKey || reachableVoltages.length === 0) {
+      setErrorMessage("Please compute voltages and select a target voltage first");
+      return;
+    }
+
+    setErrorMessage(null);
+    setSolvingLoop(true);
+    setLoopSatStats(null);
+    setPendingLoopResult(null);
+
+    const grid = orbifoldGrid;
+    const nodeIds = Array.from(grid.nodes.keys());
+
+    const blackNodeIds: string[] = [];
+    for (const [, node] of grid.nodes) {
+      if (node.data?.color === "black") {
+        blackNodeIds.push(node.id);
+      }
+    }
+
+    const blackSet = new Set(blackNodeIds);
+    if (blackNodeIds.length === nodeIds.length) {
+      setErrorMessage("No non-black nodes available for the loop");
+      setSolvingLoop(false);
+      return;
+    }
+
+    const effectiveRootNodeId = resolveEffectiveRoot(grid, nodeIds, blackNodeIds);
+    if (!effectiveRootNodeId) {
+      setErrorMessage("No non-black nodes available for the loop");
+      setSolvingLoop(false);
+      return;
+    }
+
+    if (blackSet.has(effectiveRootNodeId)) {
+      setErrorMessage("Root node must not be black-colored");
+      setSolvingLoop(false);
+      return;
+    }
+
+    const adj: Record<string, string[]> = {};
+    for (const nodeId of nodeIds) {
+      const edgeIds = grid.adjacency?.get(nodeId) ?? [];
+      const neighbors: string[] = [];
+      for (const edgeId of edgeIds) {
+        const edge = grid.edges.get(edgeId);
+        if (!edge) continue;
+        const halfEdge = edge.halfEdges.get(nodeId);
+        if (!halfEdge) continue;
+        if (!neighbors.includes(halfEdge.to)) {
+          neighbors.push(halfEdge.to);
+        }
+      }
+      adj[nodeId] = neighbors;
+    }
+
+    const edgesData = buildWorkerEdgeData(grid);
+
+    const request: LoopFinderRequest = {
+      mode: "solve",
+      maxLength,
+      rootNodeId: effectiveRootNodeId,
+      nodeIds,
+      adjacency: adj,
+      edges: edgesData,
+      blackNodeIds,
+      targetVoltageKey: selectedTargetVoltageKey,
+      reachableVoltages,
     };
 
     const worker = new LoopFinderWorker();
@@ -335,10 +473,10 @@ export function OrbifoldsExplorer() {
       }
 
       if (response.success && response.loopEdgeIds && response.pathNodeIds) {
-        // Store the result for user to accept/reject
         setPendingLoopResult({
           pathNodeIds: response.pathNodeIds,
           loopEdgeIds: response.loopEdgeIds,
+          pathEdgeIds: response.pathEdgeIds,
         });
         setErrorMessage(null);
       } else {
@@ -356,7 +494,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [loopLengthInput, rootNodeId, orbifoldGrid]);
+  }, [maxLengthInput, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
 
   // Cleanup worker on unmount
   useEffect(() => {
@@ -639,7 +777,7 @@ export function OrbifoldsExplorer() {
                 cursor: "pointer",
                 fontWeight: showLoopFinder ? "bold" : "normal",
               }}
-              title="Find a non-self-intersecting loop of given length via SAT solver"
+              title="Find a non-self-intersecting loop with target voltage via SAT solver"
             >
               🔄 Find Loop
             </button>
@@ -675,13 +813,19 @@ export function OrbifoldsExplorer() {
               borderRadius: "8px",
               border: "1px solid #8e44ad",
             }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <label style={{ fontSize: "13px" }}>Nodes in loop:</label>
+              {/* Step 1: Max length + Compute Voltages */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
+                <label style={{ fontSize: "13px" }}>Max steps:</label>
                 <input
                   type="text"
-                  value={loopLengthInput}
-                  onChange={(e) => setLoopLengthInput(e.target.value)}
-                  disabled={solvingLoop}
+                  value={maxLengthInput}
+                  onChange={(e) => {
+                    setMaxLengthInput(e.target.value);
+                    // Clear computed voltages when input changes
+                    setReachableVoltages([]);
+                    setSelectedTargetVoltageKey(null);
+                  }}
+                  disabled={solvingLoop || computingVoltages}
                   style={{
                     width: "60px",
                     padding: "4px 8px",
@@ -692,18 +836,18 @@ export function OrbifoldsExplorer() {
                   placeholder="e.g. 5"
                 />
                 <button
-                  onClick={handleSolveLoop}
-                  disabled={solvingLoop}
+                  onClick={handleComputeVoltages}
+                  disabled={solvingLoop || computingVoltages}
                   style={{
                     padding: "4px 12px",
                     borderRadius: "4px",
                     border: "1px solid #8e44ad",
-                    backgroundColor: solvingLoop ? "#d5d8dc" : "#e8daef",
-                    cursor: solvingLoop ? "not-allowed" : "pointer",
+                    backgroundColor: computingVoltages ? "#d5d8dc" : "#e8daef",
+                    cursor: computingVoltages ? "not-allowed" : "pointer",
                     fontSize: "13px",
                   }}
                 >
-                  {solvingLoop ? "Solving…" : "Solve"}
+                  {computingVoltages ? "Computing…" : "Compute Voltages"}
                 </button>
                 <button
                   onClick={handleCancelLoopFind}
@@ -719,6 +863,54 @@ export function OrbifoldsExplorer() {
                   Cancel
                 </button>
               </div>
+
+              {/* Step 2: Voltage selector + Solve */}
+              {reachableVoltages.length > 0 && (
+                <div style={{ marginBottom: "8px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <label style={{ fontSize: "13px" }}>Target voltage:</label>
+                    <select
+                      value={selectedTargetVoltageKey ?? ""}
+                      onChange={(e) => setSelectedTargetVoltageKey(e.target.value)}
+                      disabled={solvingLoop}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: "4px",
+                        border: "1px solid #ccc",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        maxWidth: "300px",
+                      }}
+                    >
+                      {reachableVoltages.map((v) => {
+                        const m = v.matrix;
+                        const label = `[[${m[0].join(",")}],[${m[1].join(",")}],[${m[2].join(",")}]]`;
+                        return (
+                          <option key={v.key} value={v.key}>{label}</option>
+                        );
+                      })}
+                    </select>
+                    <button
+                      onClick={handleSolveLoop}
+                      disabled={solvingLoop || !selectedTargetVoltageKey}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: "4px",
+                        border: "1px solid #27ae60",
+                        backgroundColor: solvingLoop ? "#d5d8dc" : "#d5f5e3",
+                        cursor: solvingLoop || !selectedTargetVoltageKey ? "not-allowed" : "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {solvingLoop ? "Solving…" : "Solve"}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+                    {reachableVoltages.length} reachable voltage{reachableVoltages.length !== 1 ? "s" : ""} found
+                  </p>
+                </div>
+              )}
+
               {loopSatStats && (
                 <p style={{ fontSize: "11px", color: "#666", marginTop: "6px" }}>
                   SAT: {loopSatStats.numVars} vars, {loopSatStats.numClauses} clauses
@@ -747,6 +939,7 @@ export function OrbifoldsExplorer() {
               onAccept={handleAcceptLoop}
               onReject={handleRejectLoop}
               wallpaperGroup={wallpaperGroup}
+              initialEdgeIds={pendingLoopResult.pathEdgeIds}
             />
           )}
           

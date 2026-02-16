@@ -107,6 +107,7 @@ export function LoopResultRenderer({
   rootNodeId,
   onAccept,
   onReject,
+  initialEdgeIds,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -116,6 +117,8 @@ export function LoopResultRenderer({
   onAccept: (selectedEdgeIds: string[]) => void;
   onReject: () => void;
   wallpaperGroup?: string;
+  /** Per-step edge IDs from the SAT solver to prefill selections (one per consecutive pair) */
+  initialEdgeIds?: string[];
 }) {
   // Build step-edge info and identify choice points
   const steps = useMemo(
@@ -123,9 +126,16 @@ export function LoopResultRenderer({
     [pathNodeIds, grid],
   );
 
-  // Initialise selections: first available edge for each step
+  // Initialise selections: use initialEdgeIds if available (and valid), else first available edge
   const [selections, setSelections] = useState<string[]>(() =>
-    steps.map((s) => s.edgeIds[0] ?? ""),
+    steps.map((s, i) => {
+      const initial = initialEdgeIds?.[i];
+      // Use the initial edge ID if it's one of the valid options for this step
+      if (initial && s.edgeIds.includes(initial)) {
+        return initial;
+      }
+      return s.edgeIds[0] ?? "";
+    }),
   );
 
   // Recompute voltage whenever selections change
