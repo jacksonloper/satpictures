@@ -403,6 +403,21 @@ export function OrbifoldsExplorer() {
     setPendingLoopResult(null);
   }, []);
 
+  // Handle clearing the grid: set all nodes to white and all edges to solid
+  const handleClear = useCallback(() => {
+    setOrbifoldGrid((prev) => {
+      const newNodes = new Map(prev.nodes);
+      for (const [nodeId, node] of newNodes) {
+        newNodes.set(nodeId, { ...node, data: { ...node.data, color: "white" } });
+      }
+      const newEdges = new Map(prev.edges);
+      for (const [edgeId, edge] of newEdges) {
+        newEdges.set(edgeId, { ...edge, data: { linestyle: "solid" } });
+      }
+      return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
+    });
+  }, []);
+
   // Handle SVG export
   const handleExportSvg = useCallback(() => {
     const svgElement = liftedGraphSvgRef.current;
@@ -627,6 +642,19 @@ export function OrbifoldsExplorer() {
               title="Find a non-self-intersecting loop of given length via SAT solver"
             >
               🔄 Find Loop
+            </button>
+            <button
+              onClick={handleClear}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: "1px solid #e74c3c",
+                backgroundColor: "#fdedec",
+                cursor: "pointer",
+              }}
+              title="Reset all nodes to white and all edges to solid"
+            >
+              🧹 Clear
             </button>
           </div>
           
