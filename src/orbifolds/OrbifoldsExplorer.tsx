@@ -369,11 +369,13 @@ export function OrbifoldsExplorer() {
   }, []);
 
   // Handle accepting the loop result: set selected loop edges as solid, others as dashed.
+  // Also assign black color to all orbifold nodes not involved in the loop.
   // `selectedEdgeIds` is the per-step edge selection made by the user in the LoopResultRenderer.
   const handleAcceptLoop = useCallback((selectedEdgeIds: string[]) => {
     if (!pendingLoopResult) return;
 
     const chosenEdges = new Set(selectedEdgeIds);
+    const loopNodeIds = new Set(pendingLoopResult.pathNodeIds);
 
     setOrbifoldGrid((prev) => {
       // Set chosen edges to solid, all others to dashed
@@ -382,7 +384,14 @@ export function OrbifoldsExplorer() {
         const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
         newEdges.set(edgeId, { ...edge, data: { linestyle } });
       }
-      return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+      // Set non-loop nodes to black
+      const newNodes = new Map(prev.nodes);
+      for (const [nodeId, node] of newNodes) {
+        if (!loopNodeIds.has(nodeId)) {
+          newNodes.set(nodeId, { ...node, data: { ...node.data, color: "black" } });
+        }
+      }
+      return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
     });
 
     setInspectionInfo(null);
@@ -392,6 +401,21 @@ export function OrbifoldsExplorer() {
   // Handle rejecting the loop result: keep original edge styles
   const handleRejectLoop = useCallback(() => {
     setPendingLoopResult(null);
+  }, []);
+
+  // Handle clearing the grid: set all nodes to white and all edges to solid
+  const handleClear = useCallback(() => {
+    setOrbifoldGrid((prev) => {
+      const newNodes = new Map(prev.nodes);
+      for (const [nodeId, node] of newNodes) {
+        newNodes.set(nodeId, { ...node, data: { ...node.data, color: "white" } });
+      }
+      const newEdges = new Map(prev.edges);
+      for (const [edgeId, edge] of newEdges) {
+        newEdges.set(edgeId, { ...edge, data: { ...edge.data, linestyle: "solid" } });
+      }
+      return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
+    });
   }, []);
 
   // Handle SVG export
@@ -618,6 +642,19 @@ export function OrbifoldsExplorer() {
               title="Find a non-self-intersecting loop of given length via SAT solver"
             >
               🔄 Find Loop
+            </button>
+            <button
+              onClick={handleClear}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: "1px solid #e74c3c",
+                backgroundColor: "#fdedec",
+                cursor: "pointer",
+              }}
+              title="Reset all nodes to white and all edges to solid"
+            >
+              🧹 Clear
             </button>
           </div>
           

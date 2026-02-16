@@ -13,7 +13,7 @@ import {
   type OrbifoldNodeId,
   type OrbifoldEdgeId,
   type Matrix3x3,
-  nodeIdFromCoord,
+  type NodePolygon,
   matMul,
   I3,
   formatVoltage,
@@ -27,6 +27,16 @@ import {
 // Constants (matching OrbifoldGridTools)
 const CELL_SIZE = 40;
 const GRID_PADDING = 20;
+
+/** Compute centroid of a polygon. */
+function polygonCentroid(polygon: NodePolygon): { x: number; y: number } {
+  let cx = 0, cy = 0;
+  for (const [x, y] of polygon) {
+    cx += x;
+    cy += y;
+  }
+  return { x: cx / polygon.length, y: cy / polygon.length };
+}
 
 /** Info about a single step in the loop path. */
 interface StepEdgeInfo {
@@ -92,13 +102,11 @@ function computeLoopVoltage(
 }
 
 export function LoopResultRenderer({
-  n,
   grid,
   pathNodeIds,
   rootNodeId,
   onAccept,
   onReject,
-  wallpaperGroup,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -109,14 +117,6 @@ export function LoopResultRenderer({
   onReject: () => void;
   wallpaperGroup?: string;
 }) {
-  const cellSize = CELL_SIZE;
-  const isP4g = wallpaperGroup === "P4g";
-  const gridCols = isP4g ? n + 1 : n;
-  const width = gridCols * cellSize + 2 * GRID_PADDING;
-  const height = n * cellSize + 2 * GRID_PADDING;
-
-  const getOddCoord = (index: number): number => 2 * index + 1;
-
   // Build step-edge info and identify choice points
   const steps = useMemo(
     () => buildStepEdges(pathNodeIds, grid),
@@ -155,6 +155,29 @@ export function LoopResultRenderer({
     }
   }
 
+  // Compute bounding box of all polygon vertices (sketchpad layout)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const node of grid.nodes.values()) {
+    for (const [x, y] of node.polygon) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const bboxW = maxX - minX;
+  const bboxH = maxY - minY;
+
+  const scale = CELL_SIZE / 2;
+  const svgW = bboxW * scale + 2 * GRID_PADDING;
+  const svgH = bboxH * scale + 2 * GRID_PADDING;
+
+  const toSvgX = (x: number) => (x - minX) * scale + GRID_PADDING;
+  const toSvgY = (y: number) => (y - minY) * scale + GRID_PADDING;
+
+  const polygonPoints = (polygon: NodePolygon): string =>
+    polygon.map(([x, y]) => `${toSvgX(x)},${toSvgY(y)}`).join(" ");
+
   return (
     <div style={{
       marginBottom: "10px",
@@ -171,100 +194,43 @@ export function LoopResultRenderer({
       </p>
 
       <svg
-        width={width}
-        height={height}
+        width={svgW}
+        height={svgH}
         style={{ border: "1px solid #27ae60", borderRadius: "4px", marginBottom: "8px" }}
       >
-        {isP4g
-          ? Array.from({ length: n }, (_, row) =>
-              Array.from({ length: n + 1 }, (_, col) => {
-                const x = GRID_PADDING + col * cellSize;
-                const y = GRID_PADDING + row * cellSize;
-                let nodeId: string;
-                let nodeExists: boolean;
+        {Array.from(grid.nodes.values()).map((node) => {
+          const color = node.data?.color ?? "white";
+          const stepIndex = nodeStep.get(node.id);
+          const isInPath = stepIndex !== undefined;
+          const isRoot = node.id === rootNodeId;
+          const centroid = polygonCentroid(node.polygon);
+          const cx = toSvgX(centroid.x);
+          const cy = toSvgY(centroid.y);
 
-                if (col === 0) {
-                  const diagI = 4 * row + 3;
-                  const diagJ = 4 * row + 1;
-                  nodeId = nodeIdFromCoord([diagI, diagJ]);
-                  nodeExists = grid.nodes.has(nodeId);
-                } else {
-                  const gridI = 4 * col + 2;
-                  const gridJ = 4 * row + 2;
-                  nodeId = nodeIdFromCoord([gridI, gridJ]);
-                  nodeExists = grid.nodes.has(nodeId);
+          return (
+            <g key={node.id}>
+              <polygon
+                points={polygonPoints(node.polygon)}
+                fill={
+                  isInPath ? (isRoot ? "#f39c12" : "#27ae60") :
+                  (color === "black" ? "#2c3e50" : "white")
                 }
-
-                const color = nodeExists ? (grid.nodes.get(nodeId)?.data?.color ?? "white") : "white";
-                const stepIndex = nodeStep.get(nodeId);
-                const isInPath = stepIndex !== undefined;
-                const isRoot = nodeId === rootNodeId;
-
-                return (
-                  <g key={`${row}-${col}`}>
-                    <rect
-                      x={x} y={y} width={cellSize} height={cellSize}
-                      fill={
-                        !nodeExists ? "#ecf0f1" :
-                        isInPath ? (isRoot ? "#f39c12" : "#27ae60") :
-                        (color === "black" ? "#2c3e50" : "white")
-                      }
-                      stroke={isInPath ? "#1a7a1a" : "#7f8c8d"}
-                      strokeWidth={isInPath ? 2 : 1}
-                    />
-                    {isInPath && nodeExists && (
-                      <text
-                        x={x + cellSize / 2} y={y + cellSize / 2}
-                        textAnchor="middle" dominantBaseline="middle"
-                        fontSize={14} fontWeight="bold" fill="white"
-                        style={{ pointerEvents: "none" }}
-                      >
-                        {stepIndex}
-                      </text>
-                    )}
-                  </g>
-                );
-              })
-            )
-          : Array.from({ length: n }, (_, row) =>
-              Array.from({ length: n }, (_, col) => {
-                const x = GRID_PADDING + col * cellSize;
-                const y = GRID_PADDING + row * cellSize;
-                const i = getOddCoord(col);
-                const j = getOddCoord(row);
-                const nodeId = nodeIdFromCoord([i, j]);
-                const nodeExists = grid.nodes.has(nodeId);
-                const color = nodeExists ? (grid.nodes.get(nodeId)?.data?.color ?? "white") : "white";
-                const stepIndex = nodeStep.get(nodeId);
-                const isInPath = stepIndex !== undefined;
-                const isRoot = nodeId === rootNodeId;
-
-                return (
-                  <g key={`${row}-${col}`}>
-                    <rect
-                      x={x} y={y} width={cellSize} height={cellSize}
-                      fill={
-                        !nodeExists ? "#ecf0f1" :
-                        isInPath ? (isRoot ? "#f39c12" : "#27ae60") :
-                        (color === "black" ? "#2c3e50" : "white")
-                      }
-                      stroke={isInPath ? "#1a7a1a" : "#7f8c8d"}
-                      strokeWidth={isInPath ? 2 : 1}
-                    />
-                    {isInPath && nodeExists && (
-                      <text
-                        x={x + cellSize / 2} y={y + cellSize / 2}
-                        textAnchor="middle" dominantBaseline="middle"
-                        fontSize={14} fontWeight="bold" fill="white"
-                        style={{ pointerEvents: "none" }}
-                      >
-                        {stepIndex}
-                      </text>
-                    )}
-                  </g>
-                );
-              })
-            )}
+                stroke={isInPath ? "#1a7a1a" : "#7f8c8d"}
+                strokeWidth={isInPath ? 2 : 1}
+              />
+              {isInPath && (
+                <text
+                  x={cx} y={cy}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fontSize={node.polygon.length < 4 ? 10 : 14} fontWeight="bold" fill="white"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {stepIndex}
+                </text>
+              )}
+            </g>
+          );
+        })}
       </svg>
 
       {/* Multi-edge choice selectors */}
