@@ -75,6 +75,7 @@ export function OrbifoldsExplorer() {
   const [pendingLoopResult, setPendingLoopResult] = useState<{
     pathNodeIds: string[];
     loopEdgeIds: string[];
+    pathEdgeIds?: string[];
   } | null>(null);
   const loopWorkerRef = useRef<Worker | null>(null);
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
@@ -475,6 +476,7 @@ export function OrbifoldsExplorer() {
         setPendingLoopResult({
           pathNodeIds: response.pathNodeIds,
           loopEdgeIds: response.loopEdgeIds,
+          pathEdgeIds: response.pathEdgeIds,
         });
         setErrorMessage(null);
       } else {
@@ -937,6 +939,7 @@ export function OrbifoldsExplorer() {
               onAccept={handleAcceptLoop}
               onReject={handleRejectLoop}
               wallpaperGroup={wallpaperGroup}
+              initialEdgeIds={pendingLoopResult.pathEdgeIds}
             />
           )}
           

@@ -77,6 +77,8 @@ export interface LoopFinderResponse {
   loopEdgeIds?: string[];
   /** If SAT: ordered path of node IDs (step 0 = root, last non-null = root) */
   pathNodeIds?: string[];
+  /** If SAT: per-step edge IDs that produced the solved voltage (one per consecutive pair in pathNodeIds) */
+  pathEdgeIds?: string[];
   /** For "computeVoltages" mode: the set of reachable voltage keys and matrices */
   reachableVoltages?: Array<{ key: string; matrix: VoltageMatrix }>;
 }
@@ -637,6 +639,52 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
     }
   }
 
+  // Extract per-step voltages from the SAT assignment
+  const pathVoltages: number[] = []; // voltage index at each non-null step
+  for (let t = 0; t < path.length; t++) {
+    for (let k = 0; k < totalVoltages; k++) {
+      if (assignment.get(volt[t][k])) {
+        pathVoltages.push(k);
+        break;
+      }
+    }
+  }
+
+  // Determine per-step edge IDs by matching voltage transitions
+  // For each step t -> t+1, find the specific edge whose half-edge voltage
+  // transforms allVoltages[pathVoltages[t]] into allVoltages[pathVoltages[t+1]]
+  const pathEdgeIds: string[] = [];
+  for (let t = 0; t < path.length - 1; t++) {
+    const fromNode = nodeIds[path[t]];
+    const toNode = nodeIds[path[t + 1]];
+    const voltBefore = pathVoltages[t] !== undefined ? allVoltages[pathVoltages[t]].matrix : IDENTITY_MATRIX;
+    const voltAfter = pathVoltages[t + 1] !== undefined ? allVoltages[pathVoltages[t + 1]].matrix : IDENTITY_MATRIX;
+    const voltAfterKey = voltageKeyFromMatrix(voltAfter);
+
+    // Find the edge that produces this voltage transition
+    let bestEdgeId: string | undefined;
+    for (const edge of edges) {
+      const hv = edge.halfEdgeVoltages[fromNode];
+      if (!hv) continue;
+      // Check that this edge connects fromNode to toNode
+      let edgeTo: string;
+      if (edge.endpoints[0] === edge.endpoints[1]) {
+        edgeTo = edge.endpoints[0];
+      } else {
+        edgeTo = edge.endpoints[0] === fromNode ? edge.endpoints[1] : edge.endpoints[0];
+      }
+      if (edgeTo !== toNode) continue;
+
+      // Check voltage transition: voltBefore * edgeVoltage should equal voltAfter
+      const result = matMulV(voltBefore, hv);
+      if (voltageKeyFromMatrix(result) === voltAfterKey) {
+        bestEdgeId = edge.edgeId;
+        break;
+      }
+    }
+    pathEdgeIds.push(bestEdgeId ?? "");
+  }
+
   // Determine which edges are in the loop
   const usedPairs = new Set<string>();
   for (let t = 0; t < path.length - 1; t++) {
@@ -659,7 +707,7 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
 
   const pathNodeIds = path.map(v => nodeIds[v]);
 
-  return { success: true, messageType: "result", loopEdgeIds, pathNodeIds };
+  return { success: true, messageType: "result", loopEdgeIds, pathNodeIds, pathEdgeIds };
 }
 
 // ---- Worker message handler ----
