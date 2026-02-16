@@ -369,11 +369,13 @@ export function OrbifoldsExplorer() {
   }, []);
 
   // Handle accepting the loop result: set selected loop edges as solid, others as dashed.
+  // Also assign black color to all orbifold nodes not involved in the loop.
   // `selectedEdgeIds` is the per-step edge selection made by the user in the LoopResultRenderer.
   const handleAcceptLoop = useCallback((selectedEdgeIds: string[]) => {
     if (!pendingLoopResult) return;
 
     const chosenEdges = new Set(selectedEdgeIds);
+    const loopNodeIds = new Set(pendingLoopResult.pathNodeIds);
 
     setOrbifoldGrid((prev) => {
       // Set chosen edges to solid, all others to dashed
@@ -382,7 +384,14 @@ export function OrbifoldsExplorer() {
         const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
         newEdges.set(edgeId, { ...edge, data: { linestyle } });
       }
-      return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+      // Set non-loop nodes to black
+      const newNodes = new Map(prev.nodes);
+      for (const [nodeId, node] of newNodes) {
+        if (!loopNodeIds.has(nodeId)) {
+          newNodes.set(nodeId, { ...node, data: { ...node.data, color: "black" } });
+        }
+      }
+      return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
     });
 
     setInspectionInfo(null);
