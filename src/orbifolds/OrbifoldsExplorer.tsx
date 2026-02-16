@@ -8,7 +8,8 @@
  * - Color in the grid cells (black/white) using "color" tool
  * - Inspect nodes to see coordinates, edges, and voltages using "inspect" tool
  * - Set a root node using the "root" tool
- * - Find non-self-intersecting loops of a given length via SAT solving
+ * - Find non-self-intersecting loops with target voltage via SAT solving
+ *   (uses BFS to compute reachable voltages, then SAT with variable-length paths)
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
@@ -774,7 +775,7 @@ export function OrbifoldsExplorer() {
                 cursor: "pointer",
                 fontWeight: showLoopFinder ? "bold" : "normal",
               }}
-              title="Find a non-self-intersecting loop of given length via SAT solver"
+              title="Find a non-self-intersecting loop with target voltage via SAT solver"
             >
               🔄 Find Loop
             </button>
@@ -812,7 +813,7 @@ export function OrbifoldsExplorer() {
             }}>
               {/* Step 1: Max length + Compute Voltages */}
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-                <label style={{ fontSize: "13px" }}>Max path length:</label>
+                <label style={{ fontSize: "13px" }}>Max steps:</label>
                 <input
                   type="text"
                   value={maxLengthInput}

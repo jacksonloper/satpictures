@@ -261,10 +261,10 @@ function computeReachableVoltagesBFS(
     }
   }
 
-  type BFSState = { nodeId: string; voltage: Matrix3x3; voltageK: string };
+  type BFSState = { nodeId: string; voltage: Matrix3x3; voltageKeyStr: string };
 
   const identityK = voltageKey(I3);
-  let frontier: BFSState[] = [{ nodeId: rootNodeId, voltage: I3, voltageK: identityK }];
+  let frontier: BFSState[] = [{ nodeId: rootNodeId, voltage: I3, voltageKeyStr: identityK }];
   const visited = new Set<string>();
   visited.add(`${rootNodeId}#${identityK}`);
 
@@ -288,7 +288,7 @@ function computeReachableVoltagesBFS(
         }
         if (!visited.has(stateKey)) {
           visited.add(stateKey);
-          nextFrontier.push({ nodeId: to, voltage: newVoltage, voltageK: newVoltageK });
+          nextFrontier.push({ nodeId: to, voltage: newVoltage, voltageKeyStr: newVoltageK });
         }
       }
     }

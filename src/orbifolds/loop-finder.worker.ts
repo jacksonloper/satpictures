@@ -62,9 +62,9 @@ export interface LoopFinderRequest {
   edges: OrbifoldEdgeInfo[];
   /** Node IDs that are black-colored and must be excluded from the path */
   blackNodeIds?: string[];
-  /** Target voltage key (only for "solve" mode) */
+  /** Target voltage key (required for "solve" mode, ignored for "computeVoltages") */
   targetVoltageKey?: string;
-  /** Set of reachable voltage keys and their matrices (only for "solve" mode) */
+  /** Set of reachable voltage keys and their matrices (required for "solve" mode, ignored for "computeVoltages") */
   reachableVoltages?: Array<{ key: string; matrix: VoltageMatrix }>;
 }
 
