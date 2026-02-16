@@ -292,10 +292,11 @@ export function findRandomLoop(
   const parent = new Map<OrbifoldNodeId, OrbifoldNodeId | null>();
   parent.set(wallNodeA, null);
   const queue: OrbifoldNodeId[] = [wallNodeA];
+  let queueIndex = 0;
   let found = false;
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
+  while (queueIndex < queue.length) {
+    const current = queue[queueIndex++];
     if (current === wallNodeB) {
       found = true;
       break;
