@@ -378,7 +378,7 @@ export function OrbifoldWeaveExplorer() {
     const adj = buildAdjRecord(grid);
     const edgesData = buildWorkerEdgeData(grid);
 
-    // The SAT loop length should be doubled (twice as many nodes in doubled orbifold)
+    // Double the max length: the doubled orbifold has 2× nodes, so paths are longer
     const request: LoopFinderRequest = {
       mode: "solve",
       maxLength: maxLength * 2,
@@ -474,13 +474,8 @@ export function OrbifoldWeaveExplorer() {
         edges: dEdgesData,
       };
 
-      // Override: we need custom solveAll that BFS uses undoubled voltages
-      // but SAT uses doubled grid. We'll use the worker's built-in solveAll
-      // which does its own BFS internally - but on the doubled grid.
-      // Actually let's just do it properly: the worker's solveAll does
-      // its own BFS. The BFS on the doubled grid will find the same voltages
-      // (since voltages only depend on 2D positions, and the doubled grid
-      // has the same voltage structure). So this should work fine.
+      // The worker's solveAll does its own BFS internally on the doubled grid.
+      // This finds the same voltages since voltages only act on 2D positions.
 
       const satWorker = new LoopFinderWorker();
       loopsWorkerRef.current = satWorker;
