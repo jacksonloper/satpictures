@@ -51,9 +51,13 @@ const DEFAULT_EXPANSION = 5;
 function DoubledOrbifoldLoopDisplay({
   doubledGrid,
   pathNodeIds,
+  onNodeClick,
+  highlightedNodeId,
 }: {
   doubledGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
   pathNodeIds: string[];
+  onNodeClick?: (nodeId: string) => void;
+  highlightedNodeId?: string | null;
 }) {
   // Build a map from nodeId → step number (1-based)
   const nodeStep = useMemo(() => {
@@ -128,9 +132,17 @@ function DoubledOrbifoldLoopDisplay({
                 if (nd.step !== null) {
                   // Node is in the loop — draw a filled circle with step number
                   const fill = level === 0 ? "#00838f" : "#ff8c00";
+                  const isHighlighted = nd.id === highlightedNodeId;
                   return (
-                    <g key={nd.id}>
-                      <circle cx={cx} cy={cy} r={11} fill={fill} stroke="#333" strokeWidth={1} />
+                    <g
+                      key={nd.id}
+                      onClick={() => onNodeClick?.(nd.id)}
+                      style={{ cursor: onNodeClick ? "pointer" : undefined }}
+                    >
+                      {isHighlighted && (
+                        <circle cx={cx} cy={cy} r={16} fill="none" stroke="#FFD700" strokeWidth={3} />
+                      )}
+                      <circle cx={cx} cy={cy} r={11} fill={fill} stroke={isHighlighted ? "#FFD700" : "#333"} strokeWidth={isHighlighted ? 2 : 1} />
                       <text
                         x={cx}
                         y={cy}
@@ -208,6 +220,9 @@ export function OrbifoldWeaveExplorer() {
   // Accepted loop state
   const [loopAccepted, setLoopAccepted] = useState(false);
   const [acceptedPathNodeIds, setAcceptedPathNodeIds] = useState<string[]>([]);
+
+  // Highlight state: which orbifold node is highlighted (clicked in 2D view)
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
 
@@ -998,6 +1013,8 @@ export function OrbifoldWeaveExplorer() {
           <DoubledOrbifoldLoopDisplay
             doubledGrid={doubledGrid}
             pathNodeIds={acceptedPathNodeIds}
+            onNodeClick={(nodeId) => setHighlightedNodeId(prev => prev === nodeId ? null : nodeId)}
+            highlightedNodeId={highlightedNodeId}
           />
 
           <h3 style={{ marginTop: "20px", marginBottom: "10px" }}>3D Weave (Lifted Graph)</h3>
@@ -1009,6 +1026,7 @@ export function OrbifoldWeaveExplorer() {
               liftedGraph={liftedGraph}
               orbifoldGrid={doubledGrid}
               useAxialTransform={wallpaperGroup === "P3"}
+              highlightedOrbifoldNodeId={highlightedNodeId}
             />
           </ErrorBoundary>
         </div>

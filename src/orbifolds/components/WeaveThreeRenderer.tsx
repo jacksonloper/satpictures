@@ -44,6 +44,7 @@ interface WeaveThreeRendererProps {
   width?: number;
   height?: number;
   levelSpacing?: number;
+  highlightedOrbifoldNodeId?: string | null;
 }
 
 /**
@@ -120,6 +121,7 @@ export function WeaveThreeRenderer({
   width = 700,
   height = 500,
   levelSpacing = 3,
+  highlightedOrbifoldNodeId = null,
 }: WeaveThreeRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -127,6 +129,7 @@ export function WeaveThreeRenderer({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameRef = useRef<number>(0);
+  const highlightMeshesRef = useRef<THREE.Mesh[]>([]);
 
   // Compute solid edges and active nodes
   const { solidEdges, activeNodes } = useMemo(() => {
@@ -408,6 +411,45 @@ export function WeaveThreeRenderer({
     );
     controls.update();
   }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing]);
+
+  // Update highlight meshes when highlighted node changes
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    // Remove old highlight meshes
+    for (const mesh of highlightMeshesRef.current) {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      const mat = mesh.material;
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+      else (mat as THREE.Material).dispose();
+    }
+    highlightMeshesRef.current = [];
+
+    if (!highlightedOrbifoldNodeId) return;
+
+    const highlightMaterial = new THREE.MeshPhongMaterial({
+      color: 0xffd700,
+      emissive: 0xffd700,
+      emissiveIntensity: 0.6,
+      shininess: 100,
+      transparent: true,
+      opacity: 0.7,
+    });
+    const highlightGeometry = new THREE.SphereGeometry(EDGE_RADIUS * 2.2, 20, 14);
+
+    // Find all lifted nodes whose orbifold node matches
+    for (const node of activeNodes) {
+      if (node.orbifoldNode !== highlightedOrbifoldNodeId) continue;
+
+      const pos = getNodePosition(orbifoldGrid, node.orbifoldNode, node.voltage, useAxialTransform, levelSpacing);
+      const mesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
+      mesh.position.copy(pos);
+      scene.add(mesh);
+      highlightMeshesRef.current.push(mesh);
+    }
+  }, [highlightedOrbifoldNodeId, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing]);
 
   return (
     <div
