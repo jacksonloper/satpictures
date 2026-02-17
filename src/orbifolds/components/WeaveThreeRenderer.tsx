@@ -3,6 +3,10 @@
  *
  * Renders:
  * - Tubes for each solid-styled lifted edge
+ *   - Same-level edges are straight and colored by their level
+ *   - Cross-level edges curve to the "right" (so opposing pairs don't
+ *     intersect) and use a vertex-color gradient from one level's color
+ *     to the other
  * - Spheres for lifted nodes that touch at least one solid edge
  *
  * The (x, y) position comes from the lifted node's 2D coordinates
@@ -23,10 +27,14 @@ import { applyMatrix, axialToCartesian } from "../orbifoldbasics";
 import type { ColorData, EdgeStyleData } from "../createOrbifolds";
 import { getLevelFromNodeId, getBaseNodeId } from "../doubleOrbifold";
 
-const TUBE_RADIUS = 0.15;
-const SPHERE_RADIUS = 0.2;
-const TUBE_SEGMENTS = 8;
-const RADIAL_SEGMENTS = 8;
+// Tube and node radius are the same
+const EDGE_RADIUS = 0.25;
+const TUBE_SEGMENTS_STRAIGHT = 8;
+const TUBE_SEGMENTS_CURVED = 24;
+const RADIAL_SEGMENTS = 10;
+
+// Curve bow magnitude as a fraction of edge length
+const CROSS_LEVEL_BOW = 0.35;
 
 interface WeaveThreeRendererProps {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
@@ -72,6 +80,36 @@ function getNodePosition(
   }
 
   return new THREE.Vector3(x, level * levelSpacing, -y);
+}
+
+/**
+ * Paint per-vertex colors on an existing TubeGeometry so the tube
+ * smoothly transitions from `colorA` (at parameter t=0) to `colorB`
+ * (at parameter t=1).
+ *
+ * TubeGeometry vertices are laid out as (tubularSegments+1) rings
+ * of (radialSegments+1) vertices each.
+ */
+function applyGradientToTube(
+  geometry: THREE.TubeGeometry,
+  colorA: THREE.Color,
+  colorB: THREE.Color,
+  tubularSegments: number,
+): void {
+  const posCount = geometry.attributes.position.count;
+  const colors = new Float32Array(posCount * 3);
+  const ringsPerSegment = posCount / (tubularSegments + 1);
+  const mix = new THREE.Color();
+
+  for (let i = 0; i < posCount; i++) {
+    const ring = Math.floor(i / ringsPerSegment);
+    const t = ring / tubularSegments;           // 0 → 1 along the tube
+    mix.copy(colorA).lerp(colorB, t);
+    colors[i * 3]     = mix.r;
+    colors[i * 3 + 1] = mix.g;
+    colors[i * 3 + 2] = mix.b;
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 }
 
 export function WeaveThreeRenderer({
@@ -179,12 +217,15 @@ export function WeaveThreeRenderer({
     controls.dampingFactor = 0.05;
     controlsRef.current = controls;
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // Lighting – key + fill + ambient to bring out surface differences
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 10, 7);
-    scene.add(directionalLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    keyLight.position.set(5, 10, 7);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    fillLight.position.set(-4, -6, -5);
+    scene.add(fillLight);
 
     // Animation loop
     function animate() {
@@ -240,22 +281,30 @@ export function WeaveThreeRenderer({
       return;
     }
 
-    // Materials colored by level
-    const level0Color = new THREE.Color(0x3498db); // Blue for level 0 (low)
-    const level1Color = new THREE.Color(0xe74c3c); // Red for level 1 (high)
-    const crossLevelColor = new THREE.Color(0x9b59b6); // Purple for cross-level edges
+    // Highly distinct level colors
+    const level0Color = new THREE.Color(0x00838f); // Deep teal for level 0
+    const level1Color = new THREE.Color(0xff8c00); // Vivid orange for level 1
 
-    const tubeMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 60 });
-    const tubeMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 60 });
-    const tubeMaterialCross = new THREE.MeshPhongMaterial({ color: crossLevelColor, shininess: 60 });
-    const sphereMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 80 });
-    const sphereMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 80 });
-    const sphereGeometry = new THREE.SphereGeometry(SPHERE_RADIUS, 16, 12);
+    // Solid-color materials for same-level edges
+    const tubeMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 70 });
+    const tubeMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 70 });
+    // Gradient material for cross-level edges (uses per-vertex colors)
+    const tubeGradientMaterial = new THREE.MeshPhongMaterial({
+      vertexColors: true,
+      shininess: 70,
+    });
+
+    const sphereMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 90 });
+    const sphereMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 90 });
+    const sphereGeometry = new THREE.SphereGeometry(EDGE_RADIUS, 16, 12);
 
     // Compute bounding box for camera positioning
     let minX = Infinity, maxX = -Infinity;
     let minY = Infinity, maxY = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
+
+    // Up vector used to compute "right" offset for cross-level curves
+    const up = new THREE.Vector3(0, 1, 0);
 
     // Render tubes for solid edges
     for (const edge of solidEdges) {
@@ -269,14 +318,42 @@ export function WeaveThreeRenderer({
         minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
       }
 
-      // Create tube path, colored by level
-      const path = new THREE.LineCurve3(posA, posB);
-      const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS, TUBE_RADIUS, RADIAL_SEGMENTS, false);
-      const material = edge.aLevel === edge.bLevel
-        ? (edge.aLevel === 0 ? tubeMaterialLevel0 : tubeMaterialLevel1)
-        : tubeMaterialCross;
-      const tubeMesh = new THREE.Mesh(tubeGeometry, material);
-      scene.add(tubeMesh);
+      const isCrossLevel = edge.aLevel !== edge.bLevel;
+
+      if (isCrossLevel) {
+        // Curved cross-level edge: bow to the "right" (cross product of
+        // edge direction × up).  This means a 0→1 edge bows one way and
+        // a 1→0 edge bows the same way in world space, so the two
+        // opposing cross-level edges between the same 2D node pair
+        // curve away from each other instead of intersecting.
+        const dir = new THREE.Vector3().subVectors(posB, posA);
+        const edgeLen = dir.length();
+        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        // If the cross product was zero (edge perfectly vertical in the
+        // remaining axes), fall back to an arbitrary perpendicular
+        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+
+        const mid = new THREE.Vector3().addVectors(posA, posB).multiplyScalar(0.5);
+        mid.addScaledVector(right, edgeLen * CROSS_LEVEL_BOW);
+
+        const curve = new THREE.QuadraticBezierCurve3(posA, mid, posB);
+        const tubeGeometry = new THREE.TubeGeometry(curve, TUBE_SEGMENTS_CURVED, EDGE_RADIUS, RADIAL_SEGMENTS, false);
+
+        // Gradient vertex colors from A-level color to B-level color
+        const colA = edge.aLevel === 0 ? level0Color : level1Color;
+        const colB = edge.bLevel === 0 ? level0Color : level1Color;
+        applyGradientToTube(tubeGeometry, colA, colB, TUBE_SEGMENTS_CURVED);
+
+        const tubeMesh = new THREE.Mesh(tubeGeometry, tubeGradientMaterial);
+        scene.add(tubeMesh);
+      } else {
+        // Straight same-level edge
+        const path = new THREE.LineCurve3(posA, posB);
+        const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS_STRAIGHT, EDGE_RADIUS, RADIAL_SEGMENTS, false);
+        const material = edge.aLevel === 0 ? tubeMaterialLevel0 : tubeMaterialLevel1;
+        const tubeMesh = new THREE.Mesh(tubeGeometry, material);
+        scene.add(tubeMesh);
+      }
     }
 
     // Render spheres for active nodes
