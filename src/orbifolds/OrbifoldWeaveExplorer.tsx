@@ -29,7 +29,7 @@ import {
   type OrbifoldGrid,
   type OrbifoldNodeId,
 } from "./orbifoldbasics";
-import { doubleOrbifold } from "./doubleOrbifold";
+import { doubleOrbifold, getLevelFromNodeId } from "./doubleOrbifold";
 import LoopFinderWorker from "./loop-finder.worker?worker";
 import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 import {
@@ -42,6 +42,130 @@ import "../App.css";
 // Constants
 const DEFAULT_SIZE = 3;
 const DEFAULT_EXPANSION = 5;
+
+/**
+ * Render two 2D views (level 0 and level 1) of the doubled orbifold,
+ * showing only nodes (no edges) with their step number in the loop path.
+ * Nodes not in the loop are shown as small grey dots.
+ */
+function DoubledOrbifoldLoopDisplay({
+  doubledGrid,
+  pathNodeIds,
+}: {
+  doubledGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
+  pathNodeIds: string[];
+}) {
+  // Build a map from nodeId → step number (1-based)
+  const nodeStep = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < pathNodeIds.length; i++) {
+      // If a node appears more than once (start == end), keep the first
+      if (!map.has(pathNodeIds[i])) {
+        map.set(pathNodeIds[i], i + 1);
+      }
+    }
+    return map;
+  }, [pathNodeIds]);
+
+  // Collect nodes per level
+  const levelNodes = useMemo(() => {
+    const byLevel: [typeof nodes0, typeof nodes1] = [[], []];
+    type NodeInfo = { id: string; x: number; y: number; step: number | null };
+    const nodes0: NodeInfo[] = [];
+    const nodes1: NodeInfo[] = [];
+    byLevel[0] = nodes0;
+    byLevel[1] = nodes1;
+    for (const [nodeId, node] of doubledGrid.nodes) {
+      const level = getLevelFromNodeId(nodeId);
+      if (level === undefined) continue;
+      const step = nodeStep.get(nodeId) ?? null;
+      const entry = { id: nodeId, x: node.coord[0], y: node.coord[1], step };
+      byLevel[level].push(entry);
+    }
+    return byLevel;
+  }, [doubledGrid, nodeStep]);
+
+  const cellSize = 36;
+  const padding = 24;
+
+  return (
+    <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+      {([0, 1] as const).map((level) => {
+        const nodes = levelNodes[level];
+        if (nodes.length === 0) return null;
+        const xs = nodes.map(n => n.x);
+        const ys = nodes.map(n => n.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const rangeX = maxX - minX || 1;
+        const rangeY = maxY - minY || 1;
+        const svgW = rangeX * cellSize / 2 + 2 * padding + 30;
+        const svgH = rangeY * cellSize / 2 + 2 * padding + 30;
+
+        const toSvgX = (c: number) => ((c - minX) * cellSize / 2) + padding + 15;
+        const toSvgY = (c: number) => ((c - minY) * cellSize / 2) + padding + 15;
+
+        return (
+          <div key={level}>
+            <h4 style={{ marginBottom: "4px", fontSize: "13px" }}>
+              Level {level} ({level === 0 ? "Low" : "High"})
+            </h4>
+            <svg
+              width={Math.min(svgW, 350)}
+              height={Math.min(svgH, 350)}
+              viewBox={`0 0 ${svgW} ${svgH}`}
+              style={{
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                backgroundColor: level === 0 ? "#f0fafa" : "#fef8f0",
+              }}
+            >
+              {nodes.map((nd) => {
+                const cx = toSvgX(nd.x);
+                const cy = toSvgY(nd.y);
+                if (nd.step !== null) {
+                  // Node is in the loop — draw a filled circle with step number
+                  const fill = level === 0 ? "#00838f" : "#ff8c00";
+                  return (
+                    <g key={nd.id}>
+                      <circle cx={cx} cy={cy} r={11} fill={fill} stroke="#333" strokeWidth={1} />
+                      <text
+                        x={cx}
+                        y={cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize="9"
+                        fontWeight="bold"
+                        fill="#fff"
+                      >
+                        {nd.step}
+                      </text>
+                    </g>
+                  );
+                } else {
+                  // Node not in loop — small grey dot
+                  return (
+                    <circle
+                      key={nd.id}
+                      cx={cx}
+                      cy={cy}
+                      r={3}
+                      fill="#ccc"
+                      stroke="#999"
+                      strokeWidth={0.5}
+                    />
+                  );
+                }
+              })}
+            </svg>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * Main Orbifold Weaves Explorer component.
@@ -83,6 +207,7 @@ export function OrbifoldWeaveExplorer() {
 
   // Accepted loop state
   const [loopAccepted, setLoopAccepted] = useState(false);
+  const [acceptedPathNodeIds, setAcceptedPathNodeIds] = useState<string[]>([]);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
 
@@ -129,6 +254,7 @@ export function OrbifoldWeaveExplorer() {
     setSelectedTargetVoltageKey(null);
     setPendingLoopResult(null);
     setLoopAccepted(false);
+    setAcceptedPathNodeIds([]);
     resetLoopsFinderState();
     setErrorMessage(null);
   }, [resetLoopsFinderState]);
@@ -202,6 +328,7 @@ export function OrbifoldWeaveExplorer() {
     setSelectedTargetVoltageKey(null);
     setPendingLoopResult(null);
     setLoopAccepted(false);
+    setAcceptedPathNodeIds([]);
 
     const grid = undoubledGrid;
     const nodeIds = Array.from(grid.nodes.keys());
@@ -262,6 +389,7 @@ export function OrbifoldWeaveExplorer() {
     setSolvingLoop(true);
     setPendingLoopResult(null);
     setLoopAccepted(false);
+    setAcceptedPathNodeIds([]);
 
     const grid = doubledGrid;
     const nodeIds = Array.from(grid.nodes.keys());
@@ -321,6 +449,7 @@ export function OrbifoldWeaveExplorer() {
     setSolvingAllLoops(true);
     setPendingLoopResult(null);
     setLoopAccepted(false);
+    setAcceptedPathNodeIds([]);
 
     // Phase 1: compute voltages on undoubled
     const undGrid = undoubledGrid;
@@ -445,7 +574,7 @@ export function OrbifoldWeaveExplorer() {
     }
   }, [resetLoopsFinderState]);
 
-  // Accept loop: style edges, mark on doubled grid
+  // Accept loop: style edges, mark on doubled grid, save path for display
   const handleAcceptLoop = useCallback(() => {
     if (!pendingLoopResult) return;
 
@@ -460,6 +589,7 @@ export function OrbifoldWeaveExplorer() {
       return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
     });
 
+    setAcceptedPathNodeIds(pendingLoopResult.pathNodeIds);
     setLoopAccepted(true);
     setPendingLoopResult(null);
     resetLoopsFinderState();
@@ -810,7 +940,7 @@ export function OrbifoldWeaveExplorer() {
         </div>
       )}
 
-      {/* Pending loop result: accept/reject */}
+      {/* Pending loop result: accept/reject with 2D loop display */}
       {pendingLoopResult && (
         <div style={{
           marginBottom: "16px",
@@ -824,7 +954,12 @@ export function OrbifoldWeaveExplorer() {
             Path: {pendingLoopResult.pathNodeIds.length} nodes, {pendingLoopResult.loopEdgeIds.length} edges in loop
           </p>
 
-          <div style={{ display: "flex", gap: "8px" }}>
+          <DoubledOrbifoldLoopDisplay
+            doubledGrid={doubledGrid}
+            pathNodeIds={pendingLoopResult.pathNodeIds}
+          />
+
+          <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
             <button
               onClick={handleAcceptLoop}
               style={{
@@ -856,10 +991,16 @@ export function OrbifoldWeaveExplorer() {
         </div>
       )}
 
-      {/* 3D Lifted Graph */}
+      {/* Accepted loop: 2D cross-reference + 3D lifted graph */}
       {loopAccepted && (
         <div>
-          <h3 style={{ marginBottom: "10px" }}>3D Weave (Lifted Graph)</h3>
+          <h3 style={{ marginBottom: "10px" }}>Loop Path (Cross Reference)</h3>
+          <DoubledOrbifoldLoopDisplay
+            doubledGrid={doubledGrid}
+            pathNodeIds={acceptedPathNodeIds}
+          />
+
+          <h3 style={{ marginTop: "20px", marginBottom: "10px" }}>3D Weave (Lifted Graph)</h3>
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
           </p>
