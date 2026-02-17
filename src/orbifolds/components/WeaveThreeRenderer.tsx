@@ -4,9 +4,10 @@
  * Renders:
  * - Tubes for each solid-styled lifted edge
  *   - Same-level edges are straight and colored by their level
- *   - Cross-level edges curve to the "right" (so opposing pairs don't
- *     intersect) and use a vertex-color gradient from one level's color
- *     to the other
+ *   - Cross-level edges curve to the "left when looking from above
+ *     along low→high" (so that lowA→highB and lowB→highA bow in
+ *     opposite directions and don't intersect) and use a vertex-color
+ *     gradient from one level's color to the other
  * - Spheres for lifted nodes that touch at least one solid edge
  *
  * The (x, y) position comes from the lifted node's 2D coordinates
@@ -321,20 +322,37 @@ export function WeaveThreeRenderer({
       const isCrossLevel = edge.aLevel !== edge.bLevel;
 
       if (isCrossLevel) {
-        // Curved cross-level edge: bow to the "right" (cross product of
-        // edge direction × up).  This means a 0→1 edge bows one way and
-        // a 1→0 edge bows the same way in world space, so the two
-        // opposing cross-level edges between the same 2D node pair
-        // curve away from each other instead of intersecting.
-        const dir = new THREE.Vector3().subVectors(posB, posA);
+        // Curved cross-level edge.  To prevent intersections we need
+        // every cross-level edge to bow to the same side when viewed
+        // from above along the low→high direction.
+        //
+        // 1. Orient the edge so it goes from the LOW endpoint to the
+        //    HIGH endpoint.
+        // 2. Project the low→high direction onto the horizontal (XZ)
+        //    plane.
+        // 3. "Left when looking from above along low→high" is
+        //    cross(up, horizontal).  This is the bow offset direction.
+        //
+        // Because this orientation is defined solely by the low→high
+        // view, edges lowA→highB and lowB→highA will bow in
+        // *different* directions (the horizontal component flips) and
+        // therefore won't intersect.
+        const posLow  = edge.aLevel < edge.bLevel ? posA : posB;
+        const posHigh = edge.aLevel < edge.bLevel ? posB : posA;
+
+        const dir = new THREE.Vector3().subVectors(posHigh, posLow);
         const edgeLen = dir.length();
-        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
-        // If the cross product was zero (edge perfectly vertical in the
-        // remaining axes), fall back to an arbitrary perpendicular
-        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+
+        // Horizontal component of the low→high direction
+        const horiz = new THREE.Vector3(dir.x, 0, dir.z);
+        // "Left" when looking from above along the low→high direction
+        const bowDir = new THREE.Vector3().crossVectors(up, horiz).normalize();
+        // If the horizontal projection was zero (nodes stacked
+        // vertically), fall back to an arbitrary perpendicular
+        if (bowDir.lengthSq() < 1e-6) bowDir.set(1, 0, 0);
 
         const mid = new THREE.Vector3().addVectors(posA, posB).multiplyScalar(0.5);
-        mid.addScaledVector(right, edgeLen * CROSS_LEVEL_BOW);
+        mid.addScaledVector(bowDir, edgeLen * CROSS_LEVEL_BOW);
 
         const curve = new THREE.QuadraticBezierCurve3(posA, mid, posB);
         const tubeGeometry = new THREE.TubeGeometry(curve, TUBE_SEGMENTS_CURVED, EDGE_RADIUS, RADIAL_SEGMENTS, false);
