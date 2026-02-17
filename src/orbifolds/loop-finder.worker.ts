@@ -48,8 +48,8 @@ export interface OrbifoldEdgeInfo {
 }
 
 export interface LoopFinderRequest {
-  /** Mode: "computeVoltages" to BFS reachable voltages, "solve" to find a loop */
-  mode: "computeVoltages" | "solve";
+  /** Mode: "computeVoltages" to BFS reachable voltages, "solve" to find a loop, "solveAll" to find loops for all voltages */
+  mode: "computeVoltages" | "solve" | "solveAll";
   /** Maximum number of steps in the loop (path length including return to root) */
   maxLength: number;
   /** The root node ID */
@@ -81,6 +81,16 @@ export interface LoopFinderResponse {
   pathEdgeIds?: string[];
   /** For "computeVoltages" mode: the set of reachable voltage keys and matrices */
   reachableVoltages?: Array<{ key: string; matrix: VoltageMatrix }>;
+  /** For "solveAll" progress: current voltage index being processed */
+  solveAllProgress?: { current: number; total: number };
+  /** For "solveAll" result: all SAT-satisfiable voltages with their cached loop results */
+  solveAllResults?: Array<{
+    key: string;
+    matrix: VoltageMatrix;
+    pathNodeIds: string[];
+    loopEdgeIds: string[];
+    pathEdgeIds?: string[];
+  }>;
 }
 
 // ---- CaDiCaL WASM boilerplate (same pattern as other workers) ----
@@ -724,6 +734,70 @@ self.onmessage = async (event: MessageEvent<LoopFinderRequest>) => {
       // BFS mode: no SAT solver needed
       const response = computeReachableVoltages(req);
       self.postMessage(response);
+      return;
+    }
+
+    if (req.mode === "solveAll") {
+      // Phase 1: BFS to find reachable voltages
+      const bfsResponse = computeReachableVoltages(req);
+      const voltages = bfsResponse.reachableVoltages ?? [];
+
+      if (voltages.length === 0) {
+        self.postMessage({
+          success: false,
+          error: "No reachable voltages found for this max length",
+          messageType: "result",
+        } as LoopFinderResponse);
+        return;
+      }
+
+      // Phase 2: Try SAT solve for each voltage
+      const module = await getModule();
+      const satResults: Array<{
+        key: string;
+        matrix: VoltageMatrix;
+        pathNodeIds: string[];
+        loopEdgeIds: string[];
+        pathEdgeIds?: string[];
+      }> = [];
+
+      for (let i = 0; i < voltages.length; i++) {
+        // Send progress
+        self.postMessage({
+          success: true,
+          messageType: "progress",
+          solveAllProgress: { current: i + 1, total: voltages.length },
+        } as LoopFinderResponse);
+
+        const cadical = new Cadical(module);
+        const solver = new CadicalSolver(cadical);
+
+        const solveReq: LoopFinderRequest = {
+          ...req,
+          mode: "solve",
+          targetVoltageKey: voltages[i].key,
+          reachableVoltages: voltages,
+        };
+
+        const result = solveLoopFinder(solveReq, solver);
+        cadical.release();
+
+        if (result.success && result.pathNodeIds && result.loopEdgeIds) {
+          satResults.push({
+            key: voltages[i].key,
+            matrix: voltages[i].matrix,
+            pathNodeIds: result.pathNodeIds,
+            loopEdgeIds: result.loopEdgeIds,
+            pathEdgeIds: result.pathEdgeIds,
+          });
+        }
+      }
+
+      self.postMessage({
+        success: true,
+        messageType: "result",
+        solveAllResults: satResults,
+      } as LoopFinderResponse);
       return;
     }
 
