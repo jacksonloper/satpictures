@@ -29,7 +29,7 @@ import {
   type OrbifoldGrid,
   type OrbifoldNodeId,
 } from "./orbifoldbasics";
-import { doubleOrbifold, getLevelFromNodeId } from "./doubleOrbifold";
+import { doubleOrbifold } from "./doubleOrbifold";
 import LoopFinderWorker from "./loop-finder.worker?worker";
 import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 import {
@@ -42,116 +42,6 @@ import "../App.css";
 // Constants
 const DEFAULT_SIZE = 3;
 const DEFAULT_EXPANSION = 5;
-
-/**
- * Orbifold grid display for a single level of the doubled orbifold.
- * Shows nodes and edges with styling (solid / dashed).
- */
-function LevelGridDisplay({
-  level,
-  doubledGrid,
-}: {
-  level: 0 | 1;
-  doubledGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
-}) {
-  const cellSize = 40;
-  const padding = 20;
-
-  // Get nodes for this level
-  const levelNodes = useMemo(() => {
-    const nodes: Array<{ id: string; x: number; y: number; color: string }> = [];
-    for (const [nodeId, node] of doubledGrid.nodes) {
-      if (getLevelFromNodeId(nodeId) === level) {
-        nodes.push({
-          id: nodeId,
-          x: node.coord[0],
-          y: node.coord[1],
-          color: node.data?.color ?? "white",
-        });
-      }
-    }
-    return nodes;
-  }, [doubledGrid, level]);
-
-  // Get edges for this level (edges where both endpoints are at this level)
-  const levelEdges = useMemo(() => {
-    const edges: Array<{
-      id: string;
-      x1: number; y1: number;
-      x2: number; y2: number;
-      linestyle: string;
-    }> = [];
-    for (const [edgeId, edge] of doubledGrid.edges) {
-      const entries = Array.from(edge.halfEdges.entries());
-      const nodeIds = entries.map(([nid]) => nid);
-      
-      // Only show edges where both endpoints are at this level
-      const levels = nodeIds.map(nid => getLevelFromNodeId(nid));
-      if (!levels.every(l => l === level)) continue;
-
-      const n1 = doubledGrid.nodes.get(nodeIds[0]);
-      const n2 = entries.length > 1 ? doubledGrid.nodes.get(nodeIds[1]) : n1;
-      if (!n1 || !n2) continue;
-
-      edges.push({
-        id: edgeId,
-        x1: n1.coord[0],
-        y1: n1.coord[1],
-        x2: n2.coord[0],
-        y2: n2.coord[1],
-        linestyle: edge.data?.linestyle ?? "solid",
-      });
-    }
-    return edges;
-  }, [doubledGrid, level]);
-
-  // Compute SVG bounds
-  const coords = levelNodes.flatMap(n => [n.x, n.y]);
-  const minCoord = Math.min(...coords, 0);
-  const maxCoord = Math.max(...coords, 1);
-  const range = maxCoord - minCoord + 4;
-  const svgSize = range * cellSize / 2 + 2 * padding;
-
-  const toSvg = (coord: number) => ((coord - minCoord + 2) * cellSize / 2) + padding;
-
-  return (
-    <div>
-      <h4 style={{ marginBottom: "4px" }}>Level {level} ({level === 0 ? "Low" : "High"})</h4>
-      <svg
-        width={Math.min(svgSize, 350)}
-        height={Math.min(svgSize, 350)}
-        viewBox={`0 0 ${svgSize} ${svgSize}`}
-        style={{ border: "1px solid #ccc", borderRadius: "4px", backgroundColor: "#fafafa" }}
-      >
-        {/* Edges */}
-        {levelEdges.map((e) => (
-          <line
-            key={e.id}
-            x1={toSvg(e.x1)}
-            y1={toSvg(e.y1)}
-            x2={toSvg(e.x2)}
-            y2={toSvg(e.y2)}
-            stroke={e.linestyle === "solid" ? "#3498db" : "#bbb"}
-            strokeWidth={e.linestyle === "solid" ? 3 : 1.5}
-            strokeDasharray={e.linestyle === "dashed" ? "4,3" : undefined}
-          />
-        ))}
-        {/* Nodes */}
-        {levelNodes.map((nd) => (
-          <circle
-            key={nd.id}
-            cx={toSvg(nd.x)}
-            cy={toSvg(nd.y)}
-            r={6}
-            fill={nd.color === "black" ? "#333" : "#fff"}
-            stroke={nd.color === "black" ? "#333" : "#999"}
-            strokeWidth={1.5}
-          />
-        ))}
-      </svg>
-    </div>
-  );
-}
 
 /**
  * Main Orbifold Weaves Explorer component.
@@ -920,7 +810,7 @@ export function OrbifoldWeaveExplorer() {
         </div>
       )}
 
-      {/* Pending loop result: show two level views + accept/reject */}
+      {/* Pending loop result: accept/reject */}
       {pendingLoopResult && (
         <div style={{
           marginBottom: "16px",
@@ -933,25 +823,6 @@ export function OrbifoldWeaveExplorer() {
           <p style={{ fontSize: "13px", marginBottom: "12px" }}>
             Path: {pendingLoopResult.pathNodeIds.length} nodes, {pendingLoopResult.loopEdgeIds.length} edges in loop
           </p>
-
-          {/* Show two level views of the pending loop */}
-          <div style={{ display: "flex", gap: "20px", marginBottom: "12px", flexWrap: "wrap" }}>
-            {(() => {
-              // Build a temporary doubled grid with loop edges styled
-              const tempGrid = { ...doubledGrid, edges: new Map(doubledGrid.edges) };
-              const loopEdgeSet = new Set(pendingLoopResult.loopEdgeIds);
-              for (const [edgeId, edge] of tempGrid.edges) {
-                const linestyle = loopEdgeSet.has(edgeId) ? "solid" : "dashed";
-                tempGrid.edges.set(edgeId, { ...edge, data: { linestyle } });
-              }
-              return (
-                <>
-                  <LevelGridDisplay level={0} doubledGrid={tempGrid} />
-                  <LevelGridDisplay level={1} doubledGrid={tempGrid} />
-                </>
-              );
-            })()}
-          </div>
 
           <div style={{ display: "flex", gap: "8px" }}>
             <button
@@ -985,34 +856,22 @@ export function OrbifoldWeaveExplorer() {
         </div>
       )}
 
-      {/* Main content */}
-      <div style={{ display: "flex", gap: "40px", flexWrap: "wrap" }}>
-        {/* Doubled orbifold level views */}
+      {/* 3D Lifted Graph */}
+      {loopAccepted && (
         <div>
-          <h3 style={{ marginBottom: "10px" }}>Doubled Orbifold ({size}×{size}, {doubledGrid.nodes.size} nodes, {doubledGrid.edges.size} edges)</h3>
-          <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
-            <LevelGridDisplay level={0} doubledGrid={doubledGrid} />
-            <LevelGridDisplay level={1} doubledGrid={doubledGrid} />
-          </div>
+          <h3 style={{ marginBottom: "10px" }}>3D Weave (Lifted Graph)</h3>
+          <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
+            Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
+          </p>
+          <ErrorBoundary>
+            <WeaveThreeRenderer
+              liftedGraph={liftedGraph}
+              orbifoldGrid={doubledGrid}
+              useAxialTransform={wallpaperGroup === "P3"}
+            />
+          </ErrorBoundary>
         </div>
-
-        {/* 3D Lifted Graph */}
-        {loopAccepted && (
-          <div>
-            <h3 style={{ marginBottom: "10px" }}>3D Weave (Lifted Graph)</h3>
-            <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
-              Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
-            </p>
-            <ErrorBoundary>
-              <WeaveThreeRenderer
-                liftedGraph={liftedGraph}
-                orbifoldGrid={doubledGrid}
-                useAxialTransform={wallpaperGroup === "P3"}
-              />
-            </ErrorBoundary>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

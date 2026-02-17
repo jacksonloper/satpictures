@@ -23,10 +23,10 @@ import { applyMatrix, axialToCartesian } from "../orbifoldbasics";
 import type { ColorData, EdgeStyleData } from "../createOrbifolds";
 import { getLevelFromNodeId, getBaseNodeId } from "../doubleOrbifold";
 
-const TUBE_RADIUS = 0.06;
-const SPHERE_RADIUS = 0.1;
+const TUBE_RADIUS = 0.15;
+const SPHERE_RADIUS = 0.2;
 const TUBE_SEGMENTS = 8;
-const RADIAL_SEGMENTS = 6;
+const RADIAL_SEGMENTS = 8;
 
 interface WeaveThreeRendererProps {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
@@ -98,6 +98,8 @@ export function WeaveThreeRenderer({
       bOrbNode: string;
       aVoltage: Matrix3x3;
       bVoltage: Matrix3x3;
+      aLevel: number;
+      bLevel: number;
     }> = [];
     const activeNodeIds = new Set<string>();
 
@@ -121,6 +123,8 @@ export function WeaveThreeRenderer({
         bOrbNode: nodeB.orbifoldNode,
         aVoltage: nodeA.voltage,
         bVoltage: nodeB.voltage,
+        aLevel: getLevelFromNodeId(nodeA.orbifoldNode) ?? 0,
+        bLevel: getLevelFromNodeId(nodeB.orbifoldNode) ?? 0,
       });
       activeNodeIds.add(edge.a);
       activeNodeIds.add(edge.b);
@@ -130,6 +134,7 @@ export function WeaveThreeRenderer({
       id: string;
       orbifoldNode: string;
       voltage: Matrix3x3;
+      level: number;
     }> = [];
 
     for (const nodeId of activeNodeIds) {
@@ -139,6 +144,7 @@ export function WeaveThreeRenderer({
           id: node.id,
           orbifoldNode: node.orbifoldNode,
           voltage: node.voltage,
+          level: getLevelFromNodeId(node.orbifoldNode) ?? 0,
         });
       }
     }
@@ -234,15 +240,16 @@ export function WeaveThreeRenderer({
       return;
     }
 
-    // Materials
-    const tubeMaterial = new THREE.MeshPhongMaterial({
-      color: 0x3498db,
-      shininess: 60,
-    });
-    const sphereMaterial = new THREE.MeshPhongMaterial({
-      color: 0xe74c3c,
-      shininess: 80,
-    });
+    // Materials colored by level
+    const level0Color = new THREE.Color(0x3498db); // Blue for level 0 (low)
+    const level1Color = new THREE.Color(0xe74c3c); // Red for level 1 (high)
+    const crossLevelColor = new THREE.Color(0x9b59b6); // Purple for cross-level edges
+
+    const tubeMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 60 });
+    const tubeMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 60 });
+    const tubeMaterialCross = new THREE.MeshPhongMaterial({ color: crossLevelColor, shininess: 60 });
+    const sphereMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 80 });
+    const sphereMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 80 });
     const sphereGeometry = new THREE.SphereGeometry(SPHERE_RADIUS, 16, 12);
 
     // Compute bounding box for camera positioning
@@ -262,10 +269,13 @@ export function WeaveThreeRenderer({
         minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
       }
 
-      // Create tube path
+      // Create tube path, colored by level
       const path = new THREE.LineCurve3(posA, posB);
       const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS, TUBE_RADIUS, RADIAL_SEGMENTS, false);
-      const tubeMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
+      const material = edge.aLevel === edge.bLevel
+        ? (edge.aLevel === 0 ? tubeMaterialLevel0 : tubeMaterialLevel1)
+        : tubeMaterialCross;
+      const tubeMesh = new THREE.Mesh(tubeGeometry, material);
       scene.add(tubeMesh);
     }
 
@@ -278,7 +288,10 @@ export function WeaveThreeRenderer({
       minY = Math.min(minY, pos.y); maxY = Math.max(maxY, pos.y);
       minZ = Math.min(minZ, pos.z); maxZ = Math.max(maxZ, pos.z);
 
-      const sphereMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      const sphereMesh = new THREE.Mesh(
+        sphereGeometry,
+        node.level === 0 ? sphereMaterialLevel0 : sphereMaterialLevel1,
+      );
       sphereMesh.position.copy(pos);
       scene.add(sphereMesh);
     }
