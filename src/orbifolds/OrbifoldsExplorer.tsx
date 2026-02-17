@@ -106,6 +106,14 @@ export function OrbifoldsExplorer() {
     return grid;
   });
 
+  // Helper: reset Find Loops state
+  const resetLoopsFinderState = useCallback(() => {
+    setSolvingAllLoops(false);
+    setSolveAllProgress(null);
+    setSolveAllResults(null);
+    setSelectedLoopsVoltageKey(null);
+  }, []);
+
   // Recreate grid and reset dependent state when wallpaper group or size changes
   const resetGrid = useCallback((nextGroup: WallpaperGroupType, nextSize: number) => {
     const grid = createOrbifoldGrid(nextGroup, nextSize);
@@ -123,11 +131,8 @@ export function OrbifoldsExplorer() {
     setSelectedTargetVoltageKey(null);
     setPendingLoopResult(null);
     setShowLoopsFinder(false);
-    setSolvingAllLoops(false);
-    setSolveAllProgress(null);
-    setSolveAllResults(null);
-    setSelectedLoopsVoltageKey(null);
-  }, []);
+    resetLoopsFinderState();
+  }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     const nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
@@ -259,11 +264,10 @@ export function OrbifoldsExplorer() {
     if (loopsWorkerRef.current) {
       loopsWorkerRef.current.terminate();
       loopsWorkerRef.current = null;
-      setSolvingAllLoops(false);
-      setSolveAllProgress(null);
+      resetLoopsFinderState();
       setErrorMessage("Loops search cancelled");
     }
-  }, []);
+  }, [resetLoopsFinderState]);
 
   // Helper: build edge data with voltages for the worker
   const buildWorkerEdgeData = useCallback((grid: OrbifoldGrid<ColorData, EdgeStyleData>) => {
@@ -547,10 +551,8 @@ export function OrbifoldsExplorer() {
     }
 
     setErrorMessage(null);
+    resetLoopsFinderState();
     setSolvingAllLoops(true);
-    setSolveAllProgress(null);
-    setSolveAllResults(null);
-    setSelectedLoopsVoltageKey(null);
     setPendingLoopResult(null);
 
     const grid = orbifoldGrid;
@@ -642,7 +644,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
+  }, [maxLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
 
   // Handle selecting a loops result for preview
   const handlePreviewLoopsResult = useCallback(() => {
@@ -657,12 +659,11 @@ export function OrbifoldsExplorer() {
     }
   }, [solveAllResults, selectedLoopsVoltageKey]);
 
-  // Handle rejecting loops results (no effect on state)
-  const handleRejectLoops = useCallback(() => {
-    setSolveAllResults(null);
-    setSelectedLoopsVoltageKey(null);
+  // Handle dismissing loops results (no effect on grid state)
+  const handleDismissLoops = useCallback(() => {
+    resetLoopsFinderState();
     setPendingLoopResult(null);
-  }, []);
+  }, [resetLoopsFinderState]);
 
   // Cleanup workers on unmount
   useEffect(() => {
@@ -706,9 +707,8 @@ export function OrbifoldsExplorer() {
 
     setInspectionInfo(null);
     setPendingLoopResult(null);
-    setSolveAllResults(null);
-    setSelectedLoopsVoltageKey(null);
-  }, [pendingLoopResult]);
+    resetLoopsFinderState();
+  }, [pendingLoopResult, resetLoopsFinderState]);
 
   // Handle rejecting the loop result: keep original edge styles
   const handleRejectLoop = useCallback(() => {
@@ -1134,8 +1134,7 @@ export function OrbifoldsExplorer() {
                   value={maxLengthLoopsInput}
                   onChange={(e) => {
                     setMaxLengthLoopsInput(e.target.value);
-                    setSolveAllResults(null);
-                    setSelectedLoopsVoltageKey(null);
+                    resetLoopsFinderState();
                   }}
                   disabled={solvingAllLoops}
                   style={{
@@ -1244,7 +1243,7 @@ export function OrbifoldsExplorer() {
                       Preview
                     </button>
                     <button
-                      onClick={handleRejectLoops}
+                      onClick={handleDismissLoops}
                       style={{
                         padding: "4px 12px",
                         borderRadius: "4px",
