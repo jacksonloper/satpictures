@@ -1,0 +1,316 @@
+/**
+ * 3D renderer for orbifold weave lifted graphs using Three.js.
+ *
+ * Renders:
+ * - Tubes for each solid-styled lifted edge
+ * - Spheres for lifted nodes that touch at least one solid edge
+ *
+ * The (x, y) position comes from the lifted node's 2D coordinates
+ * (voltage applied to orbifold node coords). The z position comes
+ * from the level of the lifted node (inherited from the orbifold
+ * node's @0 or @1 suffix): level 0 → z=0, level 1 → z=1.
+ */
+
+import { useEffect, useRef, useMemo } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import type {
+  LiftedGraph,
+  OrbifoldGrid,
+  Matrix3x3,
+} from "../orbifoldbasics";
+import { applyMatrix, axialToCartesian } from "../orbifoldbasics";
+import type { ColorData, EdgeStyleData } from "../createOrbifolds";
+import { getLevelFromNodeId, getBaseNodeId } from "../doubleOrbifold";
+
+const TUBE_RADIUS = 0.06;
+const SPHERE_RADIUS = 0.1;
+const TUBE_SEGMENTS = 8;
+const RADIAL_SEGMENTS = 6;
+
+interface WeaveThreeRendererProps {
+  liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
+  orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
+  useAxialTransform?: boolean;
+  width?: number;
+  height?: number;
+  levelSpacing?: number;
+}
+
+/**
+ * Get 3D position of a lifted node.
+ * x, y come from voltage applied to base 2D coords.
+ * z comes from the level (0 or 1).
+ */
+function getNodePosition(
+  orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>,
+  orbifoldNodeId: string,
+  voltage: Matrix3x3,
+  useAxialTransform: boolean,
+  levelSpacing: number,
+): THREE.Vector3 {
+  // The orbifold node ID in the doubled grid has @0 or @1 suffix
+  const level = getLevelFromNodeId(orbifoldNodeId) ?? 0;
+  const baseId = getBaseNodeId(orbifoldNodeId);
+
+  const baseNode = orbifoldGrid.nodes.get(orbifoldNodeId) ?? orbifoldGrid.nodes.get(baseId);
+  if (!baseNode) {
+    return new THREE.Vector3(0, 0, level * levelSpacing);
+  }
+
+  const [ox, oy] = baseNode.coord;
+  const transformed = applyMatrix(voltage, ox, oy);
+
+  let x: number, y: number;
+  if (useAxialTransform) {
+    const cart = axialToCartesian(transformed.x, transformed.y);
+    x = cart.x;
+    y = cart.y;
+  } else {
+    x = transformed.x;
+    y = transformed.y;
+  }
+
+  return new THREE.Vector3(x, level * levelSpacing, -y);
+}
+
+export function WeaveThreeRenderer({
+  liftedGraph,
+  orbifoldGrid,
+  useAxialTransform = false,
+  width = 700,
+  height = 500,
+  levelSpacing = 3,
+}: WeaveThreeRendererProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const animFrameRef = useRef<number>(0);
+
+  // Compute solid edges and active nodes
+  const { solidEdges, activeNodes } = useMemo(() => {
+    const solidEdges: Array<{
+      aId: string;
+      bId: string;
+      aOrbNode: string;
+      bOrbNode: string;
+      aVoltage: Matrix3x3;
+      bVoltage: Matrix3x3;
+    }> = [];
+    const activeNodeIds = new Set<string>();
+
+    for (const edge of liftedGraph.edges.values()) {
+      // Check if the corresponding orbifold edge is solid
+      const orbEdgeId = edge.orbifoldEdgeId;
+      if (!orbEdgeId) continue;
+
+      const orbEdge = orbifoldGrid.edges.get(orbEdgeId);
+      const linestyle = orbEdge?.data?.linestyle ?? "solid";
+      if (linestyle !== "solid") continue;
+
+      const nodeA = liftedGraph.nodes.get(edge.a);
+      const nodeB = liftedGraph.nodes.get(edge.b);
+      if (!nodeA || !nodeB) continue;
+
+      solidEdges.push({
+        aId: edge.a,
+        bId: edge.b,
+        aOrbNode: nodeA.orbifoldNode,
+        bOrbNode: nodeB.orbifoldNode,
+        aVoltage: nodeA.voltage,
+        bVoltage: nodeB.voltage,
+      });
+      activeNodeIds.add(edge.a);
+      activeNodeIds.add(edge.b);
+    }
+
+    const activeNodes: Array<{
+      id: string;
+      orbifoldNode: string;
+      voltage: Matrix3x3;
+    }> = [];
+
+    for (const nodeId of activeNodeIds) {
+      const node = liftedGraph.nodes.get(nodeId);
+      if (node) {
+        activeNodes.push({
+          id: node.id,
+          orbifoldNode: node.orbifoldNode,
+          voltage: node.voltage,
+        });
+      }
+    }
+
+    return { solidEdges, activeNodes };
+  }, [liftedGraph, orbifoldGrid]);
+
+  // Setup Three.js scene
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Create scene
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f0f0);
+    sceneRef.current = scene;
+
+    // Create camera
+    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+    cameraRef.current = camera;
+
+    // Create renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    // Orbit controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controlsRef.current = controls;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 10, 7);
+    scene.add(directionalLight);
+
+    // Animation loop
+    function animate() {
+      animFrameRef.current = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    return () => {
+      cancelAnimationFrame(animFrameRef.current);
+      controls.dispose();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+    };
+  }, [width, height]);
+
+  // Update scene content when data changes
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!scene || !camera || !controls) return;
+
+    // Clear existing meshes (keep lights)
+    const toRemove: THREE.Object3D[] = [];
+    scene.traverse((obj) => {
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
+        toRemove.push(obj);
+      }
+    });
+    for (const obj of toRemove) {
+      scene.remove(obj);
+      if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose();
+      if ((obj as THREE.Mesh).material) {
+        const mat = (obj as THREE.Mesh).material;
+        if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+        else (mat as THREE.Material).dispose();
+      }
+    }
+
+    if (solidEdges.length === 0 && activeNodes.length === 0) {
+      // Nothing to render – position camera at default
+      camera.position.set(0, 10, 15);
+      controls.target.set(0, 0, 0);
+      controls.update();
+      return;
+    }
+
+    // Materials
+    const tubeMaterial = new THREE.MeshPhongMaterial({
+      color: 0x3498db,
+      shininess: 60,
+    });
+    const sphereMaterial = new THREE.MeshPhongMaterial({
+      color: 0xe74c3c,
+      shininess: 80,
+    });
+    const sphereGeometry = new THREE.SphereGeometry(SPHERE_RADIUS, 16, 12);
+
+    // Compute bounding box for camera positioning
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+
+    // Render tubes for solid edges
+    for (const edge of solidEdges) {
+      const posA = getNodePosition(orbifoldGrid, edge.aOrbNode, edge.aVoltage, useAxialTransform, levelSpacing);
+      const posB = getNodePosition(orbifoldGrid, edge.bOrbNode, edge.bVoltage, useAxialTransform, levelSpacing);
+
+      // Update bounds
+      for (const p of [posA, posB]) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+        minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+      }
+
+      // Create tube path
+      const path = new THREE.LineCurve3(posA, posB);
+      const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS, TUBE_RADIUS, RADIAL_SEGMENTS, false);
+      const tubeMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
+      scene.add(tubeMesh);
+    }
+
+    // Render spheres for active nodes
+    for (const node of activeNodes) {
+      const pos = getNodePosition(orbifoldGrid, node.orbifoldNode, node.voltage, useAxialTransform, levelSpacing);
+
+      // Update bounds
+      minX = Math.min(minX, pos.x); maxX = Math.max(maxX, pos.x);
+      minY = Math.min(minY, pos.y); maxY = Math.max(maxY, pos.y);
+      minZ = Math.min(minZ, pos.z); maxZ = Math.max(maxZ, pos.z);
+
+      const sphereMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      sphereMesh.position.copy(pos);
+      scene.add(sphereMesh);
+    }
+
+    // Position camera to see all content
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const centerZ = (minZ + maxZ) / 2;
+    const rangeX = maxX - minX;
+    const rangeY = maxY - minY;
+    const rangeZ = maxZ - minZ;
+    const maxRange = Math.max(rangeX, rangeY, rangeZ, 1);
+
+    controls.target.set(centerX, centerY, centerZ);
+    camera.position.set(
+      centerX + maxRange * 0.8,
+      centerY + maxRange * 0.8,
+      centerZ + maxRange * 1.2,
+    );
+    controls.update();
+  }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        width,
+        height,
+        border: "1px solid #ccc",
+        borderRadius: "8px",
+        overflow: "hidden",
+      }}
+    />
+  );
+}

@@ -3,8 +3,9 @@ import App from './App.tsx';
 import PolyformExplorer from './PolyformExplorer.tsx';
 import { WallpaperMazeExplorer } from './wallpaper-maze';
 import { OrbifoldsExplorer } from './orbifolds';
+import { OrbifoldWeaveExplorer } from './orbifolds/OrbifoldWeaveExplorer';
 
-type Page = 'main' | 'polyforms' | 'wallpapermazes' | 'orbifolds';
+type Page = 'main' | 'polyforms' | 'wallpapermazes' | 'orbifolds' | 'orbifoldweaves';
 
 /** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
@@ -14,6 +15,7 @@ export function Router() {
     if (hash === 'polyforms') return 'polyforms';
     if (hash === 'wallpapermazes') return 'wallpapermazes';
     if (hash === 'orbifolds') return 'orbifolds';
+    if (hash === 'orbifoldweaves') return 'orbifoldweaves';
     return 'main';
   });
 
@@ -23,6 +25,7 @@ export function Router() {
       if (hash === 'polyforms') setPage('polyforms');
       else if (hash === 'wallpapermazes') setPage('wallpapermazes');
       else if (hash === 'orbifolds') setPage('orbifolds');
+      else if (hash === 'orbifoldweaves') setPage('orbifoldweaves');
       else setPage('main');
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -82,6 +85,17 @@ export function Router() {
         >
           🔮 Orbifolds
         </a>
+        <a
+          href="#orbifoldweaves"
+          style={{
+            color: page === 'orbifoldweaves' ? '#3498db' : 'white',
+            textDecoration: 'none',
+            fontWeight: page === 'orbifoldweaves' ? 'bold' : 'normal',
+            fontSize: '16px',
+          }}
+        >
+          🧶 Orbifold Weaves
+        </a>
       </nav>
 
       {/* Page Content */}
@@ -89,6 +103,7 @@ export function Router() {
       {page === 'polyforms' && <PolyformExplorer />}
       {page === 'wallpapermazes' && <WallpaperMazeExplorer />}
       {page === 'orbifolds' && <OrbifoldsExplorer />}
+      {page === 'orbifoldweaves' && <OrbifoldWeaveExplorer />}
     </>
   );
 }
