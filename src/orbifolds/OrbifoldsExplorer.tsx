@@ -78,6 +78,22 @@ export function OrbifoldsExplorer() {
     pathEdgeIds?: string[];
   } | null>(null);
   const loopWorkerRef = useRef<Worker | null>(null);
+
+  // "Find Loops" (plural) flow state
+  const [showLoopsFinder, setShowLoopsFinder] = useState(false);
+  const [solvingAllLoops, setSolvingAllLoops] = useState(false);
+  const [solveAllProgress, setSolveAllProgress] = useState<{ current: number; total: number } | null>(null);
+  const [solveAllResults, setSolveAllResults] = useState<Array<{
+    key: string;
+    matrix: VoltageMatrix;
+    pathNodeIds: string[];
+    loopEdgeIds: string[];
+    pathEdgeIds?: string[];
+  }> | null>(null);
+  const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
+  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("");
+  const loopsWorkerRef = useRef<Worker | null>(null);
+
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
   
   // Ref for SVG export
@@ -89,6 +105,14 @@ export function OrbifoldsExplorer() {
     buildAdjacency(grid);
     return grid;
   });
+
+  // Helper: reset Find Loops state
+  const resetLoopsFinderState = useCallback(() => {
+    setSolvingAllLoops(false);
+    setSolveAllProgress(null);
+    setSolveAllResults(null);
+    setSelectedLoopsVoltageKey(null);
+  }, []);
 
   // Recreate grid and reset dependent state when wallpaper group or size changes
   const resetGrid = useCallback((nextGroup: WallpaperGroupType, nextSize: number) => {
@@ -106,7 +130,9 @@ export function OrbifoldsExplorer() {
     setReachableVoltages([]);
     setSelectedTargetVoltageKey(null);
     setPendingLoopResult(null);
-  }, []);
+    setShowLoopsFinder(false);
+    resetLoopsFinderState();
+  }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     const nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
@@ -226,6 +252,22 @@ export function OrbifoldsExplorer() {
       setErrorMessage("Loop search cancelled");
     }
   }, []);
+
+  // Handle loops finder toggle
+  const handleToggleLoopsFinder = useCallback(() => {
+    setShowLoopsFinder(prev => !prev);
+    setErrorMessage(null);
+  }, []);
+
+  // Handle loops finder cancel
+  const handleCancelLoopsFind = useCallback(() => {
+    if (loopsWorkerRef.current) {
+      loopsWorkerRef.current.terminate();
+      loopsWorkerRef.current = null;
+      resetLoopsFinderState();
+      setErrorMessage("Loops search cancelled");
+    }
+  }, [resetLoopsFinderState]);
 
   // Helper: build edge data with voltages for the worker
   const buildWorkerEdgeData = useCallback((grid: OrbifoldGrid<ColorData, EdgeStyleData>) => {
@@ -496,12 +538,143 @@ export function OrbifoldsExplorer() {
     worker.postMessage(request);
   }, [maxLengthInput, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
 
-  // Cleanup worker on unmount
+  // Handle "Find Loops" - solve all voltages
+  const handleFindAllLoops = useCallback(() => {
+    const maxLength = parseInt(maxLengthLoopsInput, 10);
+    if (!Number.isFinite(maxLength) || maxLength < 2) {
+      setErrorMessage("Max length must be a positive integer ≥ 2");
+      return;
+    }
+    if (!rootNodeId) {
+      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
+      return;
+    }
+
+    setErrorMessage(null);
+    resetLoopsFinderState();
+    setSolvingAllLoops(true);
+    setPendingLoopResult(null);
+
+    const grid = orbifoldGrid;
+    const nodeIds = Array.from(grid.nodes.keys());
+
+    const blackNodeIds: string[] = [];
+    for (const [, node] of grid.nodes) {
+      if (node.data?.color === "black") {
+        blackNodeIds.push(node.id);
+      }
+    }
+
+    if (blackNodeIds.length === nodeIds.length) {
+      setErrorMessage("No non-black nodes available for loops");
+      setSolvingAllLoops(false);
+      return;
+    }
+
+    const effectiveRootNodeId = resolveEffectiveRoot(grid, nodeIds, blackNodeIds);
+    if (!effectiveRootNodeId) {
+      setErrorMessage("No non-black nodes available for loops");
+      setSolvingAllLoops(false);
+      return;
+    }
+
+    const adj: Record<string, string[]> = {};
+    for (const nodeId of nodeIds) {
+      const edgeIds = grid.adjacency?.get(nodeId) ?? [];
+      const neighbors: string[] = [];
+      for (const edgeId of edgeIds) {
+        const edge = grid.edges.get(edgeId);
+        if (!edge) continue;
+        const halfEdge = edge.halfEdges.get(nodeId);
+        if (!halfEdge) continue;
+        if (!neighbors.includes(halfEdge.to)) {
+          neighbors.push(halfEdge.to);
+        }
+      }
+      adj[nodeId] = neighbors;
+    }
+
+    const edgesData = buildWorkerEdgeData(grid);
+
+    const request: LoopFinderRequest = {
+      mode: "solveAll",
+      maxLength,
+      rootNodeId: effectiveRootNodeId,
+      nodeIds,
+      adjacency: adj,
+      edges: edgesData,
+      blackNodeIds,
+    };
+
+    const worker = new LoopFinderWorker();
+    loopsWorkerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<LoopFinderResponse>) => {
+      const response = event.data;
+
+      if (response.messageType === "progress") {
+        if (response.solveAllProgress) {
+          setSolveAllProgress(response.solveAllProgress);
+        }
+        return;
+      }
+
+      if (response.success && response.solveAllResults) {
+        setSolveAllResults(response.solveAllResults);
+        if (response.solveAllResults.length > 0) {
+          setSelectedLoopsVoltageKey(response.solveAllResults[0].key);
+        }
+        if (response.solveAllResults.length === 0) {
+          setErrorMessage("No satisfiable loops found for any voltage");
+        }
+      } else {
+        setErrorMessage(response.error || "Loops search failed");
+      }
+
+      setSolvingAllLoops(false);
+      setSolveAllProgress(null);
+      loopsWorkerRef.current = null;
+    };
+
+    worker.onerror = (error) => {
+      setErrorMessage(`Worker error: ${error.message}`);
+      setSolvingAllLoops(false);
+      setSolveAllProgress(null);
+      loopsWorkerRef.current = null;
+    };
+
+    worker.postMessage(request);
+  }, [maxLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
+
+  // Handle selecting a loops result for preview
+  const handlePreviewLoopsResult = useCallback(() => {
+    if (!solveAllResults || !selectedLoopsVoltageKey) return;
+    const result = solveAllResults.find(r => r.key === selectedLoopsVoltageKey);
+    if (result) {
+      setPendingLoopResult({
+        pathNodeIds: result.pathNodeIds,
+        loopEdgeIds: result.loopEdgeIds,
+        pathEdgeIds: result.pathEdgeIds,
+      });
+    }
+  }, [solveAllResults, selectedLoopsVoltageKey]);
+
+  // Handle dismissing loops results (no effect on grid state)
+  const handleDismissLoops = useCallback(() => {
+    resetLoopsFinderState();
+    setPendingLoopResult(null);
+  }, [resetLoopsFinderState]);
+
+  // Cleanup workers on unmount
   useEffect(() => {
     return () => {
       if (loopWorkerRef.current) {
         loopWorkerRef.current.terminate();
         loopWorkerRef.current = null;
+      }
+      if (loopsWorkerRef.current) {
+        loopsWorkerRef.current.terminate();
+        loopsWorkerRef.current = null;
       }
     };
   }, []);
@@ -534,7 +707,8 @@ export function OrbifoldsExplorer() {
 
     setInspectionInfo(null);
     setPendingLoopResult(null);
-  }, [pendingLoopResult]);
+    resetLoopsFinderState();
+  }, [pendingLoopResult, resetLoopsFinderState]);
 
   // Handle rejecting the loop result: keep original edge styles
   const handleRejectLoop = useCallback(() => {
@@ -782,6 +956,20 @@ export function OrbifoldsExplorer() {
               🔄 Find Loop
             </button>
             <button
+              onClick={handleToggleLoopsFinder}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "4px",
+                border: showLoopsFinder ? "2px solid #2980b9" : "1px solid #2980b9",
+                backgroundColor: showLoopsFinder ? "#d6eaf8" : "#eaf2f8",
+                cursor: "pointer",
+                fontWeight: showLoopsFinder ? "bold" : "normal",
+              }}
+              title="Find all non-self-intersecting loops across all voltages via SAT solver"
+            >
+              🔄 Find Loops
+            </button>
+            <button
               onClick={handleClear}
               style={{
                 padding: "6px 12px",
@@ -929,6 +1117,165 @@ export function OrbifoldsExplorer() {
             </div>
           )}
           
+          {/* Find Loops (plural) Panel */}
+          {showLoopsFinder && (
+            <div style={{
+              marginBottom: "10px",
+              padding: "10px",
+              backgroundColor: "#d6eaf8",
+              borderRadius: "8px",
+              border: "1px solid #2980b9",
+            }}>
+              {/* Max length + Find Loops button */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
+                <label style={{ fontSize: "13px" }}>Max steps:</label>
+                <input
+                  type="text"
+                  value={maxLengthLoopsInput}
+                  onChange={(e) => {
+                    setMaxLengthLoopsInput(e.target.value);
+                    resetLoopsFinderState();
+                  }}
+                  disabled={solvingAllLoops}
+                  style={{
+                    width: "60px",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                    fontSize: "13px",
+                  }}
+                  placeholder="e.g. 5"
+                />
+                <button
+                  onClick={handleFindAllLoops}
+                  disabled={solvingAllLoops}
+                  style={{
+                    padding: "4px 12px",
+                    borderRadius: "4px",
+                    border: "1px solid #2980b9",
+                    backgroundColor: solvingAllLoops ? "#d5d8dc" : "#aed6f1",
+                    cursor: solvingAllLoops ? "not-allowed" : "pointer",
+                    fontSize: "13px",
+                  }}
+                >
+                  {solvingAllLoops ? "Searching…" : "Find All Loops"}
+                </button>
+                {solvingAllLoops && (
+                  <button
+                    onClick={handleCancelLoopsFind}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: "4px",
+                      border: "1px solid #e74c3c",
+                      backgroundColor: "#fadbd8",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {/* Progress bar */}
+              {solvingAllLoops && solveAllProgress && (
+                <div style={{ marginBottom: "8px" }}>
+                  <div style={{
+                    width: "100%",
+                    height: "20px",
+                    backgroundColor: "#e0e0e0",
+                    borderRadius: "4px",
+                    overflow: "hidden",
+                  }}>
+                    <div style={{
+                      width: `${(solveAllProgress.current / solveAllProgress.total) * 100}%`,
+                      height: "100%",
+                      backgroundColor: "#2980b9",
+                      transition: "width 0.3s ease",
+                    }} />
+                  </div>
+                  <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+                    Testing voltage {solveAllProgress.current} / {solveAllProgress.total}…
+                  </p>
+                </div>
+              )}
+
+              {/* Results: voltage selector from SAT-satisfiable voltages */}
+              {solveAllResults && solveAllResults.length > 0 && (
+                <div style={{ marginBottom: "8px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <label style={{ fontSize: "13px" }}>SAT voltage:</label>
+                    <select
+                      value={selectedLoopsVoltageKey ?? ""}
+                      onChange={(e) => {
+                        setSelectedLoopsVoltageKey(e.target.value);
+                        setPendingLoopResult(null);
+                      }}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: "4px",
+                        border: "1px solid #ccc",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        maxWidth: "300px",
+                      }}
+                    >
+                      {solveAllResults.map((v) => {
+                        const m = v.matrix;
+                        const label = `[[${m[0].join(",")}],[${m[1].join(",")}],[${m[2].join(",")}]]`;
+                        return (
+                          <option key={v.key} value={v.key}>{label}</option>
+                        );
+                      })}
+                    </select>
+                    <button
+                      onClick={handlePreviewLoopsResult}
+                      disabled={!selectedLoopsVoltageKey}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: "4px",
+                        border: "1px solid #27ae60",
+                        backgroundColor: !selectedLoopsVoltageKey ? "#d5d8dc" : "#d5f5e3",
+                        cursor: !selectedLoopsVoltageKey ? "not-allowed" : "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      Preview
+                    </button>
+                    <button
+                      onClick={handleDismissLoops}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: "4px",
+                        border: "1px solid #e74c3c",
+                        backgroundColor: "#fadbd8",
+                        color: "#c0392b",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+                    {solveAllResults.length} satisfiable voltage{solveAllResults.length !== 1 ? "s" : ""} found
+                  </p>
+                </div>
+              )}
+
+              {rootNodeId && (
+                <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+                  Root: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{rootNodeId}</code>
+                </p>
+              )}
+              {!rootNodeId && (
+                <p style={{ fontSize: "11px", color: "#e74c3c", marginTop: "4px" }}>
+                  ⚠️ Set a root node first (use 📌 Root tool)
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Loop Result Preview (Accept/Reject) */}
           {pendingLoopResult && rootNodeId && (
             <LoopResultRenderer
