@@ -31,7 +31,6 @@ import { getLevelFromNodeId, getBaseNodeId } from "../doubleOrbifold";
 
 // Tube and node radius are the same
 const EDGE_RADIUS = 0.25;
-const TUBE_SEGMENTS = 8;
 const RADIAL_SEGMENTS = 10;
 
 // Distinct component colors (saturated, visually distinct palette)
@@ -244,6 +243,9 @@ export function WeaveThreeRenderer({
     mesh: THREE.Mesh;
     path: THREE.Curve<THREE.Vector3>;
     startStep: number;
+    edgeIndex: number;
+    totalEdges: number;
+    beadForward: boolean;
   }>>([]);
 
   // Compute solid edges and active nodes
@@ -429,104 +431,181 @@ export function WeaveThreeRenderer({
     let minY = Infinity, maxY = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
 
-    // Render tubes for solid edges — straight for same-level, bowed for cross-level
     const BOW_AMOUNT = 0.8; // how far cross-level edges bow outward
-    const CURVE_SEGMENTS = 20; // more segments for smooth curves
 
     // Bead material (bright white emissive)
     const beadMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const beadGeometry = new THREE.SphereGeometry(tubeRadius * 1.8, 12, 8);
 
-    for (const edge of solidEdges) {
+    // --- Step 1: Compute edge waypoints and build adjacency ---
+    interface EdgeWaypoints {
+      aId: string;
+      bId: string;
+      /** Points from A to B (includes waypoint for cross-level) */
+      points: THREE.Vector3[];
+      orbifoldEdgeId: string;
+      aOrbNode: string;
+      bOrbNode: string;
+    }
+
+    const edgeWaypoints: EdgeWaypoints[] = [];
+    // adjacency: nodeId → list of { edgeIdx, otherNodeId }
+    const adjacency = new Map<string, Array<{ edgeIdx: number; otherNodeId: string }>>();
+
+    for (let ei = 0; ei < solidEdges.length; ei++) {
+      const edge = solidEdges[ei];
       const posA = getNodePosition(orbifoldGrid, edge.aOrbNode, edge.aVoltage, useAxialTransform, levelSpacing);
       const posB = getNodePosition(orbifoldGrid, edge.bOrbNode, edge.bVoltage, useAxialTransform, levelSpacing);
 
-      // Update bounds
       for (const p of [posA, posB]) {
         minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
         minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
         minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
       }
 
-      // Both endpoints are in the same component (by definition of connected component)
-      const compIdx = nodeComponent.get(edge.aId) ?? 0;
-      const material = componentMaterials[compIdx % componentMaterials.length];
-
-      let path: THREE.Curve<THREE.Vector3>;
       const isCrossLevel = edge.aLevel !== edge.bLevel;
+      let points: THREE.Vector3[];
 
       if (isCrossLevel) {
-        // Bow cross-level edges: orient from low to high, then bow to the right
-        // when viewed from above (looking down the Y axis)
         const lowPos = edge.aLevel < edge.bLevel ? posA : posB;
         const highPos = edge.aLevel < edge.bLevel ? posB : posA;
 
-        // Horizontal direction from low to high (XZ plane only)
         const horizDir = new THREE.Vector3(
-          highPos.x - lowPos.x,
-          0,
-          highPos.z - lowPos.z,
+          highPos.x - lowPos.x, 0, highPos.z - lowPos.z,
         );
         const horizLen = horizDir.length();
-
-        // Perpendicular in XZ plane: cross with Y-up, gives "right" when viewed from above
         const up = new THREE.Vector3(0, 1, 0);
         let bowOffset: THREE.Vector3;
 
         if (horizLen > 1e-6) {
-          // Non-vertical edge: bow perpendicular to horizontal direction
           bowOffset = new THREE.Vector3().crossVectors(up, horizDir.normalize()).multiplyScalar(BOW_AMOUNT);
         } else {
-          // Vertical edge (same XZ position): bow in a fixed direction
           bowOffset = new THREE.Vector3(BOW_AMOUNT, 0, 0);
         }
 
-        const mid = new THREE.Vector3().addVectors(lowPos, highPos).multiplyScalar(0.5);
-        mid.add(bowOffset);
-
-        path = new THREE.QuadraticBezierCurve3(posA, mid, posB);
+        const waypoint = new THREE.Vector3().addVectors(lowPos, highPos).multiplyScalar(0.5);
+        waypoint.add(bowOffset);
+        // Points go A → waypoint → B
+        points = [posA.clone(), waypoint, posB.clone()];
       } else {
-        path = new THREE.LineCurve3(posA, posB);
+        points = [posA.clone(), posB.clone()];
       }
 
-      const segments = isCrossLevel ? CURVE_SEGMENTS : TUBE_SEGMENTS;
-      const tubeGeometry = new THREE.TubeGeometry(path, segments, tubeRadius, RADIAL_SEGMENTS, false);
+      edgeWaypoints.push({
+        aId: edge.aId,
+        bId: edge.bId,
+        points,
+        orbifoldEdgeId: edge.orbifoldEdgeId,
+        aOrbNode: edge.aOrbNode,
+        bOrbNode: edge.bOrbNode,
+      });
+
+      // Build adjacency
+      if (!adjacency.has(edge.aId)) adjacency.set(edge.aId, []);
+      if (!adjacency.has(edge.bId)) adjacency.set(edge.bId, []);
+      adjacency.get(edge.aId)!.push({ edgeIdx: ei, otherNodeId: edge.bId });
+      adjacency.get(edge.bId)!.push({ edgeIdx: ei, otherNodeId: edge.aId });
+    }
+
+    // --- Step 2: Trace ordered paths per connected component ---
+    // Each component is a path or cycle (each node has degree ≤ 2).
+    const visited = new Set<number>(); // visited edge indices
+
+    // Group nodes by component
+    const compNodes = new Map<number, string[]>();
+    for (const node of activeNodes) {
+      const comp = nodeComponent.get(node.id) ?? 0;
+      if (!compNodes.has(comp)) compNodes.set(comp, []);
+      compNodes.get(comp)!.push(node.id);
+    }
+
+    for (const [compIdx, nodeIds] of compNodes) {
+      // Find a degree-1 node to start (for open paths), or any node (for cycles)
+      let startNode = nodeIds[0];
+      for (const nid of nodeIds) {
+        const adj = adjacency.get(nid) ?? [];
+        if (adj.length === 1) { startNode = nid; break; }
+      }
+
+      // Trace the path
+      const orderedEdgeIndices: number[] = [];
+      const orderedDirections: boolean[] = []; // true = edge goes A→B from current node
+      let currentNode = startNode;
+
+      while (true) {
+        const adj = adjacency.get(currentNode) ?? [];
+        let foundNext = false;
+        for (const { edgeIdx, otherNodeId } of adj) {
+          if (visited.has(edgeIdx)) continue;
+          visited.add(edgeIdx);
+          const ew = edgeWaypoints[edgeIdx];
+          orderedEdgeIndices.push(edgeIdx);
+          orderedDirections.push(ew.aId === currentNode);
+          currentNode = otherNodeId;
+          foundNext = true;
+          break;
+        }
+        if (!foundNext) break;
+      }
+
+      if (orderedEdgeIndices.length === 0) continue;
+
+      // Collect ordered waypoints from all edges in the traced path
+      const splinePoints: THREE.Vector3[] = [];
+      for (let i = 0; i < orderedEdgeIndices.length; i++) {
+        const ew = edgeWaypoints[orderedEdgeIndices[i]];
+        const forward = orderedDirections[i];
+        const pts = forward ? ew.points : [...ew.points].reverse();
+        // Skip the first point for all edges after the first (shared with previous edge's last point)
+        const startIdx = i === 0 ? 0 : 1;
+        for (let j = startIdx; j < pts.length; j++) {
+          splinePoints.push(pts[j]);
+        }
+      }
+
+      // Create a CatmullRom cubic spline through the ordered waypoints
+      const isClosed = (orderedEdgeIndices.length > 1 &&
+        edgeWaypoints[orderedEdgeIndices[0]].aId === currentNode ||
+        edgeWaypoints[orderedEdgeIndices[0]].bId === currentNode) &&
+        startNode === currentNode;
+      const spline = new THREE.CatmullRomCurve3(splinePoints, isClosed, "catmullrom", 0.5);
+
+      // Determine tube segments based on number of waypoints
+      const tubeSegments = Math.max(splinePoints.length * 8, 32);
+      const tubeGeometry = new THREE.TubeGeometry(spline, tubeSegments, tubeRadius, RADIAL_SEGMENTS, isClosed);
+      const material = componentMaterials[compIdx % componentMaterials.length];
       const tubeMesh = new THREE.Mesh(tubeGeometry, material);
       scene.add(tubeMesh);
 
-      // Create beads for this lifted edge based on orbifold edge loopSteps
-      const orbEdge = orbifoldGrid.edges.get(edge.orbifoldEdgeId);
-      const loopSteps = orbEdge?.data?.loopSteps ?? [];
-      for (const ls of loopSteps) {
-        // The bead travels from startNode along this edge.
-        // If startNode matches aOrbNode, travel A→B (t: 0→1).
-        // If startNode matches bOrbNode, travel B→A (t: 1→0), so we reverse the path.
-        let beadPath: THREE.Curve<THREE.Vector3>;
-        if (ls.startNode === edge.aOrbNode) {
-          beadPath = path;
-        } else {
-          // Reverse the path: swap start/end
-          if (path instanceof THREE.LineCurve3) {
-            beadPath = new THREE.LineCurve3(posB, posA);
-          } else {
-            // For bezier, reverse by creating new curve with swapped endpoints
-            beadPath = new THREE.QuadraticBezierCurve3(
-              posB,
-              (path as THREE.QuadraticBezierCurve3).v1.clone(),
-              posA,
-            );
-          }
-        }
+      // --- Step 3: Create beads for this component ---
+      // Each edge in the traced path has loopSteps; the bead travels along the
+      // component spline, with each edge occupying an equal fraction of the total t range.
+      const totalEdges = orderedEdgeIndices.length;
+      for (let i = 0; i < totalEdges; i++) {
+        const ew = edgeWaypoints[orderedEdgeIndices[i]];
+        const forward = orderedDirections[i];
+        const orbEdge = orbifoldGrid.edges.get(ew.orbifoldEdgeId);
+        const loopSteps = orbEdge?.data?.loopSteps ?? [];
 
-        const beadMesh = new THREE.Mesh(beadGeometry, beadMaterial);
-        beadMesh.visible = false;
-        scene.add(beadMesh);
-        beadMeshesRef.current.push(beadMesh);
-        beadDataRef.current.push({
-          mesh: beadMesh,
-          path: beadPath,
-          startStep: ls.startStep,
-        });
+        for (const ls of loopSteps) {
+          // Determine if this bead travels in the same direction as the traced path
+          const beadForward = (forward && ls.startNode === ew.aOrbNode) ||
+            (!forward && ls.startNode === ew.bOrbNode);
+
+          const beadMesh = new THREE.Mesh(beadGeometry, beadMaterial);
+          beadMesh.visible = false;
+          scene.add(beadMesh);
+          beadMeshesRef.current.push(beadMesh);
+          beadDataRef.current.push({
+            mesh: beadMesh,
+            path: spline,
+            startStep: ls.startStep,
+            // Store edge position info for mapping step fraction to spline t
+            edgeIndex: i,
+            totalEdges,
+            beadForward,
+          });
+        }
       }
     }
 
@@ -534,7 +613,6 @@ export function WeaveThreeRenderer({
     for (const node of activeNodes) {
       const pos = getNodePosition(orbifoldGrid, node.orbifoldNode, node.voltage, useAxialTransform, levelSpacing);
 
-      // Update bounds
       minX = Math.min(minX, pos.x); maxX = Math.max(maxX, pos.x);
       minY = Math.min(minY, pos.y); maxY = Math.max(maxY, pos.y);
       minZ = Math.min(minZ, pos.z); maxZ = Math.max(maxZ, pos.z);
@@ -582,7 +660,10 @@ export function WeaveThreeRenderer({
       for (const bd of beadDataRef.current) {
         if (bd.startStep === currentStep) {
           bd.mesh.visible = true;
-          const pos = bd.path.getPoint(frac);
+          // Map edge fraction to spline t: each edge occupies 1/totalEdges of the spline
+          const edgeFrac = bd.beadForward ? frac : (1 - frac);
+          const splineT = (bd.edgeIndex + edgeFrac) / bd.totalEdges;
+          const pos = bd.path.getPoint(splineT);
           bd.mesh.position.copy(pos);
         } else {
           bd.mesh.visible = false;
