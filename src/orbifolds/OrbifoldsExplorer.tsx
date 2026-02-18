@@ -66,6 +66,7 @@ export function OrbifoldsExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(null);
   const [maxLengthInput, setMaxLengthInput] = useState("");
+  const [maxNodeVisits, setMaxNodeVisits] = useState<1 | 2>(1);
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -92,6 +93,7 @@ export function OrbifoldsExplorer() {
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
   const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("");
+  const [maxNodeVisitsLoops, setMaxNodeVisitsLoops] = useState<1 | 2>(1);
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
@@ -387,6 +389,7 @@ export function OrbifoldsExplorer() {
       adjacency: adj,
       edges: edgesData,
       blackNodeIds,
+      maxNodeVisits,
     };
 
     const worker = new LoopFinderWorker();
@@ -418,7 +421,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
+  }, [maxLengthInput, maxNodeVisits, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
 
   // Phase 2: Solve for a loop with the selected target voltage
   const handleSolveLoop = useCallback(() => {
@@ -499,6 +502,7 @@ export function OrbifoldsExplorer() {
       blackNodeIds,
       targetVoltageKey: selectedTargetVoltageKey,
       reachableVoltages,
+      maxNodeVisits,
     };
 
     const worker = new LoopFinderWorker();
@@ -536,7 +540,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
+  }, [maxLengthInput, maxNodeVisits, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
 
   // Handle "Find Loops" - solve all voltages
   const handleFindAllLoops = useCallback(() => {
@@ -604,6 +608,7 @@ export function OrbifoldsExplorer() {
       adjacency: adj,
       edges: edgesData,
       blackNodeIds,
+      maxNodeVisits: maxNodeVisitsLoops,
     };
 
     const worker = new LoopFinderWorker();
@@ -644,7 +649,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
+  }, [maxLengthLoopsInput, maxNodeVisitsLoops, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
 
   // Handle selecting a loops result for preview
   const handlePreviewLoopsResult = useCallback(() => {
@@ -1052,6 +1057,41 @@ export function OrbifoldsExplorer() {
                 </button>
               </div>
 
+              {/* Max node visits selector */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
+                <label style={{ fontSize: "13px" }}>Max node visits:</label>
+                <label style={{ fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="maxNodeVisits"
+                    value={1}
+                    checked={maxNodeVisits === 1}
+                    onChange={() => {
+                      setMaxNodeVisits(1);
+                      setReachableVoltages([]);
+                      setSelectedTargetVoltageKey(null);
+                    }}
+                    disabled={solvingLoop || computingVoltages}
+                  />
+                  {" "}1
+                </label>
+                <label style={{ fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="maxNodeVisits"
+                    value={2}
+                    checked={maxNodeVisits === 2}
+                    onChange={() => {
+                      setMaxNodeVisits(2);
+                      setReachableVoltages([]);
+                      setSelectedTargetVoltageKey(null);
+                    }}
+                    disabled={solvingLoop || computingVoltages}
+                  />
+                  {" "}2
+                </label>
+              </div>
+
               {/* Step 2: Voltage selector + Solve */}
               {reachableVoltages.length > 0 && (
                 <div style={{ marginBottom: "8px" }}>
@@ -1175,6 +1215,39 @@ export function OrbifoldsExplorer() {
                     Cancel
                   </button>
                 )}
+              </div>
+
+              {/* Max node visits selector */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
+                <label style={{ fontSize: "13px" }}>Max node visits:</label>
+                <label style={{ fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="maxNodeVisitsLoops"
+                    value={1}
+                    checked={maxNodeVisitsLoops === 1}
+                    onChange={() => {
+                      setMaxNodeVisitsLoops(1);
+                      resetLoopsFinderState();
+                    }}
+                    disabled={solvingAllLoops}
+                  />
+                  {" "}1
+                </label>
+                <label style={{ fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="maxNodeVisitsLoops"
+                    value={2}
+                    checked={maxNodeVisitsLoops === 2}
+                    onChange={() => {
+                      setMaxNodeVisitsLoops(2);
+                      resetLoopsFinderState();
+                    }}
+                    disabled={solvingAllLoops}
+                  />
+                  {" "}2
+                </label>
               </div>
 
               {/* Progress bar */}

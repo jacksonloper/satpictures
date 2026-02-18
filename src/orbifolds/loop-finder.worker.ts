@@ -66,6 +66,8 @@ export interface LoopFinderRequest {
   targetVoltageKey?: string;
   /** Set of reachable voltage keys and their matrices (required for "solve" mode, ignored for "computeVoltages") */
   reachableVoltages?: Array<{ key: string; matrix: VoltageMatrix }>;
+  /** Maximum number of times each orbifold node can appear in the path (1 or 2, default 1) */
+  maxNodeVisits?: 1 | 2;
 }
 
 export interface LoopFinderResponse {
@@ -218,6 +220,57 @@ function addSinzAtMostOne(solver: CadicalSolver, lits: number[]): void {
   }
 }
 
+/**
+ * Sinz sequential counter encoding for at-most-K constraint.
+ * Uses a 2D grid of auxiliary register variables r[i][j] where:
+ *   r[i][j] = "at least j+1 of x_1..x_{i+1} are true"
+ * Clauses enforce that no more than K literals can be true simultaneously.
+ */
+function addSinzAtMostK(solver: CadicalSolver, lits: number[], K: number): void {
+  const n = lits.length;
+  if (K <= 0) {
+    for (const lit of lits) solver.addClause([-lit]);
+    return;
+  }
+  if (K >= n) return; // No constraint needed
+  if (K === 1) {
+    addSinzAtMostOne(solver, lits);
+    return;
+  }
+  // r[i][j] for i = 0..n-1, j = 0..K-1
+  // r[i][j] means "at least j+1 of x_0..x_i are true"
+  const r: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < K; j++) {
+      row.push(solver.newVariable());
+    }
+    r.push(row);
+  }
+  // x_0 => r[0][0]
+  solver.addClause([-lits[0], r[0][0]]);
+  // r[0][j] = false for j >= 1 (can't have >1 true with just x_0)
+  for (let j = 1; j < K; j++) {
+    solver.addClause([-r[0][j]]);
+  }
+  for (let i = 1; i < n; i++) {
+    // x_i => r[i][0]
+    solver.addClause([-lits[i], r[i][0]]);
+    // r[i-1][0] => r[i][0] (propagate)
+    solver.addClause([-r[i - 1][0], r[i][0]]);
+    // x_i AND r[i-1][j-1] => r[i][j] for j = 1..K-1
+    for (let j = 1; j < K; j++) {
+      solver.addClause([-lits[i], -r[i - 1][j - 1], r[i][j]]);
+    }
+    // r[i-1][j] => r[i][j] (propagate) for j = 1..K-1
+    for (let j = 1; j < K; j++) {
+      solver.addClause([-r[i - 1][j], r[i][j]]);
+    }
+    // Conflict: x_i AND r[i-1][K-1] => false (would make K+1 true)
+    solver.addClause([-lits[i], -r[i - 1][K - 1]]);
+  }
+}
+
 // ---- Voltage helpers (no orbifoldbasics import in worker) ----
 
 function voltageKeyFromMatrix(V: VoltageMatrix): string {
@@ -343,6 +396,7 @@ function computeReachableVoltages(req: LoopFinderRequest): LoopFinderResponse {
 function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFinderResponse {
   const { maxLength, rootNodeId, nodeIds, adjacency, edges, blackNodeIds,
           targetVoltageKey, reachableVoltages } = req;
+  const maxNodeVisits = req.maxNodeVisits ?? 1;
 
   if (!targetVoltageKey || !reachableVoltages || reachableVoltages.length === 0) {
     return { success: false, error: "No target voltage specified", messageType: "result" };
@@ -522,7 +576,7 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
     }
   }
 
-  // Non-self-intersecting: each non-root node used at most once across ALL steps
+  // Non-self-intersecting: each non-root node used at most maxNodeVisits times across ALL steps
   // (excluding null steps). Black nodes excluded entirely.
   for (let v = 0; v < N; v++) {
     const isBlack = blackSet.has(nodeIds[v]);
@@ -546,7 +600,7 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
       for (let t = 1; t < L; t++) {
         lits.push(x[t][v]);
       }
-      addSinzAtMostOne(solver, lits);
+      addSinzAtMostK(solver, lits, maxNodeVisits);
     }
   }
 

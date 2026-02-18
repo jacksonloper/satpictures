@@ -43,6 +43,46 @@ function addSinzAtMostOne(solver: SATSolver, lits: number[]): void {
 }
 
 /**
+ * Sinz sequential counter encoding for at-most-K constraint.
+ * (Same as in loop-finder.worker.ts)
+ */
+function addSinzAtMostK(solver: SATSolver, lits: number[], K: number): void {
+  const n = lits.length;
+  if (K <= 0) {
+    for (const lit of lits) solver.addClause([-lit]);
+    return;
+  }
+  if (K >= n) return;
+  if (K === 1) {
+    addSinzAtMostOne(solver, lits);
+    return;
+  }
+  const r: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < K; j++) {
+      row.push(solver.newVariable());
+    }
+    r.push(row);
+  }
+  solver.addClause([-lits[0], r[0][0]]);
+  for (let j = 1; j < K; j++) {
+    solver.addClause([-r[0][j]]);
+  }
+  for (let i = 1; i < n; i++) {
+    solver.addClause([-lits[i], r[i][0]]);
+    solver.addClause([-r[i - 1][0], r[i][0]]);
+    for (let j = 1; j < K; j++) {
+      solver.addClause([-lits[i], -r[i - 1][j - 1], r[i][j]]);
+    }
+    for (let j = 1; j < K; j++) {
+      solver.addClause([-r[i - 1][j], r[i][j]]);
+    }
+    solver.addClause([-lits[i], -r[i - 1][K - 1]]);
+  }
+}
+
+/**
  * Core SAT encoding for loop finding (mirrors loop-finder.worker.ts).
  * loopLength = number of distinct nodes in the loop.
  * Internally uses L = loopLength + 1 steps.
@@ -312,6 +352,7 @@ function solveLoopWithVoltage(
   targetVoltageKey: string,
   reachableVoltages: Array<{ key: string; matrix: Matrix3x3 }>,
   blackNodeIds?: string[],
+  maxNodeVisits: 1 | 2 = 1,
 ): { satisfiable: boolean; pathNodeIds?: string[]; error?: string } {
   const L = maxLength + 1;
   const N = nodeIds.length;
@@ -463,7 +504,7 @@ function solveLoopWithVoltage(
     }
   }
 
-  // Non-self-intersecting
+  // Non-self-intersecting: each non-root node used at most maxNodeVisits times
   for (let v = 0; v < N; v++) {
     const isBlack = blackSet.has(nodeIds[v]);
     if (isBlack) {
@@ -481,7 +522,7 @@ function solveLoopWithVoltage(
       for (let t = 1; t < L; t++) {
         lits.push(x[t][v]);
       }
-      addSinzAtMostOne(solver, lits);
+      addSinzAtMostK(solver, lits, maxNodeVisits);
     }
   }
 
@@ -901,6 +942,111 @@ console.log("\nTest 16: Black nodes excluded in new encoding");
   } else {
     console.log("    Identity voltage not reachable with black nodes (skipping)");
     passed++;
+  }
+}
+
+console.log("\n\n=== Max Node Visits = 2 Tests ===\n");
+
+// Test 17: maxNodeVisits=2 allows paths that visit a node twice
+console.log("Test 17: maxNodeVisits=2 allows a node to appear twice in the path");
+{
+  // With maxNodeVisits=1, a 4-step path on a 3×3 grid visits 4 distinct non-root nodes
+  // With maxNodeVisits=2, a 4-step path can revisit a node, so more paths are possible
+  const voltages = computeReachableVoltagesBFS(4, rootNodeId, nodeIds, edgeInfo);
+  const identityK = voltageKey(I3);
+  if (voltages.some(v => v.key === identityK)) {
+    const result = solveLoopWithVoltage(4, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 2);
+    assert(result.satisfiable, "maxNodeVisits=2 with identity voltage is SAT");
+    if (result.pathNodeIds) {
+      console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+      assert(result.pathNodeIds[0] === rootNodeId, "Path starts at root");
+      assert(result.pathNodeIds[result.pathNodeIds.length - 1] === rootNodeId, "Path ends at root");
+      // Verify adjacency
+      let allAdjacent = true;
+      for (let i = 0; i < result.pathNodeIds.length - 1; i++) {
+        if (!adj[result.pathNodeIds[i]].includes(result.pathNodeIds[i + 1])) {
+          allAdjacent = false;
+        }
+      }
+      assert(allAdjacent, "All consecutive steps are adjacent");
+      // Verify no node appears more than twice
+      const counts = new Map<string, number>();
+      for (const nid of result.pathNodeIds) {
+        counts.set(nid, (counts.get(nid) ?? 0) + 1);
+      }
+      let allAtMost2 = true;
+      for (const [nid, count] of counts) {
+        if (nid !== rootNodeId && count > 2) {
+          allAtMost2 = false;
+          console.log(`    ❌ Node ${nid} appears ${count} times`);
+        }
+      }
+      assert(allAtMost2, "Each non-root node appears at most 2 times");
+    }
+  } else {
+    console.log("    Identity voltage not reachable (unexpected)");
+    failed++;
+  }
+}
+
+// Test 18: maxNodeVisits=2 still respects maxLength constraint
+console.log("\nTest 18: maxNodeVisits=2 with very large maxLength still produces valid path");
+{
+  const voltages = computeReachableVoltagesBFS(18, rootNodeId, nodeIds, edgeInfo);
+  const identityK = voltageKey(I3);
+  if (voltages.some(v => v.key === identityK)) {
+    // maxLength 18, each node visited at most 2 times => max 17 non-root node visits + root = 18 steps
+    const result = solveLoopWithVoltage(18, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 2);
+    assert(result.satisfiable, "maxNodeVisits=2 with maxLength 18 is SAT");
+    if (result.pathNodeIds) {
+      console.log(`    Path length: ${result.pathNodeIds.length - 1} steps`);
+      assert(result.pathNodeIds.length <= 19, "Path length ≤ maxLength + 1");
+      assert(result.pathNodeIds[0] === rootNodeId, "Path starts at root");
+      assert(result.pathNodeIds[result.pathNodeIds.length - 1] === rootNodeId, "Path ends at root");
+    }
+  } else {
+    console.log("    Identity voltage not reachable (unexpected)");
+    failed++;
+  }
+}
+
+// Test 19: maxNodeVisits=2 with black nodes
+console.log("\nTest 19: maxNodeVisits=2 with black nodes excluded");
+{
+  const blackNodes = ["3,1"];
+  const voltages = computeReachableVoltagesBFS(6, rootNodeId, nodeIds, edgeInfo, blackNodes);
+  const identityK = voltageKey(I3);
+  if (voltages.some(v => v.key === identityK)) {
+    const result = solveLoopWithVoltage(6, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, blackNodes, 2);
+    assert(result.satisfiable, "maxNodeVisits=2 with black nodes is SAT");
+    if (result.pathNodeIds) {
+      console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+      const pathContainsBlack = result.pathNodeIds.some(id => blackNodes.includes(id));
+      assert(!pathContainsBlack, "No black node appears in the path");
+    }
+  } else {
+    console.log("    Identity voltage not reachable with black nodes (skipping)");
+    passed++;
+  }
+}
+
+// Test 20: maxNodeVisits=1 (default) still works correctly as before
+console.log("\nTest 20: maxNodeVisits=1 (explicit) matches previous behavior");
+{
+  const voltages = computeReachableVoltagesBFS(9, rootNodeId, nodeIds, edgeInfo);
+  const identityK = voltageKey(I3);
+  if (voltages.some(v => v.key === identityK)) {
+    const result = solveLoopWithVoltage(9, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 1);
+    assert(result.satisfiable, "maxNodeVisits=1 with identity voltage is SAT");
+    if (result.pathNodeIds) {
+      // Verify uniqueness
+      const intermediate = result.pathNodeIds.slice(1, -1);
+      const uniqueIntermediate = new Set(intermediate);
+      assert(uniqueIntermediate.size === intermediate.length, "All intermediate nodes are unique with maxNodeVisits=1");
+    }
+  } else {
+    console.log("    Identity voltage not reachable (unexpected)");
+    failed++;
   }
 }
 
