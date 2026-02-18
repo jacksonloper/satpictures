@@ -340,6 +340,9 @@ export function LiftedGraphRenderer({
 
   // Compute bead positions: for each lifted edge, check all loopstep traversals.
   // If the current beadTime falls within a traversal's [startTime, endTime), render a bead.
+  // For orbifold self-edges with involutive voltages (V=V^-1), render a mirror bead
+  // crossing in the opposite direction, since each lifted edge represents traversal
+  // in both directions simultaneously.
   const beadPositions = useMemo(() => {
     if (!showBeadAnimation || !hasLoopData) return [];
 
@@ -360,6 +363,11 @@ export function LiftedGraphRenderer({
       const liftedNodeA = liftedGraph.nodes.get(liftedEdge.a);
       const liftedNodeB = liftedGraph.nodes.get(liftedEdge.b);
       if (!liftedNodeA || !liftedNodeB) continue;
+
+      // Check if this orbifold edge is a self-edge with an involutive voltage.
+      // Self-edges have halfEdges.size === 1 (single half-edge pointing back to same node).
+      // Their voltage is necessarily involutive (V*V = I).
+      const isInvolutiveSelfEdge = orbEdge.halfEdges.size === 1;
 
       for (let ti = 0; ti < data.loopstep.length; ti++) {
         const traversal = data.loopstep[ti];
@@ -389,6 +397,15 @@ export function LiftedGraphRenderer({
           y: fromPos.y + (toPos.y - fromPos.y) * progress,
           key: `bead-${liftedEdge.id}-${ti}`,
         });
+
+        // For involutive self-edges, add a mirror bead crossing in the opposite direction
+        if (isInvolutiveSelfEdge) {
+          beads.push({
+            x: toPos.x + (fromPos.x - toPos.x) * progress,
+            y: toPos.y + (fromPos.y - toPos.y) * progress,
+            key: `bead-${liftedEdge.id}-${ti}-mirror`,
+          });
+        }
       }
     }
 
