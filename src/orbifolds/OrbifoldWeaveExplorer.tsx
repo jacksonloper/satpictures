@@ -599,6 +599,22 @@ export function OrbifoldWeaveExplorer() {
 
     const chosenEdges = new Set(pendingLoopResult.loopEdgeIds);
 
+    // Validate: each orbifold node should have exactly 2 solid edges
+    {
+      const solidDeg = new Map<string, number>();
+      for (const [, edge] of doubledGrid.edges) {
+        if (!chosenEdges.has(edge.id)) continue;
+        for (const nodeId of edge.halfEdges.keys()) {
+          solidDeg.set(nodeId, (solidDeg.get(nodeId) ?? 0) + 1);
+        }
+      }
+      for (const [nodeId, deg] of solidDeg) {
+        if (deg !== 2) {
+          console.warn(`[Weave] Orbifold node ${nodeId} has ${deg} solid edges (expected 2). loopEdgeIds:`, pendingLoopResult.loopEdgeIds);
+        }
+      }
+    }
+
     setDoubledGrid((prev) => {
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
@@ -612,7 +628,7 @@ export function OrbifoldWeaveExplorer() {
     setLoopAccepted(true);
     setPendingLoopResult(null);
     resetLoopsFinderState();
-  }, [pendingLoopResult, resetLoopsFinderState]);
+  }, [pendingLoopResult, doubledGrid, resetLoopsFinderState]);
 
   // Reject loop
   const handleRejectLoop = useCallback(() => {
