@@ -10,12 +10,14 @@
  * For P3 (axial coordinates), an optional transform can be applied to convert
  * axial coordinates to Cartesian for better visualization.
  */
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   type LiftedGraph,
   type OrbifoldGrid,
   type OrbifoldNodeId,
   type Matrix3x3,
+  I3,
+  matMul,
   applyMatrix,
   axialToCartesian,
 } from "../orbifoldbasics";
@@ -121,6 +123,7 @@ export function LiftedGraphRenderer({
   showDashedLines = true,
   showNodes = false,
   showWalls = false,
+  showBeadAnimation = false,
   svgRef,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
@@ -133,6 +136,7 @@ export function LiftedGraphRenderer({
   showDashedLines?: boolean;
   showNodes?: boolean;
   showWalls?: boolean;
+  showBeadAnimation?: boolean;
   svgRef?: React.RefObject<SVGSVGElement | null>;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
@@ -290,8 +294,112 @@ export function LiftedGraphRenderer({
   const height = rangeY * scale + 2 * padding;
 
   // Transform coordinates to SVG space
-  const toSvgX = (x: number) => padding + (x - allBounds.minX) * scale;
-  const toSvgY = (y: number) => padding + (y - allBounds.minY) * scale;
+  const toSvgX = useCallback((x: number) => padding + (x - allBounds.minX) * scale, [padding, allBounds.minX, scale]);
+  const toSvgY = useCallback((y: number) => padding + (y - allBounds.minY) * scale, [padding, allBounds.minY, scale]);
+
+  // ---- Bead animation ----
+  // Build the loop path as a sequence of {x, y} positions in the lifted graph.
+  // Each orbifold edge with a loopstep value contributes one segment (from → to).
+  // We trace through the lifted graph by accumulating voltages.
+  const beadPath = useMemo(() => {
+    if (!showBeadAnimation) return [];
+
+    // Collect orbifold edges with loopstep, sorted by step
+    const loopEdges: Array<{ step: number; edgeId: string; fromNode: string; toNode: string; voltage: Matrix3x3 }> = [];
+    for (const [edgeId, edge] of orbifoldGrid.edges) {
+      const data = edge.data as EdgeStyleData | undefined;
+      if (data?.loopstep !== undefined && data.loopfrom !== undefined) {
+        const half = edge.halfEdges.get(data.loopfrom);
+        if (half) {
+          loopEdges.push({
+            step: data.loopstep,
+            edgeId,
+            fromNode: data.loopfrom,
+            toNode: half.to,
+            voltage: half.voltage,
+          });
+        }
+      }
+    }
+    if (loopEdges.length === 0) return [];
+    loopEdges.sort((a, b) => a.step - b.step);
+
+    // Trace the path through the lifted graph.
+    // Start at (first orbifold node, identity voltage), accumulating.
+    const path: Array<{ x: number; y: number }> = [];
+    let currentVoltage: Matrix3x3 = I3;
+
+    for (let i = 0; i < loopEdges.length; i++) {
+      const { fromNode, voltage } = loopEdges[i];
+
+      // Position of the "from" lifted node
+      const orbFrom = orbifoldGrid.nodes.get(fromNode);
+      if (!orbFrom) continue;
+      let posFrom = applyMatrix(currentVoltage, orbFrom.coord[0], orbFrom.coord[1]);
+      if (useAxialTransform) posFrom = axialToCartesian(posFrom.x, posFrom.y);
+      path.push(posFrom);
+
+      // Accumulate voltage
+      currentVoltage = matMul(currentVoltage, voltage);
+    }
+
+    // Add the final position (back at start for a loop)
+    if (loopEdges.length > 0) {
+      const lastEdge = loopEdges[loopEdges.length - 1];
+      const orbTo = orbifoldGrid.nodes.get(lastEdge.toNode);
+      if (orbTo) {
+        let posTo = applyMatrix(currentVoltage, orbTo.coord[0], orbTo.coord[1]);
+        if (useAxialTransform) posTo = axialToCartesian(posTo.x, posTo.y);
+        path.push(posTo);
+      }
+    }
+
+    return path;
+  }, [showBeadAnimation, orbifoldGrid, useAxialTransform]);
+
+  // Animation state: a float representing position along the path
+  const [beadProgress, setBeadProgress] = useState(0);
+
+  useEffect(() => {
+    if (!showBeadAnimation || beadPath.length < 2) return;
+
+    let animFrame: number;
+    let lastTime: number | null = null;
+    const SPEED = 0.5; // segments per second
+
+    const animate = (time: number) => {
+      if (lastTime === null) lastTime = time;
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+
+      setBeadProgress((prev) => {
+        const next = prev + dt * SPEED;
+        const totalSegments = beadPath.length - 1;
+        return next >= totalSegments ? next % totalSegments : next;
+      });
+
+      animFrame = requestAnimationFrame(animate);
+    };
+
+    animFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animFrame);
+  }, [showBeadAnimation, beadPath]);
+
+  // Compute the bead SVG position by interpolating along the path
+  const beadPos = useMemo(() => {
+    if (beadPath.length < 2) return null;
+    const totalSegments = beadPath.length - 1;
+    const clampedProgress = beadProgress % totalSegments;
+    const segIndex = Math.floor(clampedProgress);
+    const t = clampedProgress - segIndex;
+    const p0 = beadPath[segIndex];
+    const p1 = beadPath[segIndex + 1];
+    if (!p0 || !p1) return null;
+    return {
+      x: p0.x + (p1.x - p0.x) * t,
+      y: p0.y + (p1.y - p0.y) * t,
+    };
+  }, [beadPath, beadProgress]);
 
   return (
     <svg
@@ -420,6 +528,18 @@ export function LiftedGraphRenderer({
           />
         );
       })}
+
+      {/* Bead animation: a circle that moves along the loop path */}
+      {showBeadAnimation && beadPos && (
+        <circle
+          cx={toSvgX(beadPos.x)}
+          cy={toSvgY(beadPos.y)}
+          r={cellSize * 0.6}
+          fill="#e74c3c"
+          stroke="#c0392b"
+          strokeWidth={2}
+        />
+      )}
     </svg>
   );
 }

@@ -63,6 +63,7 @@ export function OrbifoldsExplorer() {
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [showWalls, setShowWalls] = useState(false);
+  const [showBeadAnimation, setShowBeadAnimation] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(null);
   const [maxLengthInput, setMaxLengthInput] = useState("");
@@ -686,6 +687,7 @@ export function OrbifoldsExplorer() {
 
   // Handle accepting the loop result: set selected loop edges as solid, others as dashed.
   // Also assign black color to all orbifold nodes not involved in the loop.
+  // Also store a loopstep value on each edge in the loop path.
   // `selectedEdgeIds` is the per-step edge selection made by the user in the LoopResultRenderer.
   const handleAcceptLoop = useCallback((selectedEdgeIds: string[]) => {
     if (!pendingLoopResult) return;
@@ -693,12 +695,27 @@ export function OrbifoldsExplorer() {
     const chosenEdges = new Set(selectedEdgeIds);
     const loopNodeIds = new Set(pendingLoopResult.pathNodeIds);
 
+    // Build maps from edgeId -> loopstep index and loopfrom (source node)
+    const edgeLoopstep = new Map<string, number>();
+    const edgeLoopfrom = new Map<string, string>();
+    for (let t = 0; t < selectedEdgeIds.length; t++) {
+      edgeLoopstep.set(selectedEdgeIds[t], t);
+      edgeLoopfrom.set(selectedEdgeIds[t], pendingLoopResult.pathNodeIds[t]);
+    }
+
     setOrbifoldGrid((prev) => {
-      // Set chosen edges to solid, all others to dashed
+      // Set chosen edges to solid with loopstep/loopfrom, all others to dashed without
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
-        const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
-        newEdges.set(edgeId, { ...edge, data: { linestyle } });
+        if (chosenEdges.has(edgeId)) {
+          newEdges.set(edgeId, { ...edge, data: {
+            linestyle: "solid",
+            loopstep: edgeLoopstep.get(edgeId),
+            loopfrom: edgeLoopfrom.get(edgeId),
+          } });
+        } else {
+          newEdges.set(edgeId, { ...edge, data: { linestyle: "dashed" } });
+        }
       }
       // Set non-loop nodes to black
       const newNodes = new Map(prev.nodes);
@@ -1524,6 +1541,14 @@ export function OrbifoldsExplorer() {
               />
               Show walls
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showBeadAnimation}
+                onChange={(e) => setShowBeadAnimation(e.target.checked)}
+              />
+              Show bead
+            </label>
             <button
               onClick={handleExportSvg}
               style={{
@@ -1551,6 +1576,7 @@ export function OrbifoldsExplorer() {
             showDashedLines={showDashedLines}
             showNodes={showNodes}
             showWalls={showWalls}
+            showBeadAnimation={showBeadAnimation}
             svgRef={liftedGraphSvgRef}
           />
           

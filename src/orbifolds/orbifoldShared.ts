@@ -21,6 +21,10 @@ export interface ColorData extends ExtraData {
 
 export interface EdgeStyleData extends ExtraData {
   linestyle: EdgeLinestyle;
+  /** Step index in the accepted loop path (0-based). Present only for edges that are part of an accepted loop. */
+  loopstep?: number;
+  /** The node from which this edge is traversed in the loop (defines direction). */
+  loopfrom?: string;
 }
 
 export type Direction = "N" | "S" | "E" | "W";
