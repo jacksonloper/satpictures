@@ -3,8 +3,9 @@
  *
  * Verifies that doubling an orbifold grid:
  * - Produces exactly 2× the number of nodes
- * - Produces exactly 4× the number of regular edges and 3× the number of self-edges
- * - Preserves voltages on all edge copies
+ * - Produces exactly 2× original edges + N vertical identity edges (one per original node)
+ * - Preserves voltages on layer-copy edges
+ * - Vertical edges have identity voltage
  * - Node IDs are correctly suffixed with @0 and @1
  * - Adjacency is built correctly
  *
@@ -12,7 +13,7 @@
  */
 
 import { createOrbifoldGrid } from "./createOrbifolds.js";
-import { buildAdjacency, type OrbifoldGrid } from "./orbifoldbasics.js";
+import { buildAdjacency, type OrbifoldGrid, I3 } from "./orbifoldbasics.js";
 import { doubleOrbifold, doubledNodeId, getBaseNodeId, getLevelFromNodeId } from "./doubleOrbifold.js";
 import type { ColorData, EdgeStyleData } from "./orbifoldShared.js";
 
@@ -43,16 +44,11 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
     `Node count: ${doubled.nodes.size} === ${grid.nodes.size * 2} (2× original)`
   );
 
-  // Edge count: 4× for regular edges, 3× for self-edges
-  let selfEdgeCount = 0;
-  for (const [, e] of grid.edges) {
-    if (e.halfEdges.size === 1) selfEdgeCount++;
-  }
-  const regularEdgeCount = grid.edges.size - selfEdgeCount;
-  const expectedEdges = regularEdgeCount * 4 + selfEdgeCount * 3;
+  // Edge count: 2× original edges + N vertical identity edges
+  const expectedEdges = grid.edges.size * 2 + grid.nodes.size;
   assert(
     doubled.edges.size === expectedEdges,
-    `Edge count: ${doubled.edges.size} === ${expectedEdges} (4×${regularEdgeCount} regular + 3×${selfEdgeCount} self)`
+    `Edge count: ${doubled.edges.size} === ${expectedEdges} (2×${grid.edges.size} layer + ${grid.nodes.size} vertical)`
   );
 
   // Every original node should have @0 and @1 variants
@@ -78,21 +74,38 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
     );
   }
 
-  // Voltages on doubled edges should match originals
+  // Layer-copy edges: voltages should match originals
   for (const [edgeId, edge] of doubled.edges) {
-    // Extract base edge ID (remove @XX suffix)
-    const baseEdgeId = edgeId.replace(/@\d\d$/, "");
-    const origEdge = grid.edges.get(baseEdgeId);
-    assert(origEdge !== undefined, `Edge ${edgeId} has base edge ${baseEdgeId} in original`);
+    if (edgeId.startsWith("vert:")) {
+      // Vertical edge: should have identity voltage
+      for (const [, half] of edge.halfEdges) {
+        const isIdentity = JSON.stringify(half.voltage) === JSON.stringify(I3);
+        assert(isIdentity, `Vertical edge ${edgeId}: has identity voltage`);
+      }
+      // Should connect node@0 ↔ node@1
+      const endpoints = Array.from(edge.halfEdges.keys());
+      assert(endpoints.length === 2, `Vertical edge ${edgeId}: has 2 endpoints`);
+      if (endpoints.length === 2) {
+        const levels = endpoints.map(e => getLevelFromNodeId(e)).sort();
+        assert(levels[0] === 0 && levels[1] === 1, `Vertical edge ${edgeId}: connects level 0 to level 1`);
+        const bases = endpoints.map(e => getBaseNodeId(e));
+        assert(bases[0] === bases[1], `Vertical edge ${edgeId}: connects same base node`);
+      }
+    } else {
+      // Layer copy: extract base edge ID (remove @<level> suffix)
+      const baseEdgeId = edgeId.replace(/@[01]$/, "");
+      const origEdge = grid.edges.get(baseEdgeId);
+      assert(origEdge !== undefined, `Edge ${edgeId} has base edge ${baseEdgeId} in original`);
 
-    if (origEdge) {
-      // Check that voltages match
-      for (const [nodeId, half] of edge.halfEdges) {
-        const baseNodeId = getBaseNodeId(nodeId);
-        const origHalf = origEdge.halfEdges.get(baseNodeId);
-        if (origHalf) {
-          const vMatch = JSON.stringify(half.voltage) === JSON.stringify(origHalf.voltage);
-          assert(vMatch, `Edge ${edgeId} half-edge from ${nodeId}: voltage matches original`);
+      if (origEdge) {
+        // Check that voltages match
+        for (const [nodeId, half] of edge.halfEdges) {
+          const baseNodeId = getBaseNodeId(nodeId);
+          const origHalf = origEdge.halfEdges.get(baseNodeId);
+          if (origHalf) {
+            const vMatch = JSON.stringify(half.voltage) === JSON.stringify(origHalf.voltage);
+            assert(vMatch, `Edge ${edgeId} half-edge from ${nodeId}: voltage matches original`);
+          }
         }
       }
     }
@@ -101,7 +114,7 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
   // Adjacency should be built
   assert(doubled.adjacency !== undefined, `Adjacency map is built`);
 
-  // Every doubled node should have adjacency entries
+  // Every doubled node should have adjacency entries (at least the vertical edge)
   if (doubled.adjacency) {
     for (const [nodeId] of doubled.nodes) {
       const adj = doubled.adjacency.get(nodeId);
@@ -109,22 +122,13 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
     }
   }
 
-  // No duplicate edges: every pair of endpoint sets should be unique per orbifold edge
-  const edgePairs = new Map<string, string[]>();
+  // All layer-copy edges should have endpoints at the same level
   for (const [edgeId, edge] of doubled.edges) {
-    const endpoints = Array.from(edge.halfEdges.keys()).sort().join("-");
-    if (!edgePairs.has(endpoints)) edgePairs.set(endpoints, []);
-    edgePairs.get(endpoints)!.push(edgeId);
-  }
-  for (const [endpoints, edgeIds] of edgePairs) {
-    // Multi-edges are OK between different orbifold base edges (e.g. NE vs SW)
-    // but NOT between @01 and @10 of the same self-edge
-    const baseEdges = edgeIds.map(id => id.replace(/@\d\d$/, ""));
-    const uniqueBases = new Set(baseEdges);
-    assert(
-      uniqueBases.size === edgeIds.length,
-      `No duplicate edges between ${endpoints} (${edgeIds.length} edges, ${uniqueBases.size} unique bases)`
-    );
+    if (edgeId.startsWith("vert:")) continue;
+    const endpoints = Array.from(edge.halfEdges.keys());
+    const levels = endpoints.map(e => getLevelFromNodeId(e));
+    const allSameLevel = levels.every(l => l === levels[0]);
+    assert(allSameLevel, `Layer edge ${edgeId}: all endpoints at same level (${levels.join(",")})`);
   }
 }
 

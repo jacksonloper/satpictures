@@ -2,22 +2,19 @@
  * 3D renderer for orbifold weave lifted graphs using Three.js.
  *
  * Renders:
- * - Tubes for each solid-styled lifted edge
- *   - Same-level edges are straight
- *   - Cross-level edges curve to the "left when looking from above
- *     along low→high" (so that lowA→highB and lowB→highA bow in
- *     opposite directions and don't intersect)
+ * - Tubes for each solid-styled lifted edge (all straight — edges are either
+ *   within-layer or vertical same-xy between-layer)
  * - Spheres for lifted nodes that touch at least one solid edge
  *
  * Shading: custom view-dependent shader where brightness = dot(normal, viewDir).
- * Full base color when normal points at the camera, pitch black at 90°.
+ * Black at perpendicular, full color at intermediate, white at aligned.
  *
  * Color: by connected component in the lifted graph (solid edges only).
  *
  * The (x, y) position comes from the lifted node's 2D coordinates
  * (voltage applied to orbifold node coords). The z position comes
  * from the level of the lifted node (inherited from the orbifold
- * node's @0 or @1 suffix): level 0 → z=0, level 1 → z=1.
+ * node's @0 or @1 suffix): level 0 → z=0, level 1 → z=levelSpacing.
  */
 
 import { useEffect, useRef, useMemo } from "react";
@@ -34,12 +31,8 @@ import { getLevelFromNodeId, getBaseNodeId } from "../doubleOrbifold";
 
 // Tube and node radius are the same
 const EDGE_RADIUS = 0.25;
-const TUBE_SEGMENTS_STRAIGHT = 8;
-const TUBE_SEGMENTS_CURVED = 24;
+const TUBE_SEGMENTS = 8;
 const RADIAL_SEGMENTS = 10;
-
-// Curve bow magnitude as a fraction of edge length
-const CROSS_LEVEL_BOW = 0.35;
 
 // Distinct component colors (saturated, visually distinct palette)
 const COMPONENT_COLORS = [
@@ -417,10 +410,7 @@ export function WeaveThreeRenderer({
     let minY = Infinity, maxY = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
 
-    // Up vector used to compute "right" offset for cross-level curves
-    const up = new THREE.Vector3(0, 1, 0);
-
-    // Render tubes for solid edges — color by component of endpoint A
+    // Render tubes for solid edges — all straight (within-layer or vertical)
     for (const edge of solidEdges) {
       const posA = getNodePosition(orbifoldGrid, edge.aOrbNode, edge.aVoltage, useAxialTransform, levelSpacing);
       const posB = getNodePosition(orbifoldGrid, edge.bOrbNode, edge.bVoltage, useAxialTransform, levelSpacing);
@@ -436,32 +426,10 @@ export function WeaveThreeRenderer({
       const compIdx = nodeComponent.get(edge.aId) ?? 0;
       const material = componentMaterials[compIdx % componentMaterials.length];
 
-      const isCrossLevel = edge.aLevel !== edge.bLevel;
-
-      if (isCrossLevel) {
-        const posLow  = edge.aLevel < edge.bLevel ? posA : posB;
-        const posHigh = edge.aLevel < edge.bLevel ? posB : posA;
-
-        const dir = new THREE.Vector3().subVectors(posHigh, posLow);
-        const edgeLen = dir.length();
-
-        const horiz = new THREE.Vector3(dir.x, 0, dir.z);
-        const bowDir = new THREE.Vector3().crossVectors(up, horiz).normalize();
-        if (bowDir.lengthSq() < 1e-6) bowDir.set(1, 0, 0);
-
-        const mid = new THREE.Vector3().addVectors(posA, posB).multiplyScalar(0.5);
-        mid.addScaledVector(bowDir, edgeLen * CROSS_LEVEL_BOW);
-
-        const curve = new THREE.QuadraticBezierCurve3(posA, mid, posB);
-        const tubeGeometry = new THREE.TubeGeometry(curve, TUBE_SEGMENTS_CURVED, tubeRadius, RADIAL_SEGMENTS, false);
-        const tubeMesh = new THREE.Mesh(tubeGeometry, material);
-        scene.add(tubeMesh);
-      } else {
-        const path = new THREE.LineCurve3(posA, posB);
-        const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS_STRAIGHT, tubeRadius, RADIAL_SEGMENTS, false);
-        const tubeMesh = new THREE.Mesh(tubeGeometry, material);
-        scene.add(tubeMesh);
-      }
+      const path = new THREE.LineCurve3(posA, posB);
+      const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS, tubeRadius, RADIAL_SEGMENTS, false);
+      const tubeMesh = new THREE.Mesh(tubeGeometry, material);
+      scene.add(tubeMesh);
     }
 
     // Render spheres for active nodes
