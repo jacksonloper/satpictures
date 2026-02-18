@@ -73,7 +73,7 @@ const vertexShader = `
   }
 `;
 
-// Custom fragment shader: brightness = dot(normal, viewDir)
+// Custom fragment shader: black at ndv=0, full color at ndv≈0.5, white at ndv=1
 const fragmentShader = `
   uniform vec3 uColor;
   varying vec3 vNormal;
@@ -81,11 +81,18 @@ const fragmentShader = `
   void main() {
     vec3 viewDir = normalize(vViewPosition);
     float ndv = max(dot(normalize(vNormal), viewDir), 0.0);
-    gl_FragColor = vec4(uColor * ndv, 1.0);
+    // Remap: 0→black, 0.5→full color, 1→white
+    vec3 col;
+    if (ndv < 0.5) {
+      col = uColor * (ndv * 2.0);          // black → color
+    } else {
+      col = mix(uColor, vec3(1.0), (ndv - 0.5) * 2.0); // color → white
+    }
+    gl_FragColor = vec4(col, 1.0);
   }
 `;
 
-// Highlight fragment shader: semi-transparent gold
+// Highlight fragment shader: semi-transparent gold with hypersaturation
 const highlightFragmentShader = `
   uniform vec3 uColor;
   uniform float uOpacity;
@@ -94,7 +101,13 @@ const highlightFragmentShader = `
   void main() {
     vec3 viewDir = normalize(vViewPosition);
     float ndv = max(dot(normalize(vNormal), viewDir), 0.0);
-    gl_FragColor = vec4(uColor * ndv, uOpacity);
+    vec3 col;
+    if (ndv < 0.5) {
+      col = uColor * (ndv * 2.0);
+    } else {
+      col = mix(uColor, vec3(1.0), (ndv - 0.5) * 2.0);
+    }
+    gl_FragColor = vec4(col, uOpacity);
   }
 `;
 
@@ -105,6 +118,7 @@ interface WeaveThreeRendererProps {
   width?: number;
   height?: number;
   levelSpacing?: number;
+  tubeRadius?: number;
   highlightedOrbifoldNodeId?: string | null;
 }
 
@@ -220,6 +234,7 @@ export function WeaveThreeRenderer({
   width = 700,
   height = 500,
   levelSpacing = 3,
+  tubeRadius = EDGE_RADIUS,
   highlightedOrbifoldNodeId = null,
 }: WeaveThreeRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -395,7 +410,7 @@ export function WeaveThreeRenderer({
     // Create per-component materials
     const componentMaterials: THREE.ShaderMaterial[] = componentColors.map(c => createNdvMaterial(c));
 
-    const sphereGeometry = new THREE.SphereGeometry(EDGE_RADIUS, 16, 12);
+    const sphereGeometry = new THREE.SphereGeometry(tubeRadius, 16, 12);
 
     // Compute bounding box for camera positioning
     let minX = Infinity, maxX = -Infinity;
@@ -438,12 +453,12 @@ export function WeaveThreeRenderer({
         mid.addScaledVector(bowDir, edgeLen * CROSS_LEVEL_BOW);
 
         const curve = new THREE.QuadraticBezierCurve3(posA, mid, posB);
-        const tubeGeometry = new THREE.TubeGeometry(curve, TUBE_SEGMENTS_CURVED, EDGE_RADIUS, RADIAL_SEGMENTS, false);
+        const tubeGeometry = new THREE.TubeGeometry(curve, TUBE_SEGMENTS_CURVED, tubeRadius, RADIAL_SEGMENTS, false);
         const tubeMesh = new THREE.Mesh(tubeGeometry, material);
         scene.add(tubeMesh);
       } else {
         const path = new THREE.LineCurve3(posA, posB);
-        const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS_STRAIGHT, EDGE_RADIUS, RADIAL_SEGMENTS, false);
+        const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS_STRAIGHT, tubeRadius, RADIAL_SEGMENTS, false);
         const tubeMesh = new THREE.Mesh(tubeGeometry, material);
         scene.add(tubeMesh);
       }
@@ -483,7 +498,7 @@ export function WeaveThreeRenderer({
       centerZ + maxRange * 1.2,
     );
     controls.update();
-  }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing, nodeComponent, componentColors]);
+  }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing, tubeRadius, nodeComponent, componentColors]);
 
   // Update highlight meshes when highlighted node changes
   useEffect(() => {
@@ -511,7 +526,7 @@ export function WeaveThreeRenderer({
       },
       transparent: true,
     });
-    const highlightGeometry = new THREE.SphereGeometry(EDGE_RADIUS * 2.2, 20, 14);
+    const highlightGeometry = new THREE.SphereGeometry(tubeRadius * 2.2, 20, 14);
 
     // Find all lifted nodes whose orbifold node matches
     for (const node of activeNodes) {
@@ -523,7 +538,7 @@ export function WeaveThreeRenderer({
       scene.add(mesh);
       highlightMeshesRef.current.push(mesh);
     }
-  }, [highlightedOrbifoldNodeId, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing]);
+  }, [highlightedOrbifoldNodeId, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing, tubeRadius]);
 
   return (
     <div

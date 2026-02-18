@@ -224,6 +224,10 @@ export function OrbifoldWeaveExplorer() {
   // Highlight state: which orbifold node is highlighted (clicked in 2D view)
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
 
+  // 3D rendering controls
+  const [levelHeight, setLevelHeight] = useState(3);
+  const [tubeRadius, setTubeRadius] = useState(0.25);
+
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
 
   // Create the undoubled orbifold (used for voltage computation)
@@ -1021,12 +1025,42 @@ export function OrbifoldWeaveExplorer() {
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
           </p>
+          <div style={{ display: "flex", gap: "20px", marginBottom: "10px", fontSize: "13px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              Level height:
+              <input
+                type="range"
+                min={0}
+                max={6}
+                step={0.1}
+                value={levelHeight}
+                onChange={(e) => setLevelHeight(parseFloat(e.target.value))}
+                style={{ width: "120px" }}
+              />
+              <span style={{ minWidth: "32px" }}>{levelHeight.toFixed(1)}</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              Tube radius:
+              <input
+                type="range"
+                min={0}
+                max={0.5}
+                step={0.01}
+                value={tubeRadius}
+                onChange={(e) => setTubeRadius(parseFloat(e.target.value))}
+                style={{ width: "120px" }}
+              />
+              <span style={{ minWidth: "32px" }}>{tubeRadius.toFixed(2)}</span>
+            </label>
+          </div>
           <ErrorBoundary>
             <WeaveThreeRenderer
               liftedGraph={liftedGraph}
               orbifoldGrid={doubledGrid}
               useAxialTransform={wallpaperGroup === "P3"}
               highlightedOrbifoldNodeId={highlightedNodeId}
+              levelSpacing={levelHeight}
+              tubeRadius={tubeRadius}
             />
           </ErrorBoundary>
         </div>
