@@ -10,15 +10,19 @@ export function ValidatedInput({
   min,
   max,
   label,
+  extraValidate,
 }: {
   value: number;
   onChange: (value: number) => void;
   min: number;
   max: number;
   label: string;
+  /** Optional extra validation. Return null if valid, or an error message string if invalid. */
+  extraValidate?: (n: number) => string | null;
 }) {
   const [inputValue, setInputValue] = useState(String(value));
   const [isValid, setIsValid] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
   const [lastExternalValue, setLastExternalValue] = useState(value);
 
   // Update input when external value changes (not from our own onChange)
@@ -27,19 +31,28 @@ export function ValidatedInput({
     setLastExternalValue(value);
     setInputValue(String(value));
     setIsValid(true);
+    setErrorMsg("");
   }
 
-  const validate = useCallback((val: string): boolean => {
+  const validate = useCallback((val: string): { valid: boolean; msg: string } => {
     const num = parseInt(val, 10);
-    return !isNaN(num) && num >= min && num <= max;
-  }, [min, max]);
+    if (isNaN(num) || num < min || num > max) {
+      return { valid: false, msg: `(${min}-${max})` };
+    }
+    if (extraValidate) {
+      const extra = extraValidate(num);
+      if (extra) return { valid: false, msg: extra };
+    }
+    return { valid: true, msg: "" };
+  }, [min, max, extraValidate]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     setInputValue(newValue);
     
-    const valid = validate(newValue);
+    const { valid, msg } = validate(newValue);
     setIsValid(valid);
+    setErrorMsg(msg);
     
     if (valid) {
       onChange(parseInt(newValue, 10));
@@ -51,6 +64,7 @@ export function ValidatedInput({
       // Reset to last valid value
       setInputValue(String(value));
       setIsValid(true);
+      setErrorMsg("");
     }
   };
 
@@ -72,7 +86,7 @@ export function ValidatedInput({
       />
       {!isValid && (
         <span style={{ color: "#e74c3c", fontSize: "12px" }}>
-          ({min}-{max})
+          {errorMsg}
         </span>
       )}
     </div>

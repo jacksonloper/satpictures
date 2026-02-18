@@ -7,6 +7,7 @@ import {
   type OrbifoldEdge,
   type OrbifoldGrid,
   type ExtraData,
+  I3,
   nodeIdFromCoord,
   matInvUnimodular,
 } from "./orbifoldbasics";
@@ -258,53 +259,66 @@ export function glideReflectionX(dx: Int, dy: Int): Matrix3x3 {
 }
 
 /**
- * Get odd coordinates for a given grid index.
- * For index i in [0, n-1], the odd coordinate is 2*i + 1.
+ * Get node coordinate for a given grid index with specified step size.
+ * For step=2 (standard): index i → 2*i + 1 (odd coordinates: 1,3,5,...)
+ * For step=4 (doubled):  index i → 4*i + 2 (doubled coordinates: 2,6,10,...)
+ * step must be even (2 or 4).
  */
-function getOddCoord(index: Int): Int {
-  return 2 * index + 1;
+function getNodeCoord(index: Int, step: Int): Int {
+  return step * index + step / 2;
 }
 
 /**
- * Get grid index from odd coordinate.
- * For odd coordinate c, the index is (c - 1) / 2.
+ * Get grid index from node coordinate with specified step size.
+ * Inverse of getNodeCoord: coord must have been produced by getNodeCoord with the same step.
+ * step must be even (2 or 4).
  */
-function getIndexFromOddCoord(coord: Int): Int {
-  return (coord - 1) / 2;
+function getIndexFromNodeCoord(coord: Int, step: Int): Int {
+  return (coord - step / 2) / step;
 }
 
 /**
  * Build a square polygon (clockwise: NW, NE, SE, SW) for a node at (i, j).
+ * halfSize = 1 for standard, 2 for doubled coordinates.
  */
-function squarePolygon(i: Int, j: Int): readonly (readonly [number, number])[] {
+function squarePolygon(i: Int, j: Int, halfSize: Int = 1): readonly (readonly [number, number])[] {
   return [
-    [i - 1, j - 1], // NW (side 0 = North: NW→NE)
-    [i + 1, j - 1], // NE (side 1 = East:  NE→SE)
-    [i + 1, j + 1], // SE (side 2 = South: SE→SW)
-    [i - 1, j + 1], // SW (side 3 = West:  SW→NW)
+    [i - halfSize, j - halfSize], // NW (side 0 = North: NW→NE)
+    [i + halfSize, j - halfSize], // NE (side 1 = East:  NE→SE)
+    [i + halfSize, j + halfSize], // SE (side 2 = South: SE→SW)
+    [i - halfSize, j + halfSize], // SW (side 3 = West:  SW→NW)
   ] as const;
 }
 
 /**
  * Create an orbifold grid for n×n nodes where each node has N/S/E/W neighbors.
+ * 
+ * @param n - Grid size (n×n nodes)
+ * @param getNeighbor - Function that returns neighbor info for each direction
+ * @param initialColors - Optional initial colors
+ * @param doubled - If true, uses 4-unit spacing (like P4g) instead of 2-unit spacing.
+ *                  This allows triangle centroids to be at integer coordinates.
  */
 export function createSquareOrbifoldGrid(
   n: Int,
   getNeighbor: NeighborFunction,
-  initialColors?: ("black" | "white")[][]
+  initialColors?: ("black" | "white")[][],
+  doubled?: boolean,
 ): OrbifoldGrid<ColorData, EdgeStyleData> {
   if (n < 2) {
     throw new Error("Grid size n must be at least 2");
   }
 
+  const step = doubled ? 4 : 2;
+  const halfSize = doubled ? 2 : 1;
   const nodes = new Map<OrbifoldNodeId, OrbifoldNode<ColorData>>();
   const edges = new Map<OrbifoldEdgeId, OrbifoldEdge<EdgeStyleData>>();
 
-  // Create nodes with odd integer coordinates
+  // Create nodes with integer coordinates
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
-      const i = getOddCoord(col); // x coordinate (column)
-      const j = getOddCoord(row); // y coordinate (row)
+      const i = getNodeCoord(col, step); // x coordinate (column)
+      const j = getNodeCoord(row, step); // y coordinate (row)
       const coord: readonly [Int, Int] = [i, j];
       const id = nodeIdFromCoord(coord);
 
@@ -314,7 +328,7 @@ export function createSquareOrbifoldGrid(
       nodes.set(id, {
         id,
         coord,
-        polygon: squarePolygon(i, j),
+        polygon: squarePolygon(i, j, halfSize),
         data: { color },
       });
     }
@@ -331,8 +345,8 @@ export function createSquareOrbifoldGrid(
 
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
-      const i = getOddCoord(col);
-      const j = getOddCoord(row);
+      const i = getNodeCoord(col, step);
+      const j = getNodeCoord(row, step);
       const fromId = nodeIdFromCoord([i, j]);
 
       // Process all 4 directions
@@ -414,15 +428,17 @@ export function createSquareOrbifoldGrid(
 
 /**
  * Update the color of a node in the orbifold grid.
+ * @param step - Coordinate step size (2 for standard, 4 for doubled). Default: 2.
  */
 export function setNodeColor(
   grid: OrbifoldGrid<ColorData>,
   row: Int,
   col: Int,
-  color: "black" | "white"
+  color: "black" | "white",
+  step: Int = 2,
 ): void {
-  const i = getOddCoord(col);
-  const j = getOddCoord(row);
+  const i = getNodeCoord(col, step);
+  const j = getNodeCoord(row, step);
   const id = nodeIdFromCoord([i, j]);
 
   const node = grid.nodes.get(id);
@@ -433,14 +449,16 @@ export function setNodeColor(
 
 /**
  * Get the color of a node in the orbifold grid.
+ * @param step - Coordinate step size (2 for standard, 4 for doubled). Default: 2.
  */
 export function getNodeColor(
   grid: OrbifoldGrid<ColorData>,
   row: Int,
-  col: Int
+  col: Int,
+  step: Int = 2,
 ): "black" | "white" {
-  const i = getOddCoord(col);
-  const j = getOddCoord(row);
+  const i = getNodeCoord(col, step);
+  const j = getNodeCoord(row, step);
   const id = nodeIdFromCoord([i, j]);
 
   const node = grid.nodes.get(id);
@@ -475,11 +493,150 @@ export function setEdgeLinestyle(
 /**
  * Convert orbifold node coordinates to grid position.
  * Returns { row, col } in 0-indexed grid coordinates.
+ * @param step - Coordinate step size (2 for standard, 4 for doubled). Default: 2.
  */
-export function coordToGridPos(coord: readonly [Int, Int]): { row: Int; col: Int } {
+export function coordToGridPos(coord: readonly [Int, Int], step: Int = 2): { row: Int; col: Int } {
   const [i, j] = coord;
   return {
-    col: getIndexFromOddCoord(i),
-    row: getIndexFromOddCoord(j),
+    col: getIndexFromNodeCoord(i, step),
+    row: getIndexFromNodeCoord(j, step),
   };
+}
+
+/**
+ * Split a corner square node into two triangles along the NE-SW diagonal
+ * to eliminate a non-involutive self-edge.
+ *
+ * The original square node at (ci, cj) has a self-edge that connects two
+ * polygon sides with a non-involutive voltage. After splitting, the self-edge
+ * becomes a regular (two-half-edge) edge between the two triangle nodes,
+ * and each triangle has exactly one nontrivial voltage edge and two trivial ones.
+ *
+ * The square is split into:
+ * - North triangle (clockwise): NW, NE, SW with sides:
+ *   0 = North (NW→NE), 1 = Hypotenuse (NE→SW), 2 = West (SW→NW)
+ * - South triangle (clockwise): NE, SE, SW with sides:
+ *   0 = East (NE→SE), 1 = South (SE→SW), 2 = Hypotenuse (SW→NE)
+ *
+ * @param grid - The orbifold grid to modify in place
+ * @param ci - x coordinate of the corner square node center
+ * @param cj - y coordinate of the corner square node center
+ * @param northCoord - Integer coordinate pair for the north triangle node
+ * @param southCoord - Integer coordinate pair for the south triangle node
+ * @param selfEdgeSideA - The polygon side of the original square for the "from" direction of the self-edge (0=N, 1=E, 2=S, 3=W)
+ * @param selfEdgeSideB - The polygon side of the original square for the "to" direction of the self-edge
+ * @param selfEdgeVoltage - The voltage of the self-edge
+ * @param halfSize - Half-width of the square polygon (default 1, use 2 for P4g)
+ */
+export function splitCornerSquare(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+  ci: Int,
+  cj: Int,
+  northCoord: readonly [Int, Int],
+  southCoord: readonly [Int, Int],
+  selfEdgeSideA: number,
+  selfEdgeSideB: number,
+  selfEdgeVoltage: Matrix3x3,
+  halfSize: Int = 1,
+): void {
+  const oldNodeId = nodeIdFromCoord([ci, cj]);
+  const northId = nodeIdFromCoord(northCoord);
+  const southId = nodeIdFromCoord(southCoord);
+
+  // Map original square sides to new triangle node/side:
+  // Original side 0 (N) → North triangle side 0
+  // Original side 1 (E) → South triangle side 0
+  // Original side 2 (S) → South triangle side 1
+  // Original side 3 (W) → North triangle side 2
+  const sideMapping: Record<number, { nodeId: OrbifoldNodeId; side: number }> = {
+    0: { nodeId: northId, side: 0 },
+    1: { nodeId: southId, side: 0 },
+    2: { nodeId: southId, side: 1 },
+    3: { nodeId: northId, side: 2 },
+  };
+
+  // Create triangle polygons
+  const northPolygon: readonly (readonly [number, number])[] = [
+    [ci - halfSize, cj - halfSize], // NW
+    [ci + halfSize, cj - halfSize], // NE
+    [ci - halfSize, cj + halfSize], // SW
+  ] as const;
+
+  const southPolygon: readonly (readonly [number, number])[] = [
+    [ci + halfSize, cj - halfSize], // NE
+    [ci + halfSize, cj + halfSize], // SE
+    [ci - halfSize, cj + halfSize], // SW
+  ] as const;
+
+  // Add the two triangle nodes
+  grid.nodes.set(northId, {
+    id: northId,
+    coord: northCoord,
+    polygon: northPolygon,
+    data: { color: "white" },
+  });
+  grid.nodes.set(southId, {
+    id: southId,
+    coord: southCoord,
+    polygon: southPolygon,
+    data: { color: "white" },
+  });
+
+  // Add the hypotenuse edge (trivial, I3) between the two triangles
+  const hypEdgeKey = [northId, southId].sort().join("|") + "|HYP";
+  const hypEdgeId = hypEdgeKey.replace(/\|/g, "--");
+  const hypHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+  hypHalfEdges.set(northId, { to: southId, voltage: I3, polygonSides: [1] });
+  hypHalfEdges.set(southId, { to: northId, voltage: I3, polygonSides: [2] });
+  grid.edges.set(hypEdgeId, { id: hypEdgeId, halfEdges: hypHalfEdges, data: { linestyle: "solid" } });
+
+  // Re-route the self-edge as a regular edge between the two triangles
+  const mappedA = sideMapping[selfEdgeSideA];
+  const mappedB = sideMapping[selfEdgeSideB];
+  const crossEdgeKey = [mappedA.nodeId, mappedB.nodeId].sort().join("|") + "|CROSS";
+  const crossEdgeId = crossEdgeKey.replace(/\|/g, "--");
+  const invVoltage = matInvUnimodular(selfEdgeVoltage);
+  const crossHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+  crossHalfEdges.set(mappedA.nodeId, { to: mappedB.nodeId, voltage: selfEdgeVoltage, polygonSides: [mappedA.side] });
+  crossHalfEdges.set(mappedB.nodeId, { to: mappedA.nodeId, voltage: invVoltage, polygonSides: [mappedB.side] });
+  grid.edges.set(crossEdgeId, { id: crossEdgeId, halfEdges: crossHalfEdges, data: { linestyle: "solid" } });
+
+  // Re-route all non-self edges from the old node to the appropriate triangle node
+  const edgesToRemove: OrbifoldEdgeId[] = [];
+  for (const [edgeId, edge] of grid.edges) {
+    const half = edge.halfEdges.get(oldNodeId);
+    if (!half) continue;
+
+    // Skip the self-edge (it's been replaced by the cross edge)
+    if (half.to === oldNodeId) {
+      edgesToRemove.push(edgeId);
+      continue;
+    }
+
+    // Find which original side this edge used
+    const origSide = half.polygonSides[0];
+    const mapped = sideMapping[origSide];
+    if (!mapped) continue;
+
+    // Find the other node's half-edge
+    const otherHalf = edge.halfEdges.get(half.to);
+
+    // Create a new edge with the triangle node
+    const newEdgeKey = [mapped.nodeId, half.to].sort().join("|");
+    const newEdgeId = newEdgeKey.replace(/\|/g, "--");
+    const newHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+    newHalfEdges.set(mapped.nodeId, { to: half.to, voltage: half.voltage, polygonSides: [mapped.side] });
+    if (otherHalf) {
+      newHalfEdges.set(half.to, { to: mapped.nodeId, voltage: otherHalf.voltage, polygonSides: [...otherHalf.polygonSides] });
+    }
+    grid.edges.set(newEdgeId, { id: newEdgeId, halfEdges: newHalfEdges, data: { linestyle: "solid" } });
+
+    edgesToRemove.push(edgeId);
+  }
+
+  // Remove old edges and old node
+  for (const edgeId of edgesToRemove) {
+    grid.edges.delete(edgeId);
+  }
+  grid.nodes.delete(oldNodeId);
 }

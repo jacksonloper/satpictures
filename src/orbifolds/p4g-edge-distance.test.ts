@@ -30,26 +30,47 @@ function testP4gStructure(n: number): { passed: boolean; failures: string[] } {
   const failures: string[] = [];
 
   // Node count: n*(n-1)/2 grid nodes + n diagonal nodes = n*(n+1)/2
-  const expectedNodeCount = (n * (n + 1)) / 2;
+  // The NE grid node (col=n-1, row=0) is split into 2 triangle nodes, adding 1 extra.
+  const expectedNodeCount = (n * (n + 1)) / 2 + 1;
   if (grid.nodes.size !== expectedNodeCount) {
     failures.push(`Expected ${expectedNodeCount} nodes, got ${grid.nodes.size}`);
   }
 
+  // The NE grid node (col=n-1, row=0) is split into triangles
+  const neI = 4 * (n - 1) + 2;
+  const neJ = 2;
+  const neNodeId = nodeIdFromCoord([neI, neJ]);
+
   // Check grid nodes exist at doubled coordinates (4*col+2, 4*row+2) for row < col
+  // except for the NE node which has been split
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       const i = 4 * col + 2;
       const j = 4 * row + 2;
       const nodeId = nodeIdFromCoord([i, j]);
       const exists = grid.nodes.has(nodeId);
+      const isNENode = nodeId === neNodeId;
 
       if (row >= col && exists) {
         failures.push(`Grid node ${nodeId} should not exist (on/below diagonal)`);
       }
-      if (row < col && !exists) {
+      if (row < col && !isNENode && !exists) {
         failures.push(`Grid node ${nodeId} should exist (above diagonal)`);
       }
+      if (isNENode && exists) {
+        failures.push(`NE grid node ${nodeId} should have been split into triangles`);
+      }
     }
+  }
+
+  // Check that the NE triangle nodes exist
+  const neNorthId = nodeIdFromCoord([neI, neJ - 2]);
+  const neSouthId = nodeIdFromCoord([neI, neJ + 2]);
+  if (!grid.nodes.has(neNorthId)) {
+    failures.push(`NE north triangle node ${neNorthId} should exist`);
+  }
+  if (!grid.nodes.has(neSouthId)) {
+    failures.push(`NE south triangle node ${neSouthId} should exist`);
   }
 
   // Check diagonal nodes exist at (4*k+3, 4*k+1) for k = 0..n-1
@@ -92,6 +113,7 @@ function testP4gStructure(n: number): { passed: boolean; failures: string[] } {
     const i = 4 * col + 2;
     const j = 4 * row + 2;
     const nodeId = nodeIdFromCoord([i, j]);
+    if (!grid.nodes.has(nodeId)) continue; // Skip split nodes
     const edgeIds = grid.adjacency?.get(nodeId) ?? [];
     const selfLoops = edgeIds.filter((edgeId) => {
       const edge = grid.edges.get(edgeId);
@@ -139,10 +161,11 @@ function testP4gLiftedDistances(n: number, m: number): { passed: boolean; failur
   // - 4.0: grid-to-grid (doubled from old step of 2)
   // - √10 ≈ 3.16: grid-to-diagonal (e.g. (6,2)→(3,1))
   // - 2√2 ≈ 2.83: diagonal reflection self-loop (e.g. (3,1)→(1,3))
-  // - 2.0: diagonal border crossing (e.g. diag(0) at (3,1)→diag(n-1)
-  //         whose absolute position after voltage is (3,-1), dist=2)
+  // - 2.0: diagonal border crossing / triangle edges
+  // - √20 ≈ 4.47: grid-to-NE-triangle (from corner triangle split)
   const allowedDistances = [
     4.0,              // grid-to-grid
+    Math.sqrt(20),    // grid-to-NE-triangle
     Math.sqrt(10),    // grid-to-diagonal
     2 * Math.sqrt(2), // diagonal reflection self-loop
     2.0,              // diagonal border crossing

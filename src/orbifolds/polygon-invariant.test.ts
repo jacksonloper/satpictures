@@ -15,7 +15,7 @@ import { validatePolygonSideInvariant, buildAdjacency } from "./orbifoldbasics.j
 // self-edges for P3/P4, so we test n≥3 (n≥4 for P4g per its constraint).
 const groups: { type: WallpaperGroupType; sizes: number[] }[] = [
   { type: "P1", sizes: [3, 4, 5] },
-  { type: "P2", sizes: [2, 3, 4, 5] },
+  { type: "P2", sizes: [2, 4, 6] },
   { type: "P3", sizes: [3, 4, 5] },
   { type: "P4", sizes: [3, 4, 5] },
   { type: "P4g", sizes: [4, 5, 6] },
