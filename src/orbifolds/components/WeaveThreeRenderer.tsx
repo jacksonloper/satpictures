@@ -318,7 +318,7 @@ export function WeaveThreeRenderer({
 
     // Create scene — no lights, shading is purely view-dependent
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    scene.background = new THREE.Color(0xffffff);
     sceneRef.current = scene;
 
     // Create camera
