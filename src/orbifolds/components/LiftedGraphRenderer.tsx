@@ -16,8 +16,6 @@ import {
   type OrbifoldGrid,
   type OrbifoldNodeId,
   type Matrix3x3,
-  I3,
-  matMul,
   applyMatrix,
   axialToCartesian,
 } from "../orbifoldbasics";
@@ -124,6 +122,7 @@ export function LiftedGraphRenderer({
   showNodes = false,
   showWalls = false,
   showBeadAnimation = false,
+  beadSpeed = 0.5,
   svgRef,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
@@ -137,6 +136,7 @@ export function LiftedGraphRenderer({
   showNodes?: boolean;
   showWalls?: boolean;
   showBeadAnimation?: boolean;
+  beadSpeed?: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
 }) {
   const cellSize = LIFTED_CELL_SIZE;
@@ -298,84 +298,37 @@ export function LiftedGraphRenderer({
   const toSvgY = (y: number) => padding + (y - allBounds.minY) * scale;
 
   // ---- Bead animation ----
-  // Build the loop path as a sequence of {x, y} positions in the lifted graph.
-  // Each orbifold edge with a loopstep value contributes one segment (from → to).
-  // We trace through the lifted graph by accumulating voltages.
-  const beadPath = useMemo(() => {
-    if (!showBeadAnimation) return [];
+  // For each lifted edge that has loopstep traversals, we render a bead at the
+  // appropriate position when the current time falls within a traversal interval.
+  // The animation time `t` cycles from 0 to 1 (one full loop).
 
-    // Collect orbifold edges with loopstep, sorted by step
-    const loopEdges: Array<{ step: number; edgeId: string; fromNode: string; toNode: string; voltage: Matrix3x3 }> = [];
-    for (const [edgeId, edge] of orbifoldGrid.edges) {
+  // Animation state: normalized time in [0,1)
+  const [beadTime, setBeadTime] = useState(0);
+
+  // Check if any orbifold edge has loopstep data
+  const hasLoopData = useMemo(() => {
+    if (!showBeadAnimation) return false;
+    for (const edge of orbifoldGrid.edges.values()) {
       const data = edge.data as EdgeStyleData | undefined;
-      if (data?.loopstep !== undefined && data.loopfrom !== undefined) {
-        const half = edge.halfEdges.get(data.loopfrom);
-        if (half) {
-          loopEdges.push({
-            step: data.loopstep,
-            edgeId,
-            fromNode: data.loopfrom,
-            toNode: half.to,
-            voltage: half.voltage,
-          });
-        }
-      }
+      if (data?.loopstep && data.loopstep.length > 0) return true;
     }
-    if (loopEdges.length === 0) return [];
-    loopEdges.sort((a, b) => a.step - b.step);
-
-    // Trace the path through the lifted graph.
-    // Start at (first orbifold node, identity voltage), accumulating.
-    const path: Array<{ x: number; y: number }> = [];
-    let currentVoltage: Matrix3x3 = I3;
-
-    for (let i = 0; i < loopEdges.length; i++) {
-      const { fromNode, voltage } = loopEdges[i];
-
-      // Position of the "from" lifted node
-      const orbFrom = orbifoldGrid.nodes.get(fromNode);
-      if (!orbFrom) continue;
-      let posFrom = applyMatrix(currentVoltage, orbFrom.coord[0], orbFrom.coord[1]);
-      if (useAxialTransform) posFrom = axialToCartesian(posFrom.x, posFrom.y);
-      path.push(posFrom);
-
-      // Accumulate voltage
-      currentVoltage = matMul(currentVoltage, voltage);
-    }
-
-    // Add the final position (back at start for a loop)
-    if (loopEdges.length > 0) {
-      const lastEdge = loopEdges[loopEdges.length - 1];
-      const orbTo = orbifoldGrid.nodes.get(lastEdge.toNode);
-      if (orbTo) {
-        let posTo = applyMatrix(currentVoltage, orbTo.coord[0], orbTo.coord[1]);
-        if (useAxialTransform) posTo = axialToCartesian(posTo.x, posTo.y);
-        path.push(posTo);
-      }
-    }
-
-    return path;
-  }, [showBeadAnimation, orbifoldGrid, useAxialTransform]);
-
-  // Animation state: a float representing position along the path
-  const [beadProgress, setBeadProgress] = useState(0);
+    return false;
+  }, [showBeadAnimation, orbifoldGrid]);
 
   useEffect(() => {
-    if (!showBeadAnimation || beadPath.length < 2) return;
+    if (!showBeadAnimation || !hasLoopData) return;
 
     let animFrame: number;
     let lastTime: number | null = null;
-    const SPEED = 0.5; // segments per second
 
     const animate = (time: number) => {
       if (lastTime === null) lastTime = time;
       const dt = (time - lastTime) / 1000;
       lastTime = time;
 
-      setBeadProgress((prev) => {
-        const next = prev + dt * SPEED;
-        const totalSegments = beadPath.length - 1;
-        return next >= totalSegments ? next % totalSegments : next;
+      setBeadTime((prev) => {
+        const next = prev + dt * beadSpeed;
+        return next % 1;
       });
 
       animFrame = requestAnimationFrame(animate);
@@ -383,23 +336,64 @@ export function LiftedGraphRenderer({
 
     animFrame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animFrame);
-  }, [showBeadAnimation, beadPath]);
+  }, [showBeadAnimation, hasLoopData, beadSpeed]);
 
-  // Compute the bead SVG position by interpolating along the path
-  const beadPos = useMemo(() => {
-    if (beadPath.length < 2) return null;
-    const totalSegments = beadPath.length - 1;
-    const wrappedProgress = beadProgress % totalSegments;
-    const segIndex = Math.floor(wrappedProgress);
-    const t = wrappedProgress - segIndex;
-    const p0 = beadPath[segIndex];
-    const p1 = beadPath[segIndex + 1];
-    if (!p0 || !p1) return null;
-    return {
-      x: p0.x + (p1.x - p0.x) * t,
-      y: p0.y + (p1.y - p0.y) * t,
-    };
-  }, [beadPath, beadProgress]);
+  // Compute bead positions: for each lifted edge, check all loopstep traversals.
+  // If the current beadTime falls within a traversal's [startTime, endTime), render a bead.
+  const beadPositions = useMemo(() => {
+    if (!showBeadAnimation || !hasLoopData) return [];
+
+    const beads: Array<{ x: number; y: number; key: string }> = [];
+
+    for (const liftedEdge of liftedGraph.edges.values()) {
+      if (!liftedEdge.orbifoldEdgeId) continue;
+      const orbEdge = orbifoldGrid.edges.get(liftedEdge.orbifoldEdgeId);
+      if (!orbEdge) continue;
+      const data = orbEdge.data as EdgeStyleData | undefined;
+      if (!data?.loopstep) continue;
+
+      const posA = positions.get(liftedEdge.a);
+      const posB = positions.get(liftedEdge.b);
+      if (!posA || !posB) continue;
+
+      // Determine which lifted node corresponds to which orbifold node
+      const liftedNodeA = liftedGraph.nodes.get(liftedEdge.a);
+      const liftedNodeB = liftedGraph.nodes.get(liftedEdge.b);
+      if (!liftedNodeA || !liftedNodeB) continue;
+
+      for (let ti = 0; ti < data.loopstep.length; ti++) {
+        const traversal = data.loopstep[ti];
+        const { startTime, endTime, startNode } = traversal;
+
+        // Check if beadTime falls within this traversal's interval
+        if (beadTime < startTime || beadTime >= endTime) continue;
+
+        // Determine direction: startNode tells us which orbifold node the bead enters from.
+        // Map that to the lifted node positions.
+        let fromPos: { x: number; y: number };
+        let toPos: { x: number; y: number };
+        if (liftedNodeA.orbifoldNode === startNode) {
+          fromPos = posA;
+          toPos = posB;
+        } else if (liftedNodeB.orbifoldNode === startNode) {
+          fromPos = posB;
+          toPos = posA;
+        } else {
+          continue; // startNode doesn't match either endpoint
+        }
+
+        // Interpolate position within the traversal interval
+        const progress = (beadTime - startTime) / (endTime - startTime);
+        beads.push({
+          x: fromPos.x + (toPos.x - fromPos.x) * progress,
+          y: fromPos.y + (toPos.y - fromPos.y) * progress,
+          key: `bead-${liftedEdge.id}-${ti}`,
+        });
+      }
+    }
+
+    return beads;
+  }, [showBeadAnimation, hasLoopData, beadTime, liftedGraph, orbifoldGrid, positions]);
 
   return (
     <svg
@@ -529,17 +523,18 @@ export function LiftedGraphRenderer({
         );
       })}
 
-      {/* Bead animation: a circle that moves along the loop path */}
-      {showBeadAnimation && beadPos && (
+      {/* Bead animation: circles on lifted edges whose loopstep traversal contains current time */}
+      {showBeadAnimation && beadPositions.map((bead) => (
         <circle
-          cx={toSvgX(beadPos.x)}
-          cy={toSvgY(beadPos.y)}
+          key={bead.key}
+          cx={toSvgX(bead.x)}
+          cy={toSvgY(bead.y)}
           r={cellSize * 0.6}
           fill="#e74c3c"
           stroke="#c0392b"
           strokeWidth={2}
         />
-      )}
+      ))}
     </svg>
   );
 }

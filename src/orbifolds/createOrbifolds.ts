@@ -62,4 +62,4 @@ export {
   translationWith90CW,
 } from "./orbifoldShared";
 
-export type { WallpaperGroupType, ColorData, EdgeStyleData, EdgeLinestyle } from "./orbifoldShared";
+export type { WallpaperGroupType, ColorData, EdgeStyleData, EdgeLinestyle, LoopTraversal } from "./orbifoldShared";

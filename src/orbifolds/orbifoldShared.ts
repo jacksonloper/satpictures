@@ -19,12 +19,20 @@ export interface ColorData extends ExtraData {
   color: "black" | "white";
 }
 
+/** A single traversal of an orbifold edge within the loop. */
+export interface LoopTraversal {
+  /** Normalized start time in [0,1) representing when the bead enters this edge. */
+  startTime: number;
+  /** Normalized end time in (0,1] representing when the bead exits this edge. */
+  endTime: number;
+  /** The orbifold node from which this edge is traversed (defines direction). */
+  startNode: string;
+}
+
 export interface EdgeStyleData extends ExtraData {
   linestyle: EdgeLinestyle;
-  /** Step index in the accepted loop path (0-based). Present only for edges that are part of an accepted loop. */
-  loopstep?: number;
-  /** The node from which this edge is traversed in the loop (defines direction). */
-  loopfrom?: string;
+  /** List of traversals of this edge within the accepted loop. Each entry has normalized times and direction. */
+  loopstep?: LoopTraversal[];
 }
 
 export type Direction = "N" | "S" | "E" | "W";
