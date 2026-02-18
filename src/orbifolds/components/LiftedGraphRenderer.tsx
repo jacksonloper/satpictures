@@ -18,6 +18,7 @@ import {
   type Matrix3x3,
   applyMatrix,
   axialToCartesian,
+  isInvolutive,
 } from "../orbifoldbasics";
 import { getEdgeLinestyle, type ColorData, type EdgeStyleData } from "../createOrbifolds";
 
@@ -364,10 +365,18 @@ export function LiftedGraphRenderer({
       const liftedNodeB = liftedGraph.nodes.get(liftedEdge.b);
       if (!liftedNodeA || !liftedNodeB) continue;
 
-      // Check if this orbifold edge is a self-edge with an involutive voltage.
+      // Check if this orbifold edge is a self-edge with a truly involutive voltage (V*V = I).
       // Self-edges have halfEdges.size === 1 (single half-edge pointing back to same node).
-      // Their voltage is necessarily involutive (V*V = I).
-      const isInvolutiveSelfEdge = orbEdge.halfEdges.size === 1;
+      // But not all self-edges are involutive — cone point self-edges have higher-order
+      // rotational voltages (e.g. 3-fold, 4-fold) that are NOT their own inverse.
+      // Only truly involutive self-edges need mirror beads.
+      let isInvolutiveSelfEdge = false;
+      if (orbEdge.halfEdges.size === 1) {
+        const halfEdge = orbEdge.halfEdges.values().next().value;
+        if (halfEdge && isInvolutive(halfEdge.voltage)) {
+          isInvolutiveSelfEdge = true;
+        }
+      }
 
       for (let ti = 0; ti < data.loopstep.length; ti++) {
         const traversal = data.loopstep[ti];
