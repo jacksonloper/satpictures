@@ -56,8 +56,20 @@ function testLiftedEdgeDistances(
   console.log(`Lifted edges: ${lifted.edges.size}`);
   
   const failures: string[] = [];
-  const EXPECTED_DISTANCE = 2;
   const TOLERANCE = 0.0001;
+
+  // With triangle-split corner nodes, edges may have varying distances.
+  // Allowed distances include:
+  // - 2.0: standard grid edge distance
+  // - sqrt(5) ≈ 2.236: grid-to-triangle edge
+  // - sqrt(2) ≈ 1.414: triangle hypotenuse / cross edge
+  // - 1.0: triangle-to-adjacent-grid edge (for small n)
+  const allowedDistances = [
+    2.0,
+    Math.sqrt(5),
+    Math.sqrt(2),
+    1.0,
+  ];
   
   for (const [edgeId, edge] of lifted.edges) {
     const nodeA = lifted.nodes.get(edge.a);
@@ -72,12 +84,13 @@ function testLiftedEdgeDistances(
     const posB = getLiftedNodeAbsolutePosition(grid, nodeB.orbifoldNode, nodeB.voltage);
     
     const dist = distance(posA, posB);
-    
-    if (Math.abs(dist - EXPECTED_DISTANCE) > TOLERANCE) {
+
+    const matchesAllowed = allowedDistances.some(d => Math.abs(dist - d) < TOLERANCE);
+    if (!matchesAllowed) {
       const failure = `Edge ${edgeId}:
     Node A: orbifold=${nodeA.orbifoldNode}, voltage=${formatVoltage(nodeA.voltage)}, pos=(${posA.x.toFixed(2)}, ${posA.y.toFixed(2)})
     Node B: orbifold=${nodeB.orbifoldNode}, voltage=${formatVoltage(nodeB.voltage)}, pos=(${posB.x.toFixed(2)}, ${posB.y.toFixed(2)})
-    Distance: ${dist.toFixed(4)} (expected ${EXPECTED_DISTANCE})`;
+    Distance: ${dist.toFixed(4)} (not in allowed set [${allowedDistances.map(d => d.toFixed(4)).join(", ")}])`;
       failures.push(failure);
     }
   }

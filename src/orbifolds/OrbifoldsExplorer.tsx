@@ -94,7 +94,7 @@ export function OrbifoldsExplorer() {
   const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("");
   const loopsWorkerRef = useRef<Worker | null>(null);
 
-  const minSize = wallpaperGroup === "P4g" ? 4 : 2;
+  const minSize = wallpaperGroup === "P4g" ? 4 : wallpaperGroup === "P2" ? 2 : 2;
   
   // Ref for SVG export
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
@@ -135,15 +135,18 @@ export function OrbifoldsExplorer() {
   }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    const nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    let nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize = nextSize + 1;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
   };
 
   const handleSizeChange = useCallback((nextSize: number) => {
-    setSize(nextSize);
-    resetGrid(wallpaperGroup, nextSize);
+    let adjustedSize = nextSize;
+    if (wallpaperGroup === "P2" && adjustedSize % 2 !== 0) adjustedSize = adjustedSize + 1;
+    setSize(adjustedSize);
+    resetGrid(wallpaperGroup, adjustedSize);
   }, [wallpaperGroup, resetGrid]);
 
   // Handle cell color toggle (by node ID)

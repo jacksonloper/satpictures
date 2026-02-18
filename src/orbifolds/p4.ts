@@ -3,6 +3,7 @@ import {
   type Direction,
   type NeighborResult,
   createSquareOrbifoldGrid,
+  splitCornerSquare,
   translationWith90CCW,
   translationWith90CW,
 } from "./orbifoldShared";
@@ -85,5 +86,28 @@ function getP4Neighbor(
 }
 
 export function createP4Grid(n: Int, initialColors?: ("black" | "white")[][]) {
-  return createSquareOrbifoldGrid(n, getP4Neighbor, initialColors);
+  const grid = createSquareOrbifoldGrid(n, getP4Neighbor, initialColors);
+  const maxOdd = 2 * n - 1;
+
+  // Split NE corner: node (maxOdd, 1) has self-edge on sides [0 (N), 1 (E)]
+  // with 90° CCW voltage. Split into two triangles.
+  splitCornerSquare(
+    grid,
+    maxOdd, 1,
+    [maxOdd, 0], [maxOdd, 2],
+    0, 1,
+    translationWith90CCW(2 * n, -2 * n),
+  );
+
+  // Split SW corner: node (1, maxOdd) has self-edge on sides [3 (W), 2 (S)]
+  // with 90° CW voltage. Split into two triangles.
+  splitCornerSquare(
+    grid,
+    1, maxOdd,
+    [0, maxOdd], [2, maxOdd],
+    3, 2,
+    translationWith90CW(-2 * n, 2 * n),
+  );
+
+  return grid;
 }

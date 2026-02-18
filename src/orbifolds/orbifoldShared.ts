@@ -483,3 +483,142 @@ export function coordToGridPos(coord: readonly [Int, Int]): { row: Int; col: Int
     row: getIndexFromOddCoord(j),
   };
 }
+
+/**
+ * Split a corner square node into two triangles along the NE-SW diagonal
+ * to eliminate a non-involutive self-edge.
+ *
+ * The original square node at (ci, cj) has a self-edge that connects two
+ * polygon sides with a non-involutive voltage. After splitting, the self-edge
+ * becomes a regular (two-half-edge) edge between the two triangle nodes,
+ * and each triangle has exactly one nontrivial voltage edge and two trivial ones.
+ *
+ * The square is split into:
+ * - North triangle (clockwise): NW, NE, SW with sides:
+ *   0 = North (NW→NE), 1 = Hypotenuse (NE→SW), 2 = West (SW→NW)
+ * - South triangle (clockwise): NE, SE, SW with sides:
+ *   0 = East (NE→SE), 1 = South (SE→SW), 2 = Hypotenuse (SW→NE)
+ *
+ * @param grid - The orbifold grid to modify in place
+ * @param ci - x coordinate of the corner square node center
+ * @param cj - y coordinate of the corner square node center
+ * @param northCoord - Integer coordinate pair for the north triangle node
+ * @param southCoord - Integer coordinate pair for the south triangle node
+ * @param selfEdgeSideA - The polygon side of the original square for the "from" direction of the self-edge (0=N, 1=E, 2=S, 3=W)
+ * @param selfEdgeSideB - The polygon side of the original square for the "to" direction of the self-edge
+ * @param selfEdgeVoltage - The voltage of the self-edge
+ * @param halfSize - Half-width of the square polygon (default 1, use 2 for P4g)
+ */
+export function splitCornerSquare(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+  ci: Int,
+  cj: Int,
+  northCoord: readonly [Int, Int],
+  southCoord: readonly [Int, Int],
+  selfEdgeSideA: number,
+  selfEdgeSideB: number,
+  selfEdgeVoltage: Matrix3x3,
+  halfSize: Int = 1,
+): void {
+  const oldNodeId = nodeIdFromCoord([ci, cj]);
+  const northId = nodeIdFromCoord(northCoord);
+  const southId = nodeIdFromCoord(southCoord);
+
+  // Map original square sides to new triangle node/side:
+  // Original side 0 (N) → North triangle side 0
+  // Original side 1 (E) → South triangle side 0
+  // Original side 2 (S) → South triangle side 1
+  // Original side 3 (W) → North triangle side 2
+  const sideMapping: Record<number, { nodeId: OrbifoldNodeId; side: number }> = {
+    0: { nodeId: northId, side: 0 },
+    1: { nodeId: southId, side: 0 },
+    2: { nodeId: southId, side: 1 },
+    3: { nodeId: northId, side: 2 },
+  };
+
+  // Create triangle polygons
+  const northPolygon: readonly (readonly [number, number])[] = [
+    [ci - halfSize, cj - halfSize], // NW
+    [ci + halfSize, cj - halfSize], // NE
+    [ci - halfSize, cj + halfSize], // SW
+  ] as const;
+
+  const southPolygon: readonly (readonly [number, number])[] = [
+    [ci + halfSize, cj - halfSize], // NE
+    [ci + halfSize, cj + halfSize], // SE
+    [ci - halfSize, cj + halfSize], // SW
+  ] as const;
+
+  // Add the two triangle nodes
+  grid.nodes.set(northId, {
+    id: northId,
+    coord: northCoord,
+    polygon: northPolygon,
+    data: { color: "white" },
+  });
+  grid.nodes.set(southId, {
+    id: southId,
+    coord: southCoord,
+    polygon: southPolygon,
+    data: { color: "white" },
+  });
+
+  // Add the hypotenuse edge (trivial, I3) between the two triangles
+  const hypEdgeKey = [northId, southId].sort().join("|") + "|HYP";
+  const hypEdgeId = hypEdgeKey.replace(/\|/g, "--");
+  const I3local: Matrix3x3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as const;
+  const hypHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+  hypHalfEdges.set(northId, { to: southId, voltage: I3local, polygonSides: [1] });
+  hypHalfEdges.set(southId, { to: northId, voltage: I3local, polygonSides: [2] });
+  grid.edges.set(hypEdgeId, { id: hypEdgeId, halfEdges: hypHalfEdges, data: { linestyle: "solid" } });
+
+  // Re-route the self-edge as a regular edge between the two triangles
+  const mappedA = sideMapping[selfEdgeSideA];
+  const mappedB = sideMapping[selfEdgeSideB];
+  const crossEdgeKey = [mappedA.nodeId, mappedB.nodeId].sort().join("|") + "|CROSS";
+  const crossEdgeId = crossEdgeKey.replace(/\|/g, "--");
+  const invVoltage = matInvUnimodular(selfEdgeVoltage);
+  const crossHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+  crossHalfEdges.set(mappedA.nodeId, { to: mappedB.nodeId, voltage: selfEdgeVoltage, polygonSides: [mappedA.side] });
+  crossHalfEdges.set(mappedB.nodeId, { to: mappedA.nodeId, voltage: invVoltage, polygonSides: [mappedB.side] });
+  grid.edges.set(crossEdgeId, { id: crossEdgeId, halfEdges: crossHalfEdges, data: { linestyle: "solid" } });
+
+  // Re-route all non-self edges from the old node to the appropriate triangle node
+  const edgesToRemove: OrbifoldEdgeId[] = [];
+  for (const [edgeId, edge] of grid.edges) {
+    const half = edge.halfEdges.get(oldNodeId);
+    if (!half) continue;
+
+    // Skip the self-edge (it's been replaced by the cross edge)
+    if (half.to === oldNodeId) {
+      edgesToRemove.push(edgeId);
+      continue;
+    }
+
+    // Find which original side this edge used
+    const origSide = half.polygonSides[0];
+    const mapped = sideMapping[origSide];
+    if (!mapped) continue;
+
+    // Find the other node's half-edge
+    const otherHalf = edge.halfEdges.get(half.to);
+
+    // Create a new edge with the triangle node
+    const newEdgeKey = [mapped.nodeId, half.to].sort().join("|");
+    const newEdgeId = newEdgeKey.replace(/\|/g, "--");
+    const newHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
+    newHalfEdges.set(mapped.nodeId, { to: half.to, voltage: half.voltage, polygonSides: [mapped.side] });
+    if (otherHalf) {
+      newHalfEdges.set(half.to, { to: mapped.nodeId, voltage: otherHalf.voltage, polygonSides: [...otherHalf.polygonSides] });
+    }
+    grid.edges.set(newEdgeId, { id: newEdgeId, halfEdges: newHalfEdges, data: { linestyle: "solid" } });
+
+    edgesToRemove.push(edgeId);
+  }
+
+  // Remove old edges and old node
+  for (const edgeId of edgesToRemove) {
+    grid.edges.delete(edgeId);
+  }
+  grid.nodes.delete(oldNodeId);
+}
