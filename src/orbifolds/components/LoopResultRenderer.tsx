@@ -157,11 +157,14 @@ export function LoopResultRenderer({
     [steps],
   );
 
-  // Build a map from nodeId -> step index (first occurrence, excluding the final root)
-  const nodeStep = new Map<string, number>();
+  // Build a map from nodeId -> step indices (all occurrences, excluding the final root)
+  const nodeSteps = new Map<string, number[]>();
   for (let t = 0; t < pathNodeIds.length - 1; t++) {
-    if (!nodeStep.has(pathNodeIds[t])) {
-      nodeStep.set(pathNodeIds[t], t);
+    const existing = nodeSteps.get(pathNodeIds[t]);
+    if (existing) {
+      existing.push(t);
+    } else {
+      nodeSteps.set(pathNodeIds[t], [t]);
     }
   }
 
@@ -210,12 +213,13 @@ export function LoopResultRenderer({
       >
         {Array.from(grid.nodes.values()).map((node) => {
           const color = node.data?.color ?? "white";
-          const stepIndex = nodeStep.get(node.id);
-          const isInPath = stepIndex !== undefined;
+          const stepsForNode = nodeSteps.get(node.id);
+          const isInPath = stepsForNode !== undefined;
           const isRoot = node.id === rootNodeId;
           const centroid = polygonCentroid(node.polygon);
           const cx = toSvgX(centroid.x);
           const cy = toSvgY(centroid.y);
+          const stepLabel = stepsForNode ? stepsForNode.join(",") : "";
 
           return (
             <g key={node.id}>
@@ -232,10 +236,10 @@ export function LoopResultRenderer({
                 <text
                   x={cx} y={cy}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={node.polygon.length < 4 ? 10 : 14} fontWeight="bold" fill="white"
+                  fontSize={node.polygon.length < 4 ? 10 : (stepsForNode.length > 1 ? 11 : 14)} fontWeight="bold" fill="white"
                   style={{ pointerEvents: "none" }}
                 >
-                  {stepIndex}
+                  {stepLabel}
                 </text>
               )}
             </g>
