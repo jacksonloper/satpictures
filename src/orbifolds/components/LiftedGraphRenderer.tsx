@@ -10,7 +10,7 @@
  * For P3 (axial coordinates), an optional transform can be applied to convert
  * axial coordinates to Cartesian for better visualization.
  */
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   type LiftedGraph,
   type OrbifoldGrid,
@@ -294,8 +294,8 @@ export function LiftedGraphRenderer({
   const height = rangeY * scale + 2 * padding;
 
   // Transform coordinates to SVG space
-  const toSvgX = useCallback((x: number) => padding + (x - allBounds.minX) * scale, [padding, allBounds.minX, scale]);
-  const toSvgY = useCallback((y: number) => padding + (y - allBounds.minY) * scale, [padding, allBounds.minY, scale]);
+  const toSvgX = (x: number) => padding + (x - allBounds.minX) * scale;
+  const toSvgY = (y: number) => padding + (y - allBounds.minY) * scale;
 
   // ---- Bead animation ----
   // Build the loop path as a sequence of {x, y} positions in the lifted graph.
@@ -389,9 +389,9 @@ export function LiftedGraphRenderer({
   const beadPos = useMemo(() => {
     if (beadPath.length < 2) return null;
     const totalSegments = beadPath.length - 1;
-    const clampedProgress = beadProgress % totalSegments;
-    const segIndex = Math.floor(clampedProgress);
-    const t = clampedProgress - segIndex;
+    const wrappedProgress = beadProgress % totalSegments;
+    const segIndex = Math.floor(wrappedProgress);
+    const t = wrappedProgress - segIndex;
     const p0 = beadPath[segIndex];
     const p1 = beadPath[segIndex + 1];
     if (!p0 || !p1) return null;
