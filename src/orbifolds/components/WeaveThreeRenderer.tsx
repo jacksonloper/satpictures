@@ -113,6 +113,7 @@ interface WeaveThreeRendererProps {
   levelSpacing?: number;
   tubeRadius?: number;
   highlightedOrbifoldNodeId?: string | null;
+  beadSpeed?: number;
 }
 
 /** Create a ShaderMaterial with the custom normal·viewDir shading. */
@@ -229,6 +230,7 @@ export function WeaveThreeRenderer({
   levelSpacing = 3,
   tubeRadius = EDGE_RADIUS,
   highlightedOrbifoldNodeId = null,
+  beadSpeed = 1.0,
 }: WeaveThreeRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -237,9 +239,15 @@ export function WeaveThreeRenderer({
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameRef = useRef<number>(0);
   const highlightMeshesRef = useRef<THREE.Mesh[]>([]);
+  const beadMeshesRef = useRef<THREE.Mesh[]>([]);
+  const beadDataRef = useRef<Array<{
+    mesh: THREE.Mesh;
+    path: THREE.Curve<THREE.Vector3>;
+    startStep: number;
+  }>>([]);
 
   // Compute solid edges and active nodes
-  const { solidEdges, activeNodes } = useMemo(() => {
+  const { solidEdges, activeNodes, maxLoopStep } = useMemo(() => {
     const solidEdges: Array<{
       aId: string;
       bId: string;
@@ -249,8 +257,10 @@ export function WeaveThreeRenderer({
       bVoltage: Matrix3x3;
       aLevel: number;
       bLevel: number;
+      orbifoldEdgeId: string;
     }> = [];
     const activeNodeIds = new Set<string>();
+    let maxStep = -1;
 
     for (const edge of liftedGraph.edges.values()) {
       // Check if the corresponding orbifold edge is solid
@@ -265,6 +275,12 @@ export function WeaveThreeRenderer({
       const nodeB = liftedGraph.nodes.get(edge.b);
       if (!nodeA || !nodeB) continue;
 
+      // Track max loop step from orbifold edge loopSteps
+      const loopSteps = orbEdge?.data?.loopSteps ?? [];
+      for (const ls of loopSteps) {
+        if (ls.startStep > maxStep) maxStep = ls.startStep;
+      }
+
       solidEdges.push({
         aId: edge.a,
         bId: edge.b,
@@ -274,6 +290,7 @@ export function WeaveThreeRenderer({
         bVoltage: nodeB.voltage,
         aLevel: getLevelFromNodeId(nodeA.orbifoldNode) ?? 0,
         bLevel: getLevelFromNodeId(nodeB.orbifoldNode) ?? 0,
+        orbifoldEdgeId: orbEdgeId,
       });
       activeNodeIds.add(edge.a);
       activeNodeIds.add(edge.b);
@@ -298,7 +315,7 @@ export function WeaveThreeRenderer({
       }
     }
 
-    return { solidEdges, activeNodes };
+    return { solidEdges, activeNodes, maxLoopStep: maxStep };
   }, [liftedGraph, orbifoldGrid]);
 
   // Compute connected components and per-component colors
@@ -391,6 +408,8 @@ export function WeaveThreeRenderer({
         else (mat as THREE.Material).dispose();
       }
     }
+    beadMeshesRef.current = [];
+    beadDataRef.current = [];
 
     if (solidEdges.length === 0 && activeNodes.length === 0) {
       // Nothing to render – position camera at default
@@ -413,6 +432,10 @@ export function WeaveThreeRenderer({
     // Render tubes for solid edges — straight for same-level, bowed for cross-level
     const BOW_AMOUNT = 0.8; // how far cross-level edges bow outward
     const CURVE_SEGMENTS = 20; // more segments for smooth curves
+
+    // Bead material (bright white emissive)
+    const beadMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const beadGeometry = new THREE.SphereGeometry(tubeRadius * 1.8, 12, 8);
 
     for (const edge of solidEdges) {
       const posA = getNodePosition(orbifoldGrid, edge.aOrbNode, edge.aVoltage, useAxialTransform, levelSpacing);
@@ -470,6 +493,41 @@ export function WeaveThreeRenderer({
       const tubeGeometry = new THREE.TubeGeometry(path, segments, tubeRadius, RADIAL_SEGMENTS, false);
       const tubeMesh = new THREE.Mesh(tubeGeometry, material);
       scene.add(tubeMesh);
+
+      // Create beads for this lifted edge based on orbifold edge loopSteps
+      const orbEdge = orbifoldGrid.edges.get(edge.orbifoldEdgeId);
+      const loopSteps = orbEdge?.data?.loopSteps ?? [];
+      for (const ls of loopSteps) {
+        // The bead travels from startNode along this edge.
+        // If startNode matches aOrbNode, travel A→B (t: 0→1).
+        // If startNode matches bOrbNode, travel B→A (t: 1→0), so we reverse the path.
+        let beadPath: THREE.Curve<THREE.Vector3>;
+        if (ls.startNode === edge.aOrbNode) {
+          beadPath = path;
+        } else {
+          // Reverse the path: swap start/end
+          if (path instanceof THREE.LineCurve3) {
+            beadPath = new THREE.LineCurve3(posB, posA);
+          } else {
+            // For bezier, reverse by creating new curve with swapped endpoints
+            beadPath = new THREE.QuadraticBezierCurve3(
+              posB,
+              (path as THREE.QuadraticBezierCurve3).v1.clone(),
+              posA,
+            );
+          }
+        }
+
+        const beadMesh = new THREE.Mesh(beadGeometry, beadMaterial);
+        beadMesh.visible = false;
+        scene.add(beadMesh);
+        beadMeshesRef.current.push(beadMesh);
+        beadDataRef.current.push({
+          mesh: beadMesh,
+          path: beadPath,
+          startStep: ls.startStep,
+        });
+      }
     }
 
     // Render spheres for active nodes
@@ -507,6 +565,39 @@ export function WeaveThreeRenderer({
     );
     controls.update();
   }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing, tubeRadius, nodeComponent, componentColors]);
+
+  // Animate beads along their paths
+  useEffect(() => {
+    if (maxLoopStep < 0 || beadDataRef.current.length === 0) return;
+
+    const totalSteps = maxLoopStep + 1;
+    const startTime = performance.now();
+
+    function updateBeads() {
+      const elapsed = (performance.now() - startTime) / 1000; // seconds
+      const t = (elapsed * beadSpeed) % totalSteps;
+      const currentStep = Math.floor(t);
+      const frac = t - currentStep;
+
+      for (const bd of beadDataRef.current) {
+        if (bd.startStep === currentStep) {
+          bd.mesh.visible = true;
+          const pos = bd.path.getPoint(frac);
+          bd.mesh.position.copy(pos);
+        } else {
+          bd.mesh.visible = false;
+        }
+      }
+
+      beadAnimRef.current = requestAnimationFrame(updateBeads);
+    }
+
+    const beadAnimRef = { current: requestAnimationFrame(updateBeads) };
+
+    return () => {
+      cancelAnimationFrame(beadAnimRef.current);
+    };
+  }, [maxLoopStep, beadSpeed]);
 
   // Update highlight meshes when highlighted node changes
   useEffect(() => {

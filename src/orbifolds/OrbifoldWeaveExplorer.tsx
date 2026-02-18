@@ -21,6 +21,7 @@ import {
   type WallpaperGroupType,
   type ColorData,
   type EdgeStyleData,
+  type LoopStep,
 } from "./createOrbifolds";
 import {
   constructLiftedGraphFromOrbifold,
@@ -227,6 +228,7 @@ export function OrbifoldWeaveExplorer() {
   // 3D rendering controls
   const [levelHeight, setLevelHeight] = useState(3);
   const [tubeRadius, setTubeRadius] = useState(0.25);
+  const [beadSpeed, setBeadSpeed] = useState(1.0);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
 
@@ -593,24 +595,44 @@ export function OrbifoldWeaveExplorer() {
     }
   }, [resetLoopsFinderState]);
 
-  // Accept loop: style edges, mark on doubled grid, save path for display
+  // Accept loop: style edges using pathEdgeIds, populate loopSteps
   const handleAcceptLoop = useCallback(() => {
     if (!pendingLoopResult) return;
 
-    const chosenEdges = new Set(pendingLoopResult.loopEdgeIds);
+    const pathNodeIds = pendingLoopResult.pathNodeIds;
+    const pathEdgeIds = pendingLoopResult.pathEdgeIds ?? [];
+
+    // Build loopSteps per edge: for each step t, pathEdgeIds[t] is the specific
+    // orbifold edge used from pathNodeIds[t] to pathNodeIds[t+1]
+    const edgeLoopSteps = new Map<string, LoopStep[]>();
+    for (let t = 0; t < pathEdgeIds.length; t++) {
+      const edgeId = pathEdgeIds[t];
+      if (!edgeId) continue;
+      if (!edgeLoopSteps.has(edgeId)) edgeLoopSteps.set(edgeId, []);
+      edgeLoopSteps.get(edgeId)!.push({ startStep: t, startNode: pathNodeIds[t] });
+    }
+
+    // Build loopStep per node
+    const nodeLoopStep = new Map<string, number>();
+    for (let i = 0; i < pathNodeIds.length; i++) {
+      if (!nodeLoopStep.has(pathNodeIds[i])) {
+        nodeLoopStep.set(pathNodeIds[i], i);
+      }
+    }
 
     // Validate: each orbifold node should have exactly 2 solid edges
     {
       const solidDeg = new Map<string, number>();
-      for (const [, edge] of doubledGrid.edges) {
-        if (!chosenEdges.has(edge.id)) continue;
+      for (const [edgeId] of edgeLoopSteps) {
+        const edge = doubledGrid.edges.get(edgeId);
+        if (!edge) continue;
         for (const nodeId of edge.halfEdges.keys()) {
           solidDeg.set(nodeId, (solidDeg.get(nodeId) ?? 0) + 1);
         }
       }
       for (const [nodeId, deg] of solidDeg) {
         if (deg !== 2) {
-          console.warn(`[Weave] Orbifold node ${nodeId} has ${deg} solid edges (expected 2). loopEdgeIds:`, pendingLoopResult.loopEdgeIds);
+          console.warn(`[Weave] Orbifold node ${nodeId} has ${deg} solid edges (expected 2). pathEdgeIds:`, pathEdgeIds);
         }
       }
     }
@@ -618,13 +640,19 @@ export function OrbifoldWeaveExplorer() {
     setDoubledGrid((prev) => {
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
-        const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
-        newEdges.set(edgeId, { ...edge, data: { linestyle } });
+        const steps = edgeLoopSteps.get(edgeId);
+        const linestyle = steps && steps.length > 0 ? "solid" : "dashed";
+        newEdges.set(edgeId, { ...edge, data: { linestyle, loopSteps: steps ?? [] } });
       }
-      return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+      const newNodes = new Map(prev.nodes);
+      for (const [nodeId, node] of newNodes) {
+        const step = nodeLoopStep.get(nodeId);
+        newNodes.set(nodeId, { ...node, data: { ...(node.data ?? { color: "white" as const }), loopStep: step ?? null } });
+      }
+      return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
     });
 
-    setAcceptedPathNodeIds(pendingLoopResult.pathNodeIds);
+    setAcceptedPathNodeIds(pathNodeIds);
     setLoopAccepted(true);
     setPendingLoopResult(null);
     resetLoopsFinderState();
@@ -1070,6 +1098,19 @@ export function OrbifoldWeaveExplorer() {
               />
               <span style={{ minWidth: "32px" }}>{tubeRadius.toFixed(2)}</span>
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              Bead speed:
+              <input
+                type="range"
+                min={0}
+                max={5}
+                step={0.1}
+                value={beadSpeed}
+                onChange={(e) => setBeadSpeed(parseFloat(e.target.value))}
+                style={{ width: "120px" }}
+              />
+              <span style={{ minWidth: "32px" }}>{beadSpeed.toFixed(1)}</span>
+            </label>
           </div>
           <ErrorBoundary>
             <WeaveThreeRenderer
@@ -1079,6 +1120,7 @@ export function OrbifoldWeaveExplorer() {
               highlightedOrbifoldNodeId={highlightedNodeId}
               levelSpacing={levelHeight}
               tubeRadius={tubeRadius}
+              beadSpeed={beadSpeed}
             />
           </ErrorBoundary>
         </div>
