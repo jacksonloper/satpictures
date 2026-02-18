@@ -24,4 +24,4 @@ export {
   type EdgeLinestyle,
 } from "./createOrbifolds";
 export * from "./orbifoldbasics";
-export { doubleOrbifold, doubledNodeId, layerEdgeId, verticalEdgeId, getLevelFromNodeId, getBaseNodeId, type Level } from "./doubleOrbifold";
+export { doubleOrbifold, doubledNodeId, layerEdgeId, selfEdgeLevelId, selfEdgeCrossId, getLevelFromNodeId, getBaseNodeId, type Level } from "./doubleOrbifold";

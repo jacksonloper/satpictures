@@ -2,8 +2,8 @@
  * 3D renderer for orbifold weave lifted graphs using Three.js.
  *
  * Renders:
- * - Tubes for each solid-styled lifted edge (all straight — edges are either
- *   within-layer or vertical same-xy between-layer)
+ * - Tubes for each solid-styled lifted edge: straight for same-level edges,
+ *   bowed (quadratic Bézier) for cross-level edges to prevent intersection
  * - Spheres for lifted nodes that touch at least one solid edge
  *
  * Shading: custom view-dependent shader where brightness = dot(normal, viewDir).
@@ -410,7 +410,10 @@ export function WeaveThreeRenderer({
     let minY = Infinity, maxY = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
 
-    // Render tubes for solid edges — all straight (within-layer or vertical)
+    // Render tubes for solid edges — straight for same-level, bowed for cross-level
+    const BOW_AMOUNT = 0.8; // how far cross-level edges bow outward
+    const CURVE_SEGMENTS = 20; // more segments for smooth curves
+
     for (const edge of solidEdges) {
       const posA = getNodePosition(orbifoldGrid, edge.aOrbNode, edge.aVoltage, useAxialTransform, levelSpacing);
       const posB = getNodePosition(orbifoldGrid, edge.bOrbNode, edge.bVoltage, useAxialTransform, levelSpacing);
@@ -426,8 +429,45 @@ export function WeaveThreeRenderer({
       const compIdx = nodeComponent.get(edge.aId) ?? 0;
       const material = componentMaterials[compIdx % componentMaterials.length];
 
-      const path = new THREE.LineCurve3(posA, posB);
-      const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS, tubeRadius, RADIAL_SEGMENTS, false);
+      let path: THREE.Curve<THREE.Vector3>;
+      const isCrossLevel = edge.aLevel !== edge.bLevel;
+
+      if (isCrossLevel) {
+        // Bow cross-level edges: orient from low to high, then bow to the right
+        // when viewed from above (looking down the Y axis)
+        const lowPos = edge.aLevel < edge.bLevel ? posA : posB;
+        const highPos = edge.aLevel < edge.bLevel ? posB : posA;
+
+        // Horizontal direction from low to high (XZ plane only)
+        const horizDir = new THREE.Vector3(
+          highPos.x - lowPos.x,
+          0,
+          highPos.z - lowPos.z,
+        );
+        const horizLen = horizDir.length();
+
+        // Perpendicular in XZ plane: cross with Y-up, gives "right" when viewed from above
+        const up = new THREE.Vector3(0, 1, 0);
+        let bowOffset: THREE.Vector3;
+
+        if (horizLen > 1e-6) {
+          // Non-vertical edge: bow perpendicular to horizontal direction
+          bowOffset = new THREE.Vector3().crossVectors(up, horizDir.normalize()).multiplyScalar(BOW_AMOUNT);
+        } else {
+          // Vertical edge (same XZ position): bow in a fixed direction
+          bowOffset = new THREE.Vector3(BOW_AMOUNT, 0, 0);
+        }
+
+        const mid = new THREE.Vector3().addVectors(lowPos, highPos).multiplyScalar(0.5);
+        mid.add(bowOffset);
+
+        path = new THREE.QuadraticBezierCurve3(posA, mid, posB);
+      } else {
+        path = new THREE.LineCurve3(posA, posB);
+      }
+
+      const segments = isCrossLevel ? CURVE_SEGMENTS : TUBE_SEGMENTS;
+      const tubeGeometry = new THREE.TubeGeometry(path, segments, tubeRadius, RADIAL_SEGMENTS, false);
       const tubeMesh = new THREE.Mesh(tubeGeometry, material);
       scene.add(tubeMesh);
     }
