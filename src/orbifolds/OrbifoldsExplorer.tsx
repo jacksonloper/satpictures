@@ -1064,7 +1064,7 @@ export function OrbifoldsExplorer() {
                   <input
                     type="radio"
                     name="maxNodeVisits"
-                    value={1}
+                    value="1"
                     checked={maxNodeVisits === 1}
                     onChange={() => {
                       setMaxNodeVisits(1);
@@ -1079,7 +1079,7 @@ export function OrbifoldsExplorer() {
                   <input
                     type="radio"
                     name="maxNodeVisits"
-                    value={2}
+                    value="2"
                     checked={maxNodeVisits === 2}
                     onChange={() => {
                       setMaxNodeVisits(2);
@@ -1224,7 +1224,7 @@ export function OrbifoldsExplorer() {
                   <input
                     type="radio"
                     name="maxNodeVisitsLoops"
-                    value={1}
+                    value="1"
                     checked={maxNodeVisitsLoops === 1}
                     onChange={() => {
                       setMaxNodeVisitsLoops(1);
@@ -1238,7 +1238,7 @@ export function OrbifoldsExplorer() {
                   <input
                     type="radio"
                     name="maxNodeVisitsLoops"
-                    value={2}
+                    value="2"
                     checked={maxNodeVisitsLoops === 2}
                     onChange={() => {
                       setMaxNodeVisitsLoops(2);

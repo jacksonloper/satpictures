@@ -995,7 +995,7 @@ console.log("\nTest 18: maxNodeVisits=2 with very large maxLength still produces
   const voltages = computeReachableVoltagesBFS(18, rootNodeId, nodeIds, edgeInfo);
   const identityK = voltageKey(I3);
   if (voltages.some(v => v.key === identityK)) {
-    // maxLength 18, each node visited at most 2 times => max 17 non-root node visits + root = 18 steps
+    // maxLength 18: with 8 non-root nodes visited at most 2 times each, paths up to 18 steps are possible
     const result = solveLoopWithVoltage(18, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 2);
     assert(result.satisfiable, "maxNodeVisits=2 with maxLength 18 is SAT");
     if (result.pathNodeIds) {
