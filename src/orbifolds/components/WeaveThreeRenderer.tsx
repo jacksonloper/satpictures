@@ -3,12 +3,16 @@
  *
  * Renders:
  * - Tubes for each solid-styled lifted edge
- *   - Same-level edges are straight and colored by their level
+ *   - Same-level edges are straight
  *   - Cross-level edges curve to the "left when looking from above
  *     along low→high" (so that lowA→highB and lowB→highA bow in
- *     opposite directions and don't intersect) and use a vertex-color
- *     gradient from one level's color to the other
+ *     opposite directions and don't intersect)
  * - Spheres for lifted nodes that touch at least one solid edge
+ *
+ * Shading: custom view-dependent shader where brightness = dot(normal, viewDir).
+ * Full base color when normal points at the camera, pitch black at 90°.
+ *
+ * Color: by connected component in the lifted graph (solid edges only).
  *
  * The (x, y) position comes from the lifted node's 2D coordinates
  * (voltage applied to orbifold node coords). The z position comes
@@ -37,6 +41,63 @@ const RADIAL_SEGMENTS = 10;
 // Curve bow magnitude as a fraction of edge length
 const CROSS_LEVEL_BOW = 0.35;
 
+// Distinct component colors (saturated, visually distinct palette)
+const COMPONENT_COLORS = [
+  0xe6194b, // red
+  0x3cb44b, // green
+  0x4363d8, // blue
+  0xf58231, // orange
+  0x911eb4, // purple
+  0x42d4f4, // cyan
+  0xf032e6, // magenta
+  0xbfef45, // lime
+  0xfabed4, // pink
+  0xdcbeff, // lavender
+  0xfffac8, // beige
+  0x800000, // maroon
+  0xaaffc3, // mint
+  0x808000, // olive
+  0x000075, // navy
+  0xa9a9a9, // grey
+];
+
+// Custom vertex shader: pass normal and position to fragment
+const vertexShader = `
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+// Custom fragment shader: brightness = dot(normal, viewDir)
+const fragmentShader = `
+  uniform vec3 uColor;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  void main() {
+    vec3 viewDir = normalize(vViewPosition);
+    float ndv = max(dot(normalize(vNormal), viewDir), 0.0);
+    gl_FragColor = vec4(uColor * ndv, 1.0);
+  }
+`;
+
+// Highlight fragment shader: semi-transparent gold
+const highlightFragmentShader = `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  void main() {
+    vec3 viewDir = normalize(vViewPosition);
+    float ndv = max(dot(normalize(vNormal), viewDir), 0.0);
+    gl_FragColor = vec4(uColor * ndv, uOpacity);
+  }
+`;
+
 interface WeaveThreeRendererProps {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -45,6 +106,15 @@ interface WeaveThreeRendererProps {
   height?: number;
   levelSpacing?: number;
   highlightedOrbifoldNodeId?: string | null;
+}
+
+/** Create a ShaderMaterial with the custom normal·viewDir shading. */
+function createNdvMaterial(color: THREE.Color): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader,
+    fragmentShader,
+    uniforms: { uColor: { value: color } },
+  });
 }
 
 /**
@@ -85,33 +155,62 @@ function getNodePosition(
 }
 
 /**
- * Paint per-vertex colors on an existing TubeGeometry so the tube
- * smoothly transitions from `colorA` (at parameter t=0) to `colorB`
- * (at parameter t=1).
- *
- * TubeGeometry vertices are laid out as (tubularSegments+1) rings
- * of (radialSegments+1) vertices each.
+ * Compute connected components from solid edges using Union-Find.
+ * Returns a map from lifted node ID → component index (0-based).
  */
-function applyGradientToTube(
-  geometry: THREE.TubeGeometry,
-  colorA: THREE.Color,
-  colorB: THREE.Color,
-  tubularSegments: number,
-): void {
-  const posCount = geometry.attributes.position.count;
-  const colors = new Float32Array(posCount * 3);
-  const ringsPerSegment = posCount / (tubularSegments + 1);
-  const mix = new THREE.Color();
+function computeConnectedComponents(
+  solidEdges: Array<{ aId: string; bId: string }>,
+  activeNodeIds: string[],
+): Map<string, number> {
+  const parent = new Map<string, string>();
+  const rank = new Map<string, number>();
 
-  for (let i = 0; i < posCount; i++) {
-    const ring = Math.floor(i / ringsPerSegment);
-    const t = ring / tubularSegments;           // 0 → 1 along the tube
-    mix.copy(colorA).lerp(colorB, t);
-    colors[i * 3]     = mix.r;
-    colors[i * 3 + 1] = mix.g;
-    colors[i * 3 + 2] = mix.b;
+  function find(x: string): string {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    // Path compression
+    let cur = x;
+    while (cur !== root) {
+      const next = parent.get(cur)!;
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
   }
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+
+  function union(a: string, b: string): void {
+    const ra = find(a), rb = find(b);
+    if (ra === rb) return;
+    const rankA = rank.get(ra) ?? 0;
+    const rankB = rank.get(rb) ?? 0;
+    if (rankA < rankB) { parent.set(ra, rb); }
+    else if (rankA > rankB) { parent.set(rb, ra); }
+    else { parent.set(rb, ra); rank.set(ra, rankA + 1); }
+  }
+
+  for (const id of activeNodeIds) {
+    parent.set(id, id);
+    rank.set(id, 0);
+  }
+
+  for (const edge of solidEdges) {
+    union(edge.aId, edge.bId);
+  }
+
+  // Map roots to sequential indices
+  const rootToIdx = new Map<string, number>();
+  const result = new Map<string, number>();
+  let nextIdx = 0;
+
+  for (const id of activeNodeIds) {
+    const root = find(id);
+    if (!rootToIdx.has(root)) {
+      rootToIdx.set(root, nextIdx++);
+    }
+    result.set(id, rootToIdx.get(root)!);
+  }
+
+  return result;
 }
 
 export function WeaveThreeRenderer({
@@ -194,14 +293,32 @@ export function WeaveThreeRenderer({
     return { solidEdges, activeNodes };
   }, [liftedGraph, orbifoldGrid]);
 
+  // Compute connected components and per-component colors
+  const { nodeComponent, componentColors } = useMemo(() => {
+    const nodeIds = activeNodes.map(n => n.id);
+    const nodeComponent = computeConnectedComponents(solidEdges, nodeIds);
+
+    // Find number of components
+    const maxComp = nodeIds.reduce((mx, id) => Math.max(mx, nodeComponent.get(id) ?? 0), -1);
+    const numComponents = maxComp + 1;
+
+    // Assign colors from palette
+    const componentColors: THREE.Color[] = [];
+    for (let i = 0; i < numComponents; i++) {
+      componentColors.push(new THREE.Color(COMPONENT_COLORS[i % COMPONENT_COLORS.length]));
+    }
+
+    return { nodeComponent, componentColors };
+  }, [solidEdges, activeNodes]);
+
   // Setup Three.js scene
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Create scene
+    // Create scene — no lights, shading is purely view-dependent
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f0f0);
+    scene.background = new THREE.Color(0x000000);
     sceneRef.current = scene;
 
     // Create camera
@@ -220,16 +337,6 @@ export function WeaveThreeRenderer({
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controlsRef.current = controls;
-
-    // Lighting – key + fill + ambient to bring out surface differences
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-    scene.add(ambientLight);
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    keyLight.position.set(5, 10, 7);
-    scene.add(keyLight);
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-    fillLight.position.set(-4, -6, -5);
-    scene.add(fillLight);
 
     // Animation loop
     function animate() {
@@ -260,7 +367,7 @@ export function WeaveThreeRenderer({
     const controls = controlsRef.current;
     if (!scene || !camera || !controls) return;
 
-    // Clear existing meshes (keep lights)
+    // Clear existing meshes
     const toRemove: THREE.Object3D[] = [];
     scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
@@ -285,21 +392,9 @@ export function WeaveThreeRenderer({
       return;
     }
 
-    // Highly distinct level colors
-    const level0Color = new THREE.Color(0x00838f); // Deep teal for level 0
-    const level1Color = new THREE.Color(0xff8c00); // Vivid orange for level 1
+    // Create per-component materials
+    const componentMaterials: THREE.ShaderMaterial[] = componentColors.map(c => createNdvMaterial(c));
 
-    // Solid-color materials for same-level edges
-    const tubeMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 70 });
-    const tubeMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 70 });
-    // Gradient material for cross-level edges (uses per-vertex colors)
-    const tubeGradientMaterial = new THREE.MeshPhongMaterial({
-      vertexColors: true,
-      shininess: 70,
-    });
-
-    const sphereMaterialLevel0 = new THREE.MeshPhongMaterial({ color: level0Color, shininess: 90 });
-    const sphereMaterialLevel1 = new THREE.MeshPhongMaterial({ color: level1Color, shininess: 90 });
     const sphereGeometry = new THREE.SphereGeometry(EDGE_RADIUS, 16, 12);
 
     // Compute bounding box for camera positioning
@@ -310,7 +405,7 @@ export function WeaveThreeRenderer({
     // Up vector used to compute "right" offset for cross-level curves
     const up = new THREE.Vector3(0, 1, 0);
 
-    // Render tubes for solid edges
+    // Render tubes for solid edges — color by component of endpoint A
     for (const edge of solidEdges) {
       const posA = getNodePosition(orbifoldGrid, edge.aOrbNode, edge.aVoltage, useAxialTransform, levelSpacing);
       const posB = getNodePosition(orbifoldGrid, edge.bOrbNode, edge.bVoltage, useAxialTransform, levelSpacing);
@@ -322,36 +417,21 @@ export function WeaveThreeRenderer({
         minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
       }
 
+      // Both endpoints are in the same component (by definition of connected component)
+      const compIdx = nodeComponent.get(edge.aId) ?? 0;
+      const material = componentMaterials[compIdx % componentMaterials.length];
+
       const isCrossLevel = edge.aLevel !== edge.bLevel;
 
       if (isCrossLevel) {
-        // Curved cross-level edge.  To prevent intersections we need
-        // every cross-level edge to bow to the same side when viewed
-        // from above along the low→high direction.
-        //
-        // 1. Orient the edge so it goes from the LOW endpoint to the
-        //    HIGH endpoint.
-        // 2. Project the low→high direction onto the horizontal (XZ)
-        //    plane.
-        // 3. "Left when looking from above along low→high" is
-        //    cross(up, horizontal).  This is the bow offset direction.
-        //
-        // Because this orientation is defined solely by the low→high
-        // view, edges lowA→highB and lowB→highA will bow in
-        // *different* directions (the horizontal component flips) and
-        // therefore won't intersect.
         const posLow  = edge.aLevel < edge.bLevel ? posA : posB;
         const posHigh = edge.aLevel < edge.bLevel ? posB : posA;
 
         const dir = new THREE.Vector3().subVectors(posHigh, posLow);
         const edgeLen = dir.length();
 
-        // Horizontal component of the low→high direction
         const horiz = new THREE.Vector3(dir.x, 0, dir.z);
-        // "Left" when looking from above along the low→high direction
         const bowDir = new THREE.Vector3().crossVectors(up, horiz).normalize();
-        // If the horizontal projection was zero (nodes stacked
-        // vertically), fall back to an arbitrary perpendicular
         if (bowDir.lengthSq() < 1e-6) bowDir.set(1, 0, 0);
 
         const mid = new THREE.Vector3().addVectors(posA, posB).multiplyScalar(0.5);
@@ -359,19 +439,11 @@ export function WeaveThreeRenderer({
 
         const curve = new THREE.QuadraticBezierCurve3(posA, mid, posB);
         const tubeGeometry = new THREE.TubeGeometry(curve, TUBE_SEGMENTS_CURVED, EDGE_RADIUS, RADIAL_SEGMENTS, false);
-
-        // Gradient vertex colors from A-level color to B-level color
-        const colA = edge.aLevel === 0 ? level0Color : level1Color;
-        const colB = edge.bLevel === 0 ? level0Color : level1Color;
-        applyGradientToTube(tubeGeometry, colA, colB, TUBE_SEGMENTS_CURVED);
-
-        const tubeMesh = new THREE.Mesh(tubeGeometry, tubeGradientMaterial);
+        const tubeMesh = new THREE.Mesh(tubeGeometry, material);
         scene.add(tubeMesh);
       } else {
-        // Straight same-level edge
         const path = new THREE.LineCurve3(posA, posB);
         const tubeGeometry = new THREE.TubeGeometry(path, TUBE_SEGMENTS_STRAIGHT, EDGE_RADIUS, RADIAL_SEGMENTS, false);
-        const material = edge.aLevel === 0 ? tubeMaterialLevel0 : tubeMaterialLevel1;
         const tubeMesh = new THREE.Mesh(tubeGeometry, material);
         scene.add(tubeMesh);
       }
@@ -386,9 +458,10 @@ export function WeaveThreeRenderer({
       minY = Math.min(minY, pos.y); maxY = Math.max(maxY, pos.y);
       minZ = Math.min(minZ, pos.z); maxZ = Math.max(maxZ, pos.z);
 
+      const compIdx = nodeComponent.get(node.id) ?? 0;
       const sphereMesh = new THREE.Mesh(
         sphereGeometry,
-        node.level === 0 ? sphereMaterialLevel0 : sphereMaterialLevel1,
+        componentMaterials[compIdx % componentMaterials.length],
       );
       sphereMesh.position.copy(pos);
       scene.add(sphereMesh);
@@ -410,7 +483,7 @@ export function WeaveThreeRenderer({
       centerZ + maxRange * 1.2,
     );
     controls.update();
-  }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing]);
+  }, [solidEdges, activeNodes, orbifoldGrid, useAxialTransform, levelSpacing, nodeComponent, componentColors]);
 
   // Update highlight meshes when highlighted node changes
   useEffect(() => {
@@ -429,13 +502,14 @@ export function WeaveThreeRenderer({
 
     if (!highlightedOrbifoldNodeId) return;
 
-    const highlightMaterial = new THREE.MeshPhongMaterial({
-      color: 0xffd700,
-      emissive: 0xffd700,
-      emissiveIntensity: 0.6,
-      shininess: 100,
+    const highlightMaterial = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader: highlightFragmentShader,
+      uniforms: {
+        uColor: { value: new THREE.Color(0xffd700) },
+        uOpacity: { value: 0.7 },
+      },
       transparent: true,
-      opacity: 0.7,
     });
     const highlightGeometry = new THREE.SphereGeometry(EDGE_RADIUS * 2.2, 20, 14);
 
