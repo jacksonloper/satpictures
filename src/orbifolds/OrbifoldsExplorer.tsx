@@ -825,6 +825,11 @@ export function OrbifoldsExplorer() {
           max={10}
           label="Size (n)"
         />
+        {wallpaperGroup === "P2" && (
+          <div style={{ fontSize: "11px", color: "#e67e22", marginTop: "-4px", marginBottom: "4px" }}>
+            ⚠️ P2 requires even n
+          </div>
+        )}
         
         {/* Expansion Input */}
         <ValidatedInput
@@ -1482,6 +1487,7 @@ export function OrbifoldsExplorer() {
             showNodes={showNodes}
             showWalls={showWalls}
             svgRef={liftedGraphSvgRef}
+            wallpaperGroup={wallpaperGroup}
           />
           
           {/* Legend */}
