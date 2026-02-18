@@ -3,7 +3,7 @@
  *
  * Verifies that doubling an orbifold grid:
  * - Produces exactly 2× the number of nodes
- * - Produces exactly 4× the number of edges
+ * - Produces exactly 4× the number of regular edges and 3× the number of self-edges
  * - Preserves voltages on all edge copies
  * - Node IDs are correctly suffixed with @0 and @1
  * - Adjacency is built correctly
@@ -43,10 +43,16 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
     `Node count: ${doubled.nodes.size} === ${grid.nodes.size * 2} (2× original)`
   );
 
-  // Edge count: exactly 4×
+  // Edge count: 4× for regular edges, 3× for self-edges
+  let selfEdgeCount = 0;
+  for (const [, e] of grid.edges) {
+    if (e.halfEdges.size === 1) selfEdgeCount++;
+  }
+  const regularEdgeCount = grid.edges.size - selfEdgeCount;
+  const expectedEdges = regularEdgeCount * 4 + selfEdgeCount * 3;
   assert(
-    doubled.edges.size === grid.edges.size * 4,
-    `Edge count: ${doubled.edges.size} === ${grid.edges.size * 4} (4× original)`
+    doubled.edges.size === expectedEdges,
+    `Edge count: ${doubled.edges.size} === ${expectedEdges} (4×${regularEdgeCount} regular + 3×${selfEdgeCount} self)`
   );
 
   // Every original node should have @0 and @1 variants
@@ -101,6 +107,24 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
       const adj = doubled.adjacency.get(nodeId);
       assert(adj !== undefined && adj.length > 0, `Node ${nodeId} has adjacency entries`);
     }
+  }
+
+  // No duplicate edges: every pair of endpoint sets should be unique per orbifold edge
+  const edgePairs = new Map<string, string[]>();
+  for (const [edgeId, edge] of doubled.edges) {
+    const endpoints = Array.from(edge.halfEdges.keys()).sort().join("-");
+    if (!edgePairs.has(endpoints)) edgePairs.set(endpoints, []);
+    edgePairs.get(endpoints)!.push(edgeId);
+  }
+  for (const [endpoints, edgeIds] of edgePairs) {
+    // Multi-edges are OK between different orbifold base edges (e.g. NE vs SW)
+    // but NOT between @01 and @10 of the same self-edge
+    const baseEdges = edgeIds.map(id => id.replace(/@\d\d$/, ""));
+    const uniqueBases = new Set(baseEdges);
+    assert(
+      uniqueBases.size === edgeIds.length,
+      `No duplicate edges between ${endpoints} (${edgeIds.length} edges, ${uniqueBases.size} unique bases)`
+    );
   }
 }
 

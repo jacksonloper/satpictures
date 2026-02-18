@@ -85,43 +85,67 @@ export function doubleOrbifold<
     }
   }
 
-  // --- Quadruple edges ---
+  // --- Quadruple edges (or triple for self-edges) ---
   for (const [, edge] of grid.edges) {
-    for (const fromLevel of [0, 1] as Level[]) {
-      for (const toLevel of [0, 1] as Level[]) {
-        const newEdgeId = doubledEdgeId(edge.id, fromLevel, toLevel);
+    if (edge.halfEdges.size === 1) {
+      // Self-edge: A → A.  Doubling produces 3 edges:
+      //   @00: self-edge on A@0
+      //   @11: self-edge on A@1
+      //   @01: regular edge A@0 ↔ A@1  (note: @10 would be the same undirected edge)
+      const [[baseNodeId, half]] = Array.from(edge.halfEdges.entries());
 
+      // @00: self-edge on A@0
+      {
+        const id = doubledEdgeId(edge.id, 0, 0);
+        const nodeId = doubledNodeId(baseNodeId, 0);
         const halfEdges = new Map<OrbifoldNodeId, OrbifoldHalfEdge>();
+        halfEdges.set(nodeId, {
+          to: nodeId,
+          voltage: half.voltage,
+          polygonSides: [...half.polygonSides],
+        });
+        edges.set(id, { id, halfEdges, data: cloneE(edge.data) });
+      }
 
-        if (edge.halfEdges.size === 1) {
-          // Self-edge: single half-edge entry
-          const [[baseNodeId, half]] = Array.from(edge.halfEdges.entries());
-          const newFromId = doubledNodeId(baseNodeId, fromLevel);
-          const newToId = doubledNodeId(half.to, toLevel);
+      // @11: self-edge on A@1
+      {
+        const id = doubledEdgeId(edge.id, 1, 1);
+        const nodeId = doubledNodeId(baseNodeId, 1);
+        const halfEdges = new Map<OrbifoldNodeId, OrbifoldHalfEdge>();
+        halfEdges.set(nodeId, {
+          to: nodeId,
+          voltage: half.voltage,
+          polygonSides: [...half.polygonSides],
+        });
+        edges.set(id, { id, halfEdges, data: cloneE(edge.data) });
+      }
 
-          if (newFromId === newToId) {
-            // Still a self-edge in the doubled graph
-            halfEdges.set(newFromId, {
-              to: newToId,
-              voltage: half.voltage,
-              polygonSides: [...half.polygonSides],
-            });
-          } else {
-            // Becomes a two-endpoint edge in the doubled graph
-            halfEdges.set(newFromId, {
-              to: newToId,
-              voltage: half.voltage,
-              polygonSides: [...half.polygonSides],
-            });
-            // The inverse half-edge
-            halfEdges.set(newToId, {
-              to: newFromId,
-              voltage: half.voltage, // Self-edge voltage is involutive (A = A^-1)
-              polygonSides: [...half.polygonSides],
-            });
-          }
-        } else {
-          // Two-endpoint edge
+      // @01: regular edge A@0 ↔ A@1
+      {
+        const id = doubledEdgeId(edge.id, 0, 1);
+        const n0 = doubledNodeId(baseNodeId, 0);
+        const n1 = doubledNodeId(baseNodeId, 1);
+        const halfEdges = new Map<OrbifoldNodeId, OrbifoldHalfEdge>();
+        halfEdges.set(n0, {
+          to: n1,
+          voltage: half.voltage,
+          polygonSides: [...half.polygonSides],
+        });
+        halfEdges.set(n1, {
+          to: n0,
+          voltage: half.voltage, // Self-edge voltage is involutive (V = V^-1)
+          polygonSides: [...half.polygonSides],
+        });
+        edges.set(id, { id, halfEdges, data: cloneE(edge.data) });
+      }
+    } else {
+      // Two-endpoint edge: produce 4 edges as before
+      for (const fromLevel of [0, 1] as Level[]) {
+        for (const toLevel of [0, 1] as Level[]) {
+          const newEdgeId = doubledEdgeId(edge.id, fromLevel, toLevel);
+
+          const halfEdges = new Map<OrbifoldNodeId, OrbifoldHalfEdge>();
+
           const entries = Array.from(edge.halfEdges.entries());
           const [n1, h1] = entries[0];
           const [n2, h2] = entries[1];
@@ -148,13 +172,13 @@ export function doubleOrbifold<
               polygonSides: [...h2.polygonSides],
             });
           }
-        }
 
-        edges.set(newEdgeId, {
-          id: newEdgeId,
-          halfEdges,
-          data: cloneE(edge.data),
-        });
+          edges.set(newEdgeId, {
+            id: newEdgeId,
+            halfEdges,
+            data: cloneE(edge.data),
+          });
+        }
       }
     }
   }
