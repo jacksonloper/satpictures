@@ -143,10 +143,8 @@ export function OrbifoldsExplorer() {
   };
 
   const handleSizeChange = useCallback((nextSize: number) => {
-    let adjustedSize = nextSize;
-    if (wallpaperGroup === "P2" && adjustedSize % 2 !== 0) adjustedSize++;
-    setSize(adjustedSize);
-    resetGrid(wallpaperGroup, adjustedSize);
+    setSize(nextSize);
+    resetGrid(wallpaperGroup, nextSize);
   }, [wallpaperGroup, resetGrid]);
 
   // Handle cell color toggle (by node ID)
@@ -824,12 +822,8 @@ export function OrbifoldsExplorer() {
           min={minSize}
           max={10}
           label="Size (n)"
+          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
         />
-        {wallpaperGroup === "P2" && (
-          <div style={{ fontSize: "11px", color: "#e67e22", marginTop: "-4px", marginBottom: "4px" }}>
-            ⚠️ P2 requires even n
-          </div>
-        )}
         
         {/* Expansion Input */}
         <ValidatedInput
