@@ -7,6 +7,7 @@ import {
   type OrbifoldEdge,
   type OrbifoldGrid,
   type ExtraData,
+  I3,
   nodeIdFromCoord,
   matInvUnimodular,
 } from "./orbifoldbasics";
@@ -566,10 +567,9 @@ export function splitCornerSquare(
   // Add the hypotenuse edge (trivial, I3) between the two triangles
   const hypEdgeKey = [northId, southId].sort().join("|") + "|HYP";
   const hypEdgeId = hypEdgeKey.replace(/\|/g, "--");
-  const I3local: Matrix3x3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as const;
   const hypHalfEdges = new Map<OrbifoldNodeId, { to: OrbifoldNodeId; voltage: Matrix3x3; polygonSides: number[] }>();
-  hypHalfEdges.set(northId, { to: southId, voltage: I3local, polygonSides: [1] });
-  hypHalfEdges.set(southId, { to: northId, voltage: I3local, polygonSides: [2] });
+  hypHalfEdges.set(northId, { to: southId, voltage: I3, polygonSides: [1] });
+  hypHalfEdges.set(southId, { to: northId, voltage: I3, polygonSides: [2] });
   grid.edges.set(hypEdgeId, { id: hypEdgeId, halfEdges: hypHalfEdges, data: { linestyle: "solid" } });
 
   // Re-route the self-edge as a regular edge between the two triangles

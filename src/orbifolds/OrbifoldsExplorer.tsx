@@ -94,7 +94,7 @@ export function OrbifoldsExplorer() {
   const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("");
   const loopsWorkerRef = useRef<Worker | null>(null);
 
-  const minSize = wallpaperGroup === "P4g" ? 4 : wallpaperGroup === "P2" ? 2 : 2;
+  const minSize = wallpaperGroup === "P4g" ? 4 : 2;
   
   // Ref for SVG export
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
@@ -136,7 +136,7 @@ export function OrbifoldsExplorer() {
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     let nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
-    if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize = nextSize + 1;
+    if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
@@ -144,7 +144,7 @@ export function OrbifoldsExplorer() {
 
   const handleSizeChange = useCallback((nextSize: number) => {
     let adjustedSize = nextSize;
-    if (wallpaperGroup === "P2" && adjustedSize % 2 !== 0) adjustedSize = adjustedSize + 1;
+    if (wallpaperGroup === "P2" && adjustedSize % 2 !== 0) adjustedSize++;
     setSize(adjustedSize);
     resetGrid(wallpaperGroup, adjustedSize);
   }, [wallpaperGroup, resetGrid]);
