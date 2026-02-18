@@ -259,53 +259,63 @@ export function glideReflectionX(dx: Int, dy: Int): Matrix3x3 {
 }
 
 /**
- * Get odd coordinates for a given grid index.
- * For index i in [0, n-1], the odd coordinate is 2*i + 1.
+ * Get node coordinate for a given grid index with specified step size.
+ * For step=2 (standard): index i → 2*i + 1 (odd coordinates: 1,3,5,...)
+ * For step=4 (doubled):  index i → 4*i + 2 (doubled coordinates: 2,6,10,...)
  */
-function getOddCoord(index: Int): Int {
-  return 2 * index + 1;
+function getNodeCoord(index: Int, step: Int): Int {
+  return step * index + step / 2;
 }
 
 /**
- * Get grid index from odd coordinate.
- * For odd coordinate c, the index is (c - 1) / 2.
+ * Get grid index from node coordinate with specified step size.
  */
-function getIndexFromOddCoord(coord: Int): Int {
-  return (coord - 1) / 2;
+function getIndexFromNodeCoord(coord: Int, step: Int): Int {
+  return (coord - step / 2) / step;
 }
 
 /**
  * Build a square polygon (clockwise: NW, NE, SE, SW) for a node at (i, j).
+ * halfSize = 1 for standard, 2 for doubled coordinates.
  */
-function squarePolygon(i: Int, j: Int): readonly (readonly [number, number])[] {
+function squarePolygon(i: Int, j: Int, halfSize: Int = 1): readonly (readonly [number, number])[] {
   return [
-    [i - 1, j - 1], // NW (side 0 = North: NW→NE)
-    [i + 1, j - 1], // NE (side 1 = East:  NE→SE)
-    [i + 1, j + 1], // SE (side 2 = South: SE→SW)
-    [i - 1, j + 1], // SW (side 3 = West:  SW→NW)
+    [i - halfSize, j - halfSize], // NW (side 0 = North: NW→NE)
+    [i + halfSize, j - halfSize], // NE (side 1 = East:  NE→SE)
+    [i + halfSize, j + halfSize], // SE (side 2 = South: SE→SW)
+    [i - halfSize, j + halfSize], // SW (side 3 = West:  SW→NW)
   ] as const;
 }
 
 /**
  * Create an orbifold grid for n×n nodes where each node has N/S/E/W neighbors.
+ * 
+ * @param n - Grid size (n×n nodes)
+ * @param getNeighbor - Function that returns neighbor info for each direction
+ * @param initialColors - Optional initial colors
+ * @param doubled - If true, uses 4-unit spacing (like P4g) instead of 2-unit spacing.
+ *                  This allows triangle centroids to be at integer coordinates.
  */
 export function createSquareOrbifoldGrid(
   n: Int,
   getNeighbor: NeighborFunction,
-  initialColors?: ("black" | "white")[][]
+  initialColors?: ("black" | "white")[][],
+  doubled?: boolean,
 ): OrbifoldGrid<ColorData, EdgeStyleData> {
   if (n < 2) {
     throw new Error("Grid size n must be at least 2");
   }
 
+  const step = doubled ? 4 : 2;
+  const halfSize = doubled ? 2 : 1;
   const nodes = new Map<OrbifoldNodeId, OrbifoldNode<ColorData>>();
   const edges = new Map<OrbifoldEdgeId, OrbifoldEdge<EdgeStyleData>>();
 
-  // Create nodes with odd integer coordinates
+  // Create nodes with integer coordinates
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
-      const i = getOddCoord(col); // x coordinate (column)
-      const j = getOddCoord(row); // y coordinate (row)
+      const i = getNodeCoord(col, step); // x coordinate (column)
+      const j = getNodeCoord(row, step); // y coordinate (row)
       const coord: readonly [Int, Int] = [i, j];
       const id = nodeIdFromCoord(coord);
 
@@ -315,7 +325,7 @@ export function createSquareOrbifoldGrid(
       nodes.set(id, {
         id,
         coord,
-        polygon: squarePolygon(i, j),
+        polygon: squarePolygon(i, j, halfSize),
         data: { color },
       });
     }
@@ -332,8 +342,8 @@ export function createSquareOrbifoldGrid(
 
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
-      const i = getOddCoord(col);
-      const j = getOddCoord(row);
+      const i = getNodeCoord(col, step);
+      const j = getNodeCoord(row, step);
       const fromId = nodeIdFromCoord([i, j]);
 
       // Process all 4 directions
@@ -415,15 +425,17 @@ export function createSquareOrbifoldGrid(
 
 /**
  * Update the color of a node in the orbifold grid.
+ * @param step - Coordinate step size (2 for standard, 4 for doubled). Default: 2.
  */
 export function setNodeColor(
   grid: OrbifoldGrid<ColorData>,
   row: Int,
   col: Int,
-  color: "black" | "white"
+  color: "black" | "white",
+  step: Int = 2,
 ): void {
-  const i = getOddCoord(col);
-  const j = getOddCoord(row);
+  const i = getNodeCoord(col, step);
+  const j = getNodeCoord(row, step);
   const id = nodeIdFromCoord([i, j]);
 
   const node = grid.nodes.get(id);
@@ -434,14 +446,16 @@ export function setNodeColor(
 
 /**
  * Get the color of a node in the orbifold grid.
+ * @param step - Coordinate step size (2 for standard, 4 for doubled). Default: 2.
  */
 export function getNodeColor(
   grid: OrbifoldGrid<ColorData>,
   row: Int,
-  col: Int
+  col: Int,
+  step: Int = 2,
 ): "black" | "white" {
-  const i = getOddCoord(col);
-  const j = getOddCoord(row);
+  const i = getNodeCoord(col, step);
+  const j = getNodeCoord(row, step);
   const id = nodeIdFromCoord([i, j]);
 
   const node = grid.nodes.get(id);
@@ -476,12 +490,13 @@ export function setEdgeLinestyle(
 /**
  * Convert orbifold node coordinates to grid position.
  * Returns { row, col } in 0-indexed grid coordinates.
+ * @param step - Coordinate step size (2 for standard, 4 for doubled). Default: 2.
  */
-export function coordToGridPos(coord: readonly [Int, Int]): { row: Int; col: Int } {
+export function coordToGridPos(coord: readonly [Int, Int], step: Int = 2): { row: Int; col: Int } {
   const [i, j] = coord;
   return {
-    col: getIndexFromOddCoord(i),
-    row: getIndexFromOddCoord(j),
+    col: getIndexFromNodeCoord(i, step),
+    row: getIndexFromNodeCoord(j, step),
   };
 }
 

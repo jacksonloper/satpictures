@@ -58,17 +58,20 @@ function testLiftedEdgeDistances(
   const failures: string[] = [];
   const TOLERANCE = 0.0001;
 
-  // With triangle-split corner nodes, edges may have varying distances.
-  // Allowed distances include:
-  // - 2.0: standard grid edge distance
-  // - sqrt(5) ≈ 2.236: grid-to-triangle edge
-  // - sqrt(2) ≈ 1.414: triangle hypotenuse / cross edge
-  // - 1.0: triangle-to-adjacent-grid edge (for small n)
+  // With doubled coordinate system (4-unit spacing), allowed distances include:
+  // - 4.0: standard grid edge distance
+  // - various triangle-related distances from corner splits
   const allowedDistances = [
-    2.0,
-    Math.sqrt(5),
-    Math.sqrt(2),
-    1.0,
+    4.0,
+    Math.sqrt(32),   // sqrt((4)^2 + (4)^2) ≈ 5.657 for diagonal
+    Math.sqrt(8),    // sqrt((2)^2 + (2)^2) ≈ 2.828 for triangle hypotenuse / cross edge
+    Math.sqrt(10),   // sqrt((1)^2 + (3)^2) = sqrt(10) ≈ 3.162 for grid-to-triangle edge
+    Math.sqrt(20),   // sqrt((2)^2 + (4)^2) = sqrt(20) ≈ 4.472 for grid-to-triangle across border
+    Math.sqrt(2),    // sqrt(2) ≈ 1.414 for triangle nodes close together
+    2.0,             // triangle to adjacent grid in some configs
+    Math.sqrt(5),    // sqrt(5) ≈ 2.236
+    Math.sqrt(18),   // sqrt(18) ≈ 4.243
+    Math.sqrt(13),   // sqrt(13) ≈ 3.606
   ];
   
   for (const [edgeId, edge] of lifted.edges) {
@@ -106,26 +109,27 @@ function testSpecificNorthCase(n: number): { passed: boolean; details: string } 
   const grid = createOrbifoldGrid("P4", n);
   buildAdjacency(grid);
   
-  // The node at (1,1) with voltage I
-  const startOrbifoldId = nodeIdFromCoord([1, 1]);
+  // P4 now uses doubled (4-unit) coordinates: NW corner node is at (2,2)
+  const startOrbifoldId = nodeIdFromCoord([2, 2]);
   
-  // Get edges from (1,1) - one should be the north edge
+  // Get edges from (2,2) - one should be the north edge
   const edgeIds = grid.adjacency?.get(startOrbifoldId) ?? [];
   
-  console.log(`\n=== Testing specific North case from (1,1) with n=${n} ===`);
-  console.log(`Orbifold node (1,1) has ${edgeIds.length} edges`);
+  console.log(`\n=== Testing specific North case from (2,2) with n=${n} ===`);
+  console.log(`Orbifold node (2,2) has ${edgeIds.length} edges`);
   
-  // Find the north edge - for P4 with n=3, from (1,1) heading north goes to orbifold node (5,5)
-  // because P4 wrapping: North of (i, 1) wraps to (maxOdd, maxOdd + 1 - i) = (5, 5) for i=1
-  const maxOdd = 2 * n - 1;
-  const expectedTargetI = maxOdd;  // 5
-  const expectedTargetJ = maxOdd + 1 - 1;  // 5
+  // Find the north edge - for P4 with n=3, from (2,2) heading north goes to orbifold node
+  // (maxCoord, maxCoord) = (10,10), because P4 wrapping: North of (i, 2) wraps to (maxCoord, L - i)
+  // where L=4n, maxCoord=4*(n-1)+2. For i=2: L-i = 12-2 = 10 = maxCoord.
+  const maxCoord = 4 * (n - 1) + 2;
+  const L = 4 * n;
+  const expectedTargetI = maxCoord;
+  const expectedTargetJ = L - 2;  // L - minCoord
   const expectedTargetOrbifoldId = nodeIdFromCoord([expectedTargetI, expectedTargetJ]);
   
   console.log(`Expected target orbifold node for north: ${expectedTargetOrbifoldId}`);
   
   // The North edge should have the 90° CCW rotation signature: [[0,-1,...], [1,0,...], ...]
-  // The West edge has 90° CW rotation signature: [[0,1,...], [-1,0,...], ...]
   let northVoltage: Matrix3x3 | null = null;
   
   for (const edgeId of edgeIds) {
@@ -149,23 +153,22 @@ function testSpecificNorthCase(n: number): { passed: boolean; details: string } 
   if (!northVoltage) {
     return { 
       passed: false, 
-      details: `Could not find north edge from (1,1) to (5,5) with 90° CCW rotation` 
+      details: `Could not find north edge from (2,2) to (${expectedTargetI},${expectedTargetJ}) with 90° CCW rotation` 
     };
   }
   
   // Calculate absolute position of the neighbor node
-  // Apply northVoltage to (5,5)
   const neighborAbsPos = applyMatrix(northVoltage, expectedTargetI, expectedTargetJ);
   
-  // Expected: (1, -1) - which is 2 units north of (1, 1)
-  const expectedX = 1;
-  const expectedY = -1;
+  // Expected: (2, -2) - which is 4 units north of (2, 2) in the doubled system
+  const expectedX = 2;
+  const expectedY = -2;
   
   const TOLERANCE = 0.0001;
   const passed = Math.abs(neighborAbsPos.x - expectedX) < TOLERANCE && 
                  Math.abs(neighborAbsPos.y - expectedY) < TOLERANCE;
   
-  const details = `From (1,1) with I heading north:
+  const details = `From (2,2) with I heading north:
   Target orbifold node: (${expectedTargetI}, ${expectedTargetJ})
   Voltage for north edge: ${formatVoltage(northVoltage)}
   Absolute position: (${neighborAbsPos.x.toFixed(4)}, ${neighborAbsPos.y.toFixed(4)})
