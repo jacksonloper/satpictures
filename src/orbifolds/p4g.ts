@@ -238,7 +238,7 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
   splitCornerSquare(
     grid,
     neI, neJ,
-    [neI, neJ - 2], [neI, neJ + 2],
+    [neI - 1, neJ - 1], [neI + 1, neJ + 1],
     0, 1,
     translationWith90CCW(4 * n, -4 * n),
     2,

@@ -16,12 +16,19 @@ export type WallpaperGroupType = "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg";
 
 export type EdgeLinestyle = "solid" | "dashed";
 
+export interface LoopStep {
+  startStep: number;
+  startNode: string;
+}
+
 export interface ColorData extends ExtraData {
   color: "black" | "white";
+  loopStep?: number | null;
 }
 
 export interface EdgeStyleData extends ExtraData {
   linestyle: EdgeLinestyle;
+  loopSteps?: LoopStep[];
 }
 
 export type Direction = "N" | "S" | "E" | "W";

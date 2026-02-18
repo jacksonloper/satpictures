@@ -136,9 +136,10 @@ export function liftedNodeId(nodeId: OrbifoldNodeId, V: Matrix3x3): LiftedNodeId
   return `${nodeId}#${voltageKey(V)}`;
 }
 
-export function liftedEdgeId(a: LiftedNodeId, b: LiftedNodeId): LiftedEdgeId {
-  // Unordered, unique.
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
+export function liftedEdgeId(a: LiftedNodeId, b: LiftedNodeId, orbifoldEdgeId?: string): LiftedEdgeId {
+  // Unordered by node pair, but distinguished by orbifold edge when present.
+  const pair = a < b ? `${a}|${b}` : `${b}|${a}`;
+  return orbifoldEdgeId ? `${pair}||${orbifoldEdgeId}` : pair;
 }
 
 /////////////////////////////
@@ -398,7 +399,7 @@ export function addLiftedEdge<LED extends ExtraData>(
     // allowed (self-edge) if you want, but you said LiftedGraphEdge is pair of nodes "unordered";
     // leaving this permitted. If you want to forbid, throw here.
   }
-  const id = liftedEdgeId(a, b);
+  const id = liftedEdgeId(a, b, orbifoldEdgeId);
   if (!g.edges.has(id)) {
     g.edges.set(id, { id, a, b, orbifoldEdgeId, data });
   }

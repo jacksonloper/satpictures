@@ -1,4 +1,5 @@
 export { OrbifoldsExplorer } from "./OrbifoldsExplorer";
+export { OrbifoldWeaveExplorer } from "./OrbifoldWeaveExplorer";
 export {
   createOrbifoldGrid,
   setNodeColor,
@@ -23,3 +24,4 @@ export {
   type EdgeLinestyle,
 } from "./createOrbifolds";
 export * from "./orbifoldbasics";
+export { doubleOrbifold, doubledNodeId, layerEdgeId, selfEdgeLevelId, selfEdgeCrossId, getLevelFromNodeId, getBaseNodeId, type Level } from "./doubleOrbifold";
