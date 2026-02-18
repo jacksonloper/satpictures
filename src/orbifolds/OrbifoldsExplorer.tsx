@@ -1423,6 +1423,28 @@ export function OrbifoldsExplorer() {
               <p style={{ fontSize: "13px", marginBottom: "8px" }}>
                 <strong>Coordinates:</strong> ({inspectionInfo.coord[0]}, {inspectionInfo.coord[1]})
               </p>
+              {/* Show loop times when this node is involved */}
+              {(() => {
+                const loopTimes: number[] = [];
+                for (const edge of inspectionInfo.edges) {
+                  if (!edge.loopstep) continue;
+                  for (const t of edge.loopstep) {
+                    if (t.startNode === inspectionInfo.nodeId) {
+                      loopTimes.push(t.startTime);
+                    } else {
+                      loopTimes.push(t.endTime);
+                    }
+                  }
+                }
+                // Deduplicate and sort
+                const unique = [...new Set(loopTimes)].sort((a, b) => a - b);
+                if (unique.length === 0) return null;
+                return (
+                  <p style={{ fontSize: "13px", marginBottom: "8px" }}>
+                    <strong>Loop times:</strong> {unique.map(t => t.toFixed(3)).join(", ")}
+                  </p>
+                );
+              })()}
               <p style={{ fontSize: "13px", marginBottom: "4px" }}>
                 <strong>Edges ({inspectionInfo.edges.length}):</strong>
               </p>
@@ -1478,6 +1500,16 @@ export function OrbifoldsExplorer() {
                     {formatVoltageRows(edge.voltage).map((row, rowIdx) => (
                       <div key={rowIdx} style={{ marginLeft: "10px" }}>{row}</div>
                     ))}
+                    {edge.loopstep && edge.loopstep.length > 0 && (
+                      <div style={{ marginTop: "4px" }}>
+                        <strong>Loop traversals:</strong>
+                        {edge.loopstep.map((t, tIdx) => (
+                          <div key={tIdx} style={{ marginLeft: "10px", fontSize: "11px" }}>
+                            t=[{t.startTime.toFixed(3)}, {t.endTime.toFixed(3)}) from {t.startNode}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

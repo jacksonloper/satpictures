@@ -15,6 +15,7 @@ import {
   type ColorData,
   type EdgeStyleData,
   type EdgeLinestyle,
+  type LoopTraversal,
 } from "../createOrbifolds";
 
 // Constants
@@ -32,6 +33,7 @@ export interface EdgeInfo {
   targetCoord: readonly [number, number];
   voltage: Matrix3x3;
   linestyle: EdgeLinestyle;
+  loopstep?: LoopTraversal[];
 }
 
 /**
@@ -176,12 +178,14 @@ export function OrbifoldGridTools({
         if (!halfEdge) continue;
         const targetNode = grid.nodes.get(halfEdge.to);
         if (!targetNode) continue;
+        const edgeData = edge.data as EdgeStyleData | undefined;
         edges.push({
           edgeId,
           targetNodeId: halfEdge.to,
           targetCoord: targetNode.coord,
           voltage: halfEdge.voltage,
           linestyle: getEdgeLinestyle(grid, edgeId),
+          loopstep: edgeData?.loopstep,
         });
       }
 
