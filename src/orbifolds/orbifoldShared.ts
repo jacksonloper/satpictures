@@ -262,6 +262,7 @@ export function glideReflectionX(dx: Int, dy: Int): Matrix3x3 {
  * Get node coordinate for a given grid index with specified step size.
  * For step=2 (standard): index i → 2*i + 1 (odd coordinates: 1,3,5,...)
  * For step=4 (doubled):  index i → 4*i + 2 (doubled coordinates: 2,6,10,...)
+ * step must be even (2 or 4).
  */
 function getNodeCoord(index: Int, step: Int): Int {
   return step * index + step / 2;
@@ -269,6 +270,8 @@ function getNodeCoord(index: Int, step: Int): Int {
 
 /**
  * Get grid index from node coordinate with specified step size.
+ * Inverse of getNodeCoord: coord must have been produced by getNodeCoord with the same step.
+ * step must be even (2 or 4).
  */
 function getIndexFromNodeCoord(coord: Int, step: Int): Int {
   return (coord - step / 2) / step;
