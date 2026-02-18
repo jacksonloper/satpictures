@@ -82,5 +82,8 @@ function getP2Neighbor(
 }
 
 export function createP2Grid(n: Int, initialColors?: ("black" | "white")[][]) {
+  if (n % 2 !== 0) {
+    throw new Error("P2 grid size n must be even");
+  }
   return createSquareOrbifoldGrid(n, getP2Neighbor, initialColors);
 }

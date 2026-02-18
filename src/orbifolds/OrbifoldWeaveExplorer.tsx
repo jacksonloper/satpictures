@@ -688,7 +688,9 @@ export function OrbifoldWeaveExplorer() {
           </select>
         </div>
 
-        <ValidatedInput value={size} onChange={handleSizeChange} min={minSize} max={10} label="Size (n)" />
+        <ValidatedInput value={size} onChange={handleSizeChange} min={minSize} max={10} label="Size (n)"
+          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
+        />
         <ValidatedInput value={expansion} onChange={setExpansion} min={0} max={20} label="Expansion (m)" />
       </div>
 

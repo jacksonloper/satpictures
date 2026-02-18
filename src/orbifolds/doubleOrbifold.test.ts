@@ -134,7 +134,7 @@ function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "pgg", n: n
 
 // Run tests for all wallpaper groups
 testDoubling("P1", 3);
-testDoubling("P2", 3);
+testDoubling("P2", 4);
 testDoubling("P4", 3);
 testDoubling("pgg", 3);
 testDoubling("P3", 3);

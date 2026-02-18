@@ -699,9 +699,25 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
     pathEdgeIds.push(bestEdgeId ?? "");
   }
 
-  // Determine which edges are in the loop — use pathEdgeIds directly
-  // (not endpoint pairs) so that multi-edges are correctly disambiguated.
-  const loopEdgeIds: string[] = [...new Set(pathEdgeIds.filter(id => id !== ""))];
+  // Determine which edges are in the loop
+  const usedPairs = new Set<string>();
+  for (let t = 0; t < path.length - 1; t++) {
+    const a = path[t];
+    const b = path[t + 1];
+    const key = a < b ? `${a},${b}` : `${b},${a}`;
+    usedPairs.add(key);
+  }
+
+  const loopEdgeIds: string[] = [];
+  for (const edge of edges) {
+    const aIdx = nodeIndex.get(edge.endpoints[0]);
+    const bIdx = nodeIndex.get(edge.endpoints[1]);
+    if (aIdx === undefined || bIdx === undefined) continue;
+    const key = aIdx < bIdx ? `${aIdx},${bIdx}` : `${bIdx},${aIdx}`;
+    if (usedPairs.has(key)) {
+      loopEdgeIds.push(edge.edgeId);
+    }
+  }
 
   const pathNodeIds = path.map(v => nodeIds[v]);
 

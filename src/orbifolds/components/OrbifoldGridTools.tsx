@@ -61,6 +61,7 @@ export function OrbifoldGridTools({
   onSetRoot,
   inspectedNodeId,
   rootNodeId,
+  wallpaperGroup,
 }: {
   n: number;
   grid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -72,6 +73,10 @@ export function OrbifoldGridTools({
   rootNodeId?: OrbifoldNodeId | null;
   wallpaperGroup?: string;
 }) {
+  // Groups with doubled coordinate systems (4-unit spacing) need halved visual scale
+  // to match the appearance of standard (2-unit) groups.
+  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g";
+
   // Compute bounding box of all polygon vertices
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const node of grid.nodes.values()) {
@@ -86,8 +91,9 @@ export function OrbifoldGridTools({
   const bboxH = maxY - minY;
 
   // Scale so the grid fits within a reasonable size
-  // Use CELL_SIZE per 2 coordinate units (matching the standard square node size)
-  const scale = CELL_SIZE / 2;
+  // Standard groups: CELL_SIZE per 2 coordinate units (polygon is ±1)
+  // Doubled groups: CELL_SIZE per 4 coordinate units (polygon is ±2)
+  const scale = isDoubled ? CELL_SIZE / 4 : CELL_SIZE / 2;
   const svgW = bboxW * scale + 2 * GRID_PADDING;
   const svgH = bboxH * scale + 2 * GRID_PADDING;
 

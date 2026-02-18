@@ -122,6 +122,7 @@ export function LiftedGraphRenderer({
   showNodes = false,
   showWalls = false,
   svgRef,
+  wallpaperGroup,
 }: {
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
@@ -134,8 +135,11 @@ export function LiftedGraphRenderer({
   showNodes?: boolean;
   showWalls?: boolean;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  wallpaperGroup?: string;
 }) {
-  const cellSize = LIFTED_CELL_SIZE;
+  // Groups with doubled coordinate systems need halved visual scale
+  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g";
+  const cellSize = isDoubled ? LIFTED_CELL_SIZE / 2 : LIFTED_CELL_SIZE;
   
   // Compute positions and bounds
   const nodePositions = useMemo(() => {

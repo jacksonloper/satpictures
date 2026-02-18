@@ -398,10 +398,7 @@ export function addLiftedEdge<LED extends ExtraData>(
     // allowed (self-edge) if you want, but you said LiftedGraphEdge is pair of nodes "unordered";
     // leaving this permitted. If you want to forbid, throw here.
   }
-  // Include orbifoldEdgeId in the key so parallel edges (same endpoint
-  // pair but different orbifold edges) are kept as separate lifted edges.
-  const base = liftedEdgeId(a, b);
-  const id = orbifoldEdgeId ? `${base}||${orbifoldEdgeId}` : base;
+  const id = liftedEdgeId(a, b);
   if (!g.edges.has(id)) {
     g.edges.set(id, { id, a, b, orbifoldEdgeId, data });
   }

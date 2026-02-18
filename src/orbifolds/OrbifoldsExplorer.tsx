@@ -135,7 +135,8 @@ export function OrbifoldsExplorer() {
   }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    const nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    let nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
@@ -821,6 +822,7 @@ export function OrbifoldsExplorer() {
           min={minSize}
           max={10}
           label="Size (n)"
+          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
         />
         
         {/* Expansion Input */}
@@ -1479,6 +1481,7 @@ export function OrbifoldsExplorer() {
             showNodes={showNodes}
             showWalls={showWalls}
             svgRef={liftedGraphSvgRef}
+            wallpaperGroup={wallpaperGroup}
           />
           
           {/* Legend */}

@@ -829,7 +829,7 @@ console.log("\nTest 14: Max length 6, but solution can be shorter");
 // Test 15: Test with P2 grid which has non-trivial voltages
 console.log("\nTest 15: P2 grid voltage BFS finds non-identity voltages");
 {
-  const p2Grid = createOrbifoldGrid("P2", 3);
+  const p2Grid = createOrbifoldGrid("P2", 4);
   buildAdjacency(p2Grid);
   const p2NodeIds = Array.from(p2Grid.nodes.keys());
   const p2EdgeInfo = buildEdgeInfoFromGrid(p2Grid);

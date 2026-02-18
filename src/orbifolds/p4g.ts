@@ -13,6 +13,7 @@ import {
 import {
   type ColorData,
   type EdgeStyleData,
+  splitCornerSquare,
   translationWith90CCW,
 } from "./orbifoldShared";
 
@@ -228,5 +229,20 @@ export function createP4gGrid(n: Int, initialColors?: ("black" | "white")[][]) {
     }
   }
 
-  return { nodes, edges } as OrbifoldGrid<ColorData, EdgeStyleData>;
+  const grid = { nodes, edges } as OrbifoldGrid<ColorData, EdgeStyleData>;
+
+  // Split the NE grid node to eliminate the non-involutive N-BORDER self-edge.
+  // The NE grid node is at col=n-1, row=0: i=4*(n-1)+2, j=2.
+  const neI = 4 * (n - 1) + 2;
+  const neJ = 2;
+  splitCornerSquare(
+    grid,
+    neI, neJ,
+    [neI, neJ - 2], [neI, neJ + 2],
+    0, 1,
+    translationWith90CCW(4 * n, -4 * n),
+    2,
+  );
+
+  return grid;
 }
