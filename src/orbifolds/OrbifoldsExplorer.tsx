@@ -1004,7 +1004,7 @@ export function OrbifoldsExplorer() {
                     setMaxLength(v);
                     setReachableVoltages([]);
                     setSelectedTargetVoltageKey(null);
-                    if (minLength > v) setMinLength(0);
+                    if (minLength > v) setMinLength(v);
                   }}
                   min={2}
                   max={9999}
@@ -1129,7 +1129,7 @@ export function OrbifoldsExplorer() {
                   onChange={(v) => {
                     setMaxLengthLoops(v);
                     resetLoopsFinderState();
-                    if (minLengthLoops > v) setMinLengthLoops(0);
+                    if (minLengthLoops > v) setMinLengthLoops(v);
                   }}
                   min={2}
                   max={9999}
