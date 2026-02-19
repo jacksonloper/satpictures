@@ -64,8 +64,12 @@ export function OrbifoldsExplorer() {
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [showWalls, setShowWalls] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(null);
-  const [maxLengthInput, setMaxLengthInput] = useState("");
+  const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(() => {
+    const grid = createOrbifoldGrid("P1", DEFAULT_SIZE);
+    const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
+    return firstNodeId ?? null;
+  });
+  const [maxLengthInput, setMaxLengthInput] = useState("10");
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -91,7 +95,7 @@ export function OrbifoldsExplorer() {
     pathEdgeIds?: string[];
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
-  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("");
+  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("10");
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;

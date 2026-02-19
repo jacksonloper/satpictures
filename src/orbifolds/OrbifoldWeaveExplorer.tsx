@@ -42,7 +42,7 @@ import "../App.css";
 
 // Constants
 const DEFAULT_SIZE = 3;
-const DEFAULT_EXPANSION = 5;
+const DEFAULT_EXPANSION = 10;
 
 /**
  * Render two 2D views (level 0 and level 1) of the doubled orbifold,
@@ -190,7 +190,7 @@ export function OrbifoldWeaveExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Loop finder state
-  const [maxLengthInput, setMaxLengthInput] = useState("");
+  const [maxLengthInput, setMaxLengthInput] = useState("10");
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -215,7 +215,7 @@ export function OrbifoldWeaveExplorer() {
     pathEdgeIds?: string[];
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
-  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("");
+  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("10");
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   // Accepted loop state
@@ -417,10 +417,10 @@ export function OrbifoldWeaveExplorer() {
     const adj = buildAdjRecord(grid);
     const edgesData = buildWorkerEdgeData(grid);
 
-    // Double the max length: the doubled orbifold has 2× nodes, so paths are longer
+    // Solve on doubled orbifold with user-specified max length
     const request: LoopFinderRequest = {
       mode: "solve",
-      maxLength: maxLength * 2,
+      maxLength,
       rootNodeId: doubledRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -507,7 +507,7 @@ export function OrbifoldWeaveExplorer() {
 
       const satReq: LoopFinderRequest = {
         mode: "solveAll",
-        maxLength: maxLength * 2,
+        maxLength,
         rootNodeId: doubledRootNodeId,
         nodeIds: dNodeIds,
         adjacency: dAdj,
