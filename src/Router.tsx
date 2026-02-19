@@ -63,17 +63,7 @@ export function Router() {
         >
           🧩 Polyforms
         </a>
-        <a
-          href="#wallpapermazes"
-          style={{
-            color: page === 'wallpapermazes' ? '#3498db' : 'white',
-            textDecoration: 'none',
-            fontWeight: page === 'wallpapermazes' ? 'bold' : 'normal',
-            fontSize: '16px',
-          }}
-        >
-          🧱 Wallpaper Mazes
-        </a>
+        {/* Wallpaper Mazes hidden from navbar but still accessible via direct URL */}
         <a
           href="#orbifolds"
           style={{
