@@ -70,6 +70,7 @@ export function OrbifoldsExplorer() {
     return firstNodeId ?? null;
   });
   const [maxLengthInput, setMaxLengthInput] = useState("10");
+  const [minLengthInput, setMinLengthInput] = useState("0");
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -96,6 +97,7 @@ export function OrbifoldsExplorer() {
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
   const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("10");
+  const [minLengthLoopsInput, setMinLengthLoopsInput] = useState("0");
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
@@ -432,6 +434,11 @@ export function OrbifoldsExplorer() {
       setErrorMessage("Max length must be a positive integer ≥ 2");
       return;
     }
+    const minLength = parseInt(minLengthInput, 10);
+    if (!Number.isFinite(minLength) || minLength < 0) {
+      setErrorMessage("Min length must be a non-negative integer");
+      return;
+    }
     if (!rootNodeId) {
       setErrorMessage("Please set a root node first (use the 📌 Root tool)");
       return;
@@ -497,6 +504,7 @@ export function OrbifoldsExplorer() {
     const request: LoopFinderRequest = {
       mode: "solve",
       maxLength,
+      minLength,
       rootNodeId: effectiveRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -541,13 +549,18 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
+  }, [maxLengthInput, minLengthInput, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
 
   // Handle "Find Loops" - solve all voltages
   const handleFindAllLoops = useCallback(() => {
     const maxLength = parseInt(maxLengthLoopsInput, 10);
     if (!Number.isFinite(maxLength) || maxLength < 2) {
       setErrorMessage("Max length must be a positive integer ≥ 2");
+      return;
+    }
+    const minLength = parseInt(minLengthLoopsInput, 10);
+    if (!Number.isFinite(minLength) || minLength < 0) {
+      setErrorMessage("Min length must be a non-negative integer");
       return;
     }
     if (!rootNodeId) {
@@ -604,6 +617,7 @@ export function OrbifoldsExplorer() {
     const request: LoopFinderRequest = {
       mode: "solveAll",
       maxLength,
+      minLength,
       rootNodeId: effectiveRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -649,7 +663,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
+  }, [maxLengthLoopsInput, minLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
 
   // Handle selecting a loops result for preview
   const handlePreviewLoopsResult = useCallback(() => {
@@ -1029,6 +1043,21 @@ export function OrbifoldsExplorer() {
                   }}
                   placeholder="e.g. 5"
                 />
+                <label style={{ fontSize: "13px" }}>Min steps:</label>
+                <input
+                  type="text"
+                  value={minLengthInput}
+                  onChange={(e) => setMinLengthInput(e.target.value)}
+                  disabled={solvingLoop || computingVoltages}
+                  style={{
+                    width: "60px",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                    fontSize: "13px",
+                  }}
+                  placeholder="e.g. 0"
+                />
                 <button
                   onClick={handleComputeVoltages}
                   disabled={solvingLoop || computingVoltages}
@@ -1151,6 +1180,24 @@ export function OrbifoldsExplorer() {
                     fontSize: "13px",
                   }}
                   placeholder="e.g. 5"
+                />
+                <label style={{ fontSize: "13px" }}>Min steps:</label>
+                <input
+                  type="text"
+                  value={minLengthLoopsInput}
+                  onChange={(e) => {
+                    setMinLengthLoopsInput(e.target.value);
+                    resetLoopsFinderState();
+                  }}
+                  disabled={solvingAllLoops}
+                  style={{
+                    width: "60px",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                    fontSize: "13px",
+                  }}
+                  placeholder="e.g. 0"
                 />
                 <button
                   onClick={handleFindAllLoops}

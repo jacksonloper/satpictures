@@ -191,6 +191,7 @@ export function OrbifoldWeaveExplorer() {
 
   // Loop finder state
   const [maxLengthInput, setMaxLengthInput] = useState("10");
+  const [minLengthInput, setMinLengthInput] = useState("0");
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -216,6 +217,7 @@ export function OrbifoldWeaveExplorer() {
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
   const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("10");
+  const [minLengthLoopsInput, setMinLengthLoopsInput] = useState("0");
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   // Accepted loop state
@@ -401,6 +403,11 @@ export function OrbifoldWeaveExplorer() {
       setErrorMessage("Max length must be a positive integer ≥ 2");
       return;
     }
+    const minLength = parseInt(minLengthInput, 10);
+    if (!Number.isFinite(minLength) || minLength < 0) {
+      setErrorMessage("Min length must be a non-negative integer");
+      return;
+    }
     if (!selectedTargetVoltageKey || reachableVoltages.length === 0) {
       setErrorMessage("Please compute voltages and select a target voltage first");
       return;
@@ -421,6 +428,7 @@ export function OrbifoldWeaveExplorer() {
     const request: LoopFinderRequest = {
       mode: "solve",
       maxLength,
+      minLength,
       rootNodeId: doubledRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -455,13 +463,18 @@ export function OrbifoldWeaveExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, doubledGrid, doubledRootNodeId, selectedTargetVoltageKey, reachableVoltages, buildAdjRecord, buildWorkerEdgeData]);
+  }, [maxLengthInput, minLengthInput, doubledGrid, doubledRootNodeId, selectedTargetVoltageKey, reachableVoltages, buildAdjRecord, buildWorkerEdgeData]);
 
   // Find all loops on doubled orbifold
   const handleFindAllLoops = useCallback(() => {
     const maxLength = parseInt(maxLengthLoopsInput, 10);
     if (!Number.isFinite(maxLength) || maxLength < 2) {
       setErrorMessage("Max length must be a positive integer ≥ 2");
+      return;
+    }
+    const minLength = parseInt(minLengthLoopsInput, 10);
+    if (!Number.isFinite(minLength) || minLength < 0) {
+      setErrorMessage("Min length must be a non-negative integer");
       return;
     }
 
@@ -508,6 +521,7 @@ export function OrbifoldWeaveExplorer() {
       const satReq: LoopFinderRequest = {
         mode: "solveAll",
         maxLength,
+        minLength,
         rootNodeId: doubledRootNodeId,
         nodeIds: dNodeIds,
         adjacency: dAdj,
@@ -560,7 +574,7 @@ export function OrbifoldWeaveExplorer() {
     };
 
     bfsWorker.postMessage(bfsReq);
-  }, [maxLengthLoopsInput, rootNodeId, undoubledGrid, doubledGrid, doubledRootNodeId, buildAdjRecord, buildWorkerEdgeData, resetLoopsFinderState]);
+  }, [maxLengthLoopsInput, minLengthLoopsInput, rootNodeId, undoubledGrid, doubledGrid, doubledRootNodeId, buildAdjRecord, buildWorkerEdgeData, resetLoopsFinderState]);
 
   // Preview a loops result
   const handlePreviewLoopsResult = useCallback(() => {
@@ -798,6 +812,15 @@ export function OrbifoldWeaveExplorer() {
               style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", fontSize: "13px" }}
               placeholder="e.g. 5"
             />
+            <label style={{ fontSize: "13px" }}>Min steps:</label>
+            <input
+              type="text"
+              value={minLengthInput}
+              onChange={(e) => setMinLengthInput(e.target.value)}
+              disabled={solvingLoop || computingVoltages}
+              style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", fontSize: "13px" }}
+              placeholder="e.g. 0"
+            />
             <button
               onClick={handleComputeVoltages}
               disabled={solvingLoop || computingVoltages}
@@ -899,6 +922,18 @@ export function OrbifoldWeaveExplorer() {
               disabled={solvingAllLoops}
               style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", fontSize: "13px" }}
               placeholder="e.g. 5"
+            />
+            <label style={{ fontSize: "13px" }}>Min steps:</label>
+            <input
+              type="text"
+              value={minLengthLoopsInput}
+              onChange={(e) => {
+                setMinLengthLoopsInput(e.target.value);
+                resetLoopsFinderState();
+              }}
+              disabled={solvingAllLoops}
+              style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", fontSize: "13px" }}
+              placeholder="e.g. 0"
             />
             <button
               onClick={handleFindAllLoops}

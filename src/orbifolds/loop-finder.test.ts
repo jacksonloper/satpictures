@@ -312,11 +312,13 @@ function solveLoopWithVoltage(
   targetVoltageKey: string,
   reachableVoltages: Array<{ key: string; matrix: Matrix3x3 }>,
   blackNodeIds?: string[],
+  minLength?: number,
 ): { satisfiable: boolean; pathNodeIds?: string[]; error?: string } {
   const L = maxLength + 1;
   const N = nodeIds.length;
   const V = reachableVoltages.length;
   const solver = new DPLLSolver();
+  const minLen = minLength ?? 0;
 
   const blackSet = new Set(blackNodeIds ?? []);
 
@@ -437,6 +439,11 @@ function solveLoopWithVoltage(
   // Null propagation
   for (let t = 0; t < L - 1; t++) {
     solver.addClause([-nl[t], nl[t + 1]]);
+  }
+
+  // Minimum length: forbid null at steps 1..minLen
+  for (let t = 1; t <= minLen && t < L; t++) {
+    solver.addClause([-nl[t]]);
   }
 
   // Early termination: root at t >= 1 => null at t+1
@@ -900,6 +907,73 @@ console.log("\nTest 16: Black nodes excluded in new encoding");
     }
   } else {
     console.log("    Identity voltage not reachable with black nodes (skipping)");
+    passed++;
+  }
+}
+
+console.log("\n\n=== Min Length Tests ===\n");
+
+// Test 17: minLength=0 allows shortest loop (length 2)
+console.log("Test 17: minLength=0 allows shortest loop (length 2)");
+{
+  const voltages = computeReachableVoltagesBFS(9, rootNodeId, nodeIds, edgeInfo);
+  const identityK = voltageKey(I3);
+  const result = solveLoopWithVoltage(9, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 0);
+  assert(result.satisfiable, "minLength=0 is SAT");
+  if (result.pathNodeIds) {
+    console.log(`    Path: ${result.pathNodeIds.join(" → ")} (length ${result.pathNodeIds.length - 1})`);
+    assert(result.pathNodeIds.length >= 3, "Path has at least 3 steps");
+  }
+}
+
+// Test 18: minLength=4 forces loop to have at least 4 edges
+console.log("\nTest 18: minLength=4 forces loop length >= 4");
+{
+  const voltages = computeReachableVoltagesBFS(9, rootNodeId, nodeIds, edgeInfo);
+  const identityK = voltageKey(I3);
+  const result = solveLoopWithVoltage(9, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 4);
+  assert(result.satisfiable, "minLength=4 with maxLength=9 is SAT");
+  if (result.pathNodeIds) {
+    const loopLen = result.pathNodeIds.length - 1;
+    console.log(`    Path: ${result.pathNodeIds.join(" → ")} (length ${loopLen})`);
+    assert(loopLen >= 4, `Loop length ${loopLen} >= 4`);
+    assert(result.pathNodeIds[0] === rootNodeId, "Path starts at root");
+    assert(result.pathNodeIds[result.pathNodeIds.length - 1] === rootNodeId, "Path ends at root");
+  }
+}
+
+// Test 19: minLength = maxLength forces exact length loop
+console.log("\nTest 19: minLength=4 with maxLength=4 forces exact length 4");
+{
+  const voltages = computeReachableVoltagesBFS(4, rootNodeId, nodeIds, edgeInfo);
+  const identityK = voltageKey(I3);
+  if (voltages.some(v => v.key === identityK)) {
+    const result = solveLoopWithVoltage(4, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, undefined, 4);
+    assert(result.satisfiable, "minLength=4, maxLength=4 is SAT");
+    if (result.pathNodeIds) {
+      const loopLen = result.pathNodeIds.length - 1;
+      console.log(`    Path: ${result.pathNodeIds.join(" → ")} (length ${loopLen})`);
+      assert(loopLen === 4, `Loop length is exactly 4`);
+    }
+  } else {
+    console.log("    Identity not reachable in 4 steps (skipping)");
+    passed++;
+  }
+}
+
+// Test 20: minLength too large for available non-black nodes should be UNSAT
+console.log("\nTest 20: minLength=5 with only 4 non-black nodes should be UNSAT");
+{
+  // With 5 black nodes, only 4 non-black remain (including root)
+  // A loop of minLength 5 needs at least 6 non-null steps but only 4 non-black nodes exist
+  const blackNodes = ["3,1", "5,1", "5,3", "3,5", "5,5"];
+  const voltages = computeReachableVoltagesBFS(9, rootNodeId, nodeIds, edgeInfo, blackNodes);
+  const identityK = voltageKey(I3);
+  if (voltages.some(v => v.key === identityK)) {
+    const result = solveLoopWithVoltage(9, rootNodeId, nodeIds, adj, edgeInfo, identityK, voltages, blackNodes, 5);
+    assert(!result.satisfiable, "minLength=5 with only 4 non-black nodes is UNSAT");
+  } else {
+    console.log("    Identity not reachable (skipping)");
     passed++;
   }
 }
