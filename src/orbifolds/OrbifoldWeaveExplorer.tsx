@@ -190,7 +190,8 @@ export function OrbifoldWeaveExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Loop finder state
-  const [maxLengthInput, setMaxLengthInput] = useState("10");
+  const [maxLength, setMaxLength] = useState(10);
+  const [minLength, setMinLength] = useState(0);
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -215,7 +216,8 @@ export function OrbifoldWeaveExplorer() {
     pathEdgeIds?: string[];
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
-  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("10");
+  const [maxLengthLoops, setMaxLengthLoops] = useState(10);
+  const [minLengthLoops, setMinLengthLoops] = useState(0);
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   // Accepted loop state
@@ -337,12 +339,6 @@ export function OrbifoldWeaveExplorer() {
 
   // Phase 1: Compute reachable voltages (on undoubled grid)
   const handleComputeVoltages = useCallback(() => {
-    const maxLength = parseInt(maxLengthInput, 10);
-    if (!Number.isFinite(maxLength) || maxLength < 2) {
-      setErrorMessage("Max length must be a positive integer ≥ 2");
-      return;
-    }
-
     setErrorMessage(null);
     setComputingVoltages(true);
     setReachableVoltages([]);
@@ -392,15 +388,10 @@ export function OrbifoldWeaveExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, rootNodeId, undoubledGrid, buildAdjRecord, buildWorkerEdgeData]);
+  }, [maxLength, rootNodeId, undoubledGrid, buildAdjRecord, buildWorkerEdgeData]);
 
   // Phase 2: Solve loop on *doubled* orbifold
   const handleSolveLoop = useCallback(() => {
-    const maxLength = parseInt(maxLengthInput, 10);
-    if (!Number.isFinite(maxLength) || maxLength < 2) {
-      setErrorMessage("Max length must be a positive integer ≥ 2");
-      return;
-    }
     if (!selectedTargetVoltageKey || reachableVoltages.length === 0) {
       setErrorMessage("Please compute voltages and select a target voltage first");
       return;
@@ -421,6 +412,7 @@ export function OrbifoldWeaveExplorer() {
     const request: LoopFinderRequest = {
       mode: "solve",
       maxLength,
+      minLength,
       rootNodeId: doubledRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -455,16 +447,10 @@ export function OrbifoldWeaveExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, doubledGrid, doubledRootNodeId, selectedTargetVoltageKey, reachableVoltages, buildAdjRecord, buildWorkerEdgeData]);
+  }, [maxLength, minLength, doubledGrid, doubledRootNodeId, selectedTargetVoltageKey, reachableVoltages, buildAdjRecord, buildWorkerEdgeData]);
 
   // Find all loops on doubled orbifold
   const handleFindAllLoops = useCallback(() => {
-    const maxLength = parseInt(maxLengthLoopsInput, 10);
-    if (!Number.isFinite(maxLength) || maxLength < 2) {
-      setErrorMessage("Max length must be a positive integer ≥ 2");
-      return;
-    }
-
     setErrorMessage(null);
     resetLoopsFinderState();
     setSolvingAllLoops(true);
@@ -480,7 +466,7 @@ export function OrbifoldWeaveExplorer() {
 
     const bfsReq: LoopFinderRequest = {
       mode: "computeVoltages",
-      maxLength,
+      maxLength: maxLengthLoops,
       rootNodeId,
       nodeIds: undNodeIds,
       adjacency: undAdj,
@@ -507,7 +493,8 @@ export function OrbifoldWeaveExplorer() {
 
       const satReq: LoopFinderRequest = {
         mode: "solveAll",
-        maxLength,
+        maxLength: maxLengthLoops,
+        minLength: minLengthLoops,
         rootNodeId: doubledRootNodeId,
         nodeIds: dNodeIds,
         adjacency: dAdj,
@@ -560,7 +547,7 @@ export function OrbifoldWeaveExplorer() {
     };
 
     bfsWorker.postMessage(bfsReq);
-  }, [maxLengthLoopsInput, rootNodeId, undoubledGrid, doubledGrid, doubledRootNodeId, buildAdjRecord, buildWorkerEdgeData, resetLoopsFinderState]);
+  }, [maxLengthLoops, minLengthLoops, rootNodeId, undoubledGrid, doubledGrid, doubledRootNodeId, buildAdjRecord, buildWorkerEdgeData, resetLoopsFinderState]);
 
   // Preview a loops result
   const handlePreviewLoopsResult = useCallback(() => {
@@ -785,18 +772,26 @@ export function OrbifoldWeaveExplorer() {
           border: "1px solid #8e44ad",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-            <label style={{ fontSize: "13px" }}>Max steps:</label>
-            <input
-              type="text"
-              value={maxLengthInput}
-              onChange={(e) => {
-                setMaxLengthInput(e.target.value);
+            <ValidatedInput
+              value={maxLength}
+              onChange={(v) => {
+                setMaxLength(v);
                 setReachableVoltages([]);
                 setSelectedTargetVoltageKey(null);
+                if (minLength > v) setMinLength(v);
               }}
+              min={2}
+              max={9999}
+              label="Max steps"
               disabled={solvingLoop || computingVoltages}
-              style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", fontSize: "13px" }}
-              placeholder="e.g. 5"
+            />
+            <ValidatedInput
+              value={minLength}
+              onChange={setMinLength}
+              min={0}
+              max={maxLength}
+              label="Min steps"
+              disabled={solvingLoop || computingVoltages}
             />
             <button
               onClick={handleComputeVoltages}
@@ -888,17 +883,28 @@ export function OrbifoldWeaveExplorer() {
           border: "1px solid #2980b9",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-            <label style={{ fontSize: "13px" }}>Max steps:</label>
-            <input
-              type="text"
-              value={maxLengthLoopsInput}
-              onChange={(e) => {
-                setMaxLengthLoopsInput(e.target.value);
+            <ValidatedInput
+              value={maxLengthLoops}
+              onChange={(v) => {
+                setMaxLengthLoops(v);
+                resetLoopsFinderState();
+                if (minLengthLoops > v) setMinLengthLoops(v);
+              }}
+              min={2}
+              max={9999}
+              label="Max steps"
+              disabled={solvingAllLoops}
+            />
+            <ValidatedInput
+              value={minLengthLoops}
+              onChange={(v) => {
+                setMinLengthLoops(v);
                 resetLoopsFinderState();
               }}
+              min={0}
+              max={maxLengthLoops}
+              label="Min steps"
               disabled={solvingAllLoops}
-              style={{ width: "60px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc", fontSize: "13px" }}
-              placeholder="e.g. 5"
             />
             <button
               onClick={handleFindAllLoops}

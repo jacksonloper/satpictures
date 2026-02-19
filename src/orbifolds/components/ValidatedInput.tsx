@@ -11,6 +11,7 @@ export function ValidatedInput({
   max,
   label,
   extraValidate,
+  disabled,
 }: {
   value: number;
   onChange: (value: number) => void;
@@ -19,6 +20,7 @@ export function ValidatedInput({
   label: string;
   /** Optional extra validation. Return null if valid, or an error message string if invalid. */
   extraValidate?: (n: number) => string | null;
+  disabled?: boolean;
 }) {
   const [inputValue, setInputValue] = useState(String(value));
   const [isValid, setIsValid] = useState(true);
@@ -76,6 +78,7 @@ export function ValidatedInput({
         value={inputValue}
         onChange={handleChange}
         onBlur={handleBlur}
+        disabled={disabled}
         style={{
           width: "60px",
           padding: "4px 8px",

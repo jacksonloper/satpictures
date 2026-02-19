@@ -69,7 +69,8 @@ export function OrbifoldsExplorer() {
     const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
     return firstNodeId ?? null;
   });
-  const [maxLengthInput, setMaxLengthInput] = useState("10");
+  const [maxLength, setMaxLength] = useState(10);
+  const [minLength, setMinLength] = useState(0);
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
@@ -95,7 +96,8 @@ export function OrbifoldsExplorer() {
     pathEdgeIds?: string[];
   }> | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
-  const [maxLengthLoopsInput, setMaxLengthLoopsInput] = useState("10");
+  const [maxLengthLoops, setMaxLengthLoops] = useState(10);
+  const [minLengthLoops, setMinLengthLoops] = useState(0);
   const loopsWorkerRef = useRef<Worker | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
@@ -326,11 +328,6 @@ export function OrbifoldsExplorer() {
 
   // Phase 1: Compute reachable voltages via BFS
   const handleComputeVoltages = useCallback(() => {
-    const maxLength = parseInt(maxLengthInput, 10);
-    if (!Number.isFinite(maxLength) || maxLength < 2) {
-      setErrorMessage("Max length must be a positive integer ≥ 2");
-      return;
-    }
     if (!rootNodeId) {
       setErrorMessage("Please set a root node first (use the 📌 Root tool)");
       return;
@@ -423,15 +420,10 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
+  }, [maxLength, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
 
   // Phase 2: Solve for a loop with the selected target voltage
   const handleSolveLoop = useCallback(() => {
-    const maxLength = parseInt(maxLengthInput, 10);
-    if (!Number.isFinite(maxLength) || maxLength < 2) {
-      setErrorMessage("Max length must be a positive integer ≥ 2");
-      return;
-    }
     if (!rootNodeId) {
       setErrorMessage("Please set a root node first (use the 📌 Root tool)");
       return;
@@ -497,6 +489,7 @@ export function OrbifoldsExplorer() {
     const request: LoopFinderRequest = {
       mode: "solve",
       maxLength,
+      minLength,
       rootNodeId: effectiveRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -541,15 +534,10 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthInput, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
+  }, [maxLength, minLength, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
 
   // Handle "Find Loops" - solve all voltages
   const handleFindAllLoops = useCallback(() => {
-    const maxLength = parseInt(maxLengthLoopsInput, 10);
-    if (!Number.isFinite(maxLength) || maxLength < 2) {
-      setErrorMessage("Max length must be a positive integer ≥ 2");
-      return;
-    }
     if (!rootNodeId) {
       setErrorMessage("Please set a root node first (use the 📌 Root tool)");
       return;
@@ -603,7 +591,8 @@ export function OrbifoldsExplorer() {
 
     const request: LoopFinderRequest = {
       mode: "solveAll",
-      maxLength,
+      maxLength: maxLengthLoops,
+      minLength: minLengthLoops,
       rootNodeId: effectiveRootNodeId,
       nodeIds,
       adjacency: adj,
@@ -649,7 +638,7 @@ export function OrbifoldsExplorer() {
     };
 
     worker.postMessage(request);
-  }, [maxLengthLoopsInput, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
+  }, [maxLengthLoops, minLengthLoops, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
 
   // Handle selecting a loops result for preview
   const handlePreviewLoopsResult = useCallback(() => {
@@ -1009,25 +998,26 @@ export function OrbifoldsExplorer() {
             }}>
               {/* Step 1: Max length + Compute Voltages */}
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-                <label style={{ fontSize: "13px" }}>Max steps:</label>
-                <input
-                  type="text"
-                  value={maxLengthInput}
-                  onChange={(e) => {
-                    setMaxLengthInput(e.target.value);
-                    // Clear computed voltages when input changes
+                <ValidatedInput
+                  value={maxLength}
+                  onChange={(v) => {
+                    setMaxLength(v);
                     setReachableVoltages([]);
                     setSelectedTargetVoltageKey(null);
+                    if (minLength > v) setMinLength(v);
                   }}
+                  min={2}
+                  max={9999}
+                  label="Max steps"
                   disabled={solvingLoop || computingVoltages}
-                  style={{
-                    width: "60px",
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ccc",
-                    fontSize: "13px",
-                  }}
-                  placeholder="e.g. 5"
+                />
+                <ValidatedInput
+                  value={minLength}
+                  onChange={setMinLength}
+                  min={0}
+                  max={maxLength}
+                  label="Min steps"
+                  disabled={solvingLoop || computingVoltages}
                 />
                 <button
                   onClick={handleComputeVoltages}
@@ -1134,23 +1124,28 @@ export function OrbifoldsExplorer() {
             }}>
               {/* Max length + Find Loops button */}
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-                <label style={{ fontSize: "13px" }}>Max steps:</label>
-                <input
-                  type="text"
-                  value={maxLengthLoopsInput}
-                  onChange={(e) => {
-                    setMaxLengthLoopsInput(e.target.value);
+                <ValidatedInput
+                  value={maxLengthLoops}
+                  onChange={(v) => {
+                    setMaxLengthLoops(v);
+                    resetLoopsFinderState();
+                    if (minLengthLoops > v) setMinLengthLoops(v);
+                  }}
+                  min={2}
+                  max={9999}
+                  label="Max steps"
+                  disabled={solvingAllLoops}
+                />
+                <ValidatedInput
+                  value={minLengthLoops}
+                  onChange={(v) => {
+                    setMinLengthLoops(v);
                     resetLoopsFinderState();
                   }}
+                  min={0}
+                  max={maxLengthLoops}
+                  label="Min steps"
                   disabled={solvingAllLoops}
-                  style={{
-                    width: "60px",
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ccc",
-                    fontSize: "13px",
-                  }}
-                  placeholder="e.g. 5"
                 />
                 <button
                   onClick={handleFindAllLoops}

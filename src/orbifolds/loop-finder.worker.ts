@@ -52,6 +52,8 @@ export interface LoopFinderRequest {
   mode: "computeVoltages" | "solve" | "solveAll";
   /** Maximum number of steps in the loop (path length including return to root) */
   maxLength: number;
+  /** Minimum number of steps in the loop (default 0). Forbids null at steps 1..minLength. */
+  minLength?: number;
   /** The root node ID */
   rootNodeId: string;
   /** All node IDs */
@@ -341,8 +343,9 @@ function computeReachableVoltages(req: LoopFinderRequest): LoopFinderResponse {
 // ---- SAT solve for a loop with target voltage ----
 
 function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFinderResponse {
-  const { maxLength, rootNodeId, nodeIds, adjacency, edges, blackNodeIds,
+  const { maxLength, minLength: minLengthRaw, rootNodeId, nodeIds, adjacency, edges, blackNodeIds,
           targetVoltageKey, reachableVoltages } = req;
+  const minLength = minLengthRaw ?? 0;
 
   if (!targetVoltageKey || !reachableVoltages || reachableVoltages.length === 0) {
     return { success: false, error: "No target voltage specified", messageType: "result" };
@@ -493,6 +496,11 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
   // Null propagation: if null at t, then null at t+1
   for (let t = 0; t < L - 1; t++) {
     solver.addClause([-nl[t], nl[t + 1]]);
+  }
+
+  // Minimum length: forbid null at steps 1..minLength
+  for (let t = 1; t <= minLength && t < L; t++) {
+    solver.addClause([-nl[t]]);
   }
 
   // Early termination: if at root at step t (t >= 1), then null at t+1
