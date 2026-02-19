@@ -965,7 +965,7 @@ console.log("\nTest 19: minLength=4 with maxLength=4 forces exact length 4");
 console.log("\nTest 20: minLength=5 with only 4 non-black nodes should be UNSAT");
 {
   // With 5 black nodes, only 4 non-black remain (including root)
-  // A loop of minLength 5 needs at least 6 non-null steps but only 4 non-black nodes exist
+  // A loop of minLength 5 needs at least 5 edges, requiring 6 node positions, but only 4 non-black nodes exist
   const blackNodes = ["3,1", "5,1", "5,3", "3,5", "5,5"];
   const voltages = computeReachableVoltagesBFS(9, rootNodeId, nodeIds, edgeInfo, blackNodes);
   const identityK = voltageKey(I3);
