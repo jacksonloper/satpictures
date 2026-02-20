@@ -100,7 +100,7 @@ export function OrbifoldsExplorer() {
   const [minLengthLoops, setMinLengthLoops] = useState(0);
   const loopsWorkerRef = useRef<Worker | null>(null);
 
-  const minSize = wallpaperGroup === "P4g" ? 4 : 2;
+  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
   
   // Ref for SVG export
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
@@ -141,7 +141,7 @@ export function OrbifoldsExplorer() {
   }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    let nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
     if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
@@ -805,6 +805,7 @@ export function OrbifoldsExplorer() {
             <option value="P3">P3 (120° rotation - axial)</option>
             <option value="P4">P4 (90° rotation)</option>
             <option value="P4g">P4g (90° rotation + diagonal flip)</option>
+            <option value="P6">P6 (120° rotation + diagonal flip)</option>
           </select>
         </div>
         
@@ -827,8 +828,8 @@ export function OrbifoldsExplorer() {
           label="Expansion (m)"
         />
         
-        {/* Axial Transform Checkbox (only visible for P3) */}
-        {wallpaperGroup === "P3" && (
+        {/* Axial Transform Checkbox (only visible for P3/P6) */}
+        {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
               <input
@@ -1392,7 +1393,7 @@ export function OrbifoldsExplorer() {
         
         {/* Lifted Graph */}
         <div>
-          <h3 style={{ marginBottom: "10px" }}>Lifted Graph{wallpaperGroup === "P3" && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
+          <h3 style={{ marginBottom: "10px" }}>Lifted Graph{(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
             {inspectionInfo && (
@@ -1472,7 +1473,7 @@ export function OrbifoldsExplorer() {
             liftedGraph={liftedGraph}
             orbifoldGrid={orbifoldGrid}
             highlightOrbifoldNodeId={inspectionInfo?.nodeId}
-            useAxialTransform={wallpaperGroup === "P3" && useAxialTransform}
+            useAxialTransform={(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform}
             selectedVoltageKey={selectedVoltageKey}
             onNodeClick={handleLiftedNodeClick}
             showDomains={backgroundMode}
@@ -1536,9 +1537,9 @@ export function OrbifoldsExplorer() {
         <p style={{ marginTop: "8px" }}>
           Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
         </p>
-        {wallpaperGroup === "P3" && (
+        {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
           <p style={{ marginTop: "8px", color: "#666" }}>
-            <strong>Note:</strong> P3 uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
+            <strong>Note:</strong> {wallpaperGroup} uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
             may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
           </p>
         )}
