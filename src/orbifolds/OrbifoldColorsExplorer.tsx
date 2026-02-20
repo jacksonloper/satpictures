@@ -3,9 +3,12 @@
  *
  * A large-scale rasterized view of wallpaper-group orbifolds. The user picks
  * a wallpaper type, size n (default 40), and expansion m (default 160), then
- * generates either a random spanning tree or a random graph (edge probability
- * slider). The lifted graph is built, colored by connected component, and
- * rendered on a <canvas> for performance.
+ * generates either a random spanning tree or a random loop. The lifted graph
+ * is built, colored by connected component, and rendered on a <canvas> for
+ * performance.
+ *
+ * Random loop is found by DFS with random edge ordering at each node,
+ * tracking cycles and picking the longest one found.
  *
  * P3 always uses the axial transform.
  */
@@ -36,23 +39,103 @@ import "../App.css";
 const DEFAULT_N = 40;
 const DEFAULT_M = 160;
 const DEFAULT_DPI = 800;
-const DEFAULT_EDGE_PROB = 0.5;
 
 // ---------------------------------------------------------------------------
-// Random graph helper: independently keep each edge with probability p
+// Random loop helper: DFS with random edge order, track cycles, pick longest
 // ---------------------------------------------------------------------------
-function applyRandomGraph(
+function applyRandomLoop(
   grid: OrbifoldGrid<ColorData, EdgeStyleData>,
-  edgeProbability: number,
 ): OrbifoldGrid<ColorData, EdgeStyleData> {
+  // Build simple adjacency: nodeId -> list of { neighbor, edgeId }
+  // Skip self-loops.
+  type Adj = { neighbor: string; edgeId: string };
+  const adj = new Map<string, Adj[]>();
+  for (const nodeId of grid.nodes.keys()) adj.set(nodeId, []);
+
+  for (const [edgeId, edge] of grid.edges) {
+    const endpoints = Array.from(edge.halfEdges.keys());
+    if (endpoints.length === 1) continue; // self-loop
+    const [a, b] = endpoints;
+    if (a === b) continue; // self-loop (2 half-edges, same node)
+    adj.get(a)!.push({ neighbor: b, edgeId });
+    adj.get(b)!.push({ neighbor: a, edgeId });
+  }
+
+  // Shuffle each adjacency list (Fisher-Yates)
+  for (const list of adj.values()) {
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+  }
+
+  // Iterative DFS tracking the current path; when we find a back-edge to an
+  // ancestor, extract the cycle and keep the longest one found.
+  let bestCycleEdges: string[] = [];
+
+  // Pick a random start node
+  const nodeIds = Array.from(grid.nodes.keys());
+  const startIdx = Math.floor(Math.random() * nodeIds.length);
+  const startNode = nodeIds[startIdx];
+
+  const visited = new Set<string>();
+  // pathNodes[i] is the node, pathEdges[i] is the edge from pathNodes[i] to pathNodes[i+1]
+  const pathNodes: string[] = [];
+  const pathEdges: string[] = [];
+  const depthOf = new Map<string, number>(); // node -> index in pathNodes
+  // stack stores (node, edgeUsedToGetHere, adjIndex)
+  const stack: Array<{ node: string; edge: string; adjIdx: number }> = [];
+
+  // Initialize: push start node
+  visited.add(startNode);
+  pathNodes.push(startNode);
+  depthOf.set(startNode, 0);
+
+  // Push first frame: we iterate over adj of startNode
+  stack.push({ node: startNode, edge: "", adjIdx: 0 });
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    const neighbors = adj.get(frame.node)!;
+
+    if (frame.adjIdx >= neighbors.length) {
+      // Backtrack
+      stack.pop();
+      pathNodes.pop();
+      pathEdges.pop();
+      depthOf.delete(frame.node);
+      continue;
+    }
+
+    const { neighbor, edgeId } = neighbors[frame.adjIdx];
+    frame.adjIdx++;
+
+    if (depthOf.has(neighbor)) {
+      // Back-edge found → cycle from depthOf(neighbor) .. current depth
+      const cycleStart = depthOf.get(neighbor)!;
+      const cycleEdges = pathEdges.slice(cycleStart);
+      cycleEdges.push(edgeId); // edge back to ancestor
+      if (cycleEdges.length > bestCycleEdges.length) {
+        bestCycleEdges = cycleEdges;
+      }
+      continue;
+    }
+
+    if (visited.has(neighbor)) continue; // cross-edge, skip
+
+    // Tree edge: descend
+    visited.add(neighbor);
+    pathEdges.push(edgeId);
+    pathNodes.push(neighbor);
+    depthOf.set(neighbor, pathNodes.length - 1);
+    stack.push({ node: neighbor, edge: edgeId, adjIdx: 0 });
+  }
+
+  // Mark loop edges as solid, everything else dashed
+  const loopEdgeSet = new Set(bestCycleEdges);
   const newEdges = new Map(grid.edges);
   for (const [edgeId, edge] of newEdges) {
-    const endpoints = Array.from(edge.halfEdges.keys());
-    // Self-loops cannot be in a spanning tree / useful component – always dash
-    const isSelfLoop =
-      endpoints.length === 1 || (endpoints.length === 2 && endpoints[0] === endpoints[1]);
-    const linestyle: EdgeLinestyle =
-      isSelfLoop ? "dashed" : Math.random() < edgeProbability ? "solid" : "dashed";
+    const linestyle: EdgeLinestyle = loopEdgeSet.has(edgeId) ? "solid" : "dashed";
     newEdges.set(edgeId, { ...edge, data: { linestyle } });
   }
   return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
@@ -248,7 +331,6 @@ export function OrbifoldColorsExplorer() {
   const [size, setSize] = useState(DEFAULT_N);
   const [expansion, setExpansion] = useState(DEFAULT_M);
   const [dpi, setDpi] = useState(DEFAULT_DPI);
-  const [edgeProbability, setEdgeProbability] = useState(DEFAULT_EDGE_PROB);
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<string>("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -301,13 +383,13 @@ export function OrbifoldColorsExplorer() {
     buildAndRender(treeGrid);
   }, [ensureGrid, buildAndRender]);
 
-  // Random Graph handler
-  const handleRandomGraph = useCallback(() => {
+  // Random Loop handler
+  const handleRandomLoop = useCallback(() => {
     const grid = ensureGrid();
-    const graphGrid = applyRandomGraph(grid, edgeProbability);
-    gridRef.current = graphGrid;
-    buildAndRender(graphGrid);
-  }, [ensureGrid, buildAndRender, edgeProbability]);
+    const loopGrid = applyRandomLoop(grid);
+    gridRef.current = loopGrid;
+    buildAndRender(loopGrid);
+  }, [ensureGrid, buildAndRender]);
 
   // Size validation helper
   const validateSize = useCallback(
@@ -431,36 +513,21 @@ export function OrbifoldColorsExplorer() {
           🌲 Random Tree
         </button>
 
-        {/* Random Graph — slider + button in one row */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <button
-            onClick={handleRandomGraph}
-            disabled={busy}
-            style={{
-              padding: "6px 14px",
-              borderRadius: "4px",
-              border: "1px solid #2980b9",
-              backgroundColor: "#d6eaf8",
-              cursor: busy ? "wait" : "pointer",
-            }}
-            title={`Random graph – each edge kept with probability ${edgeProbability.toFixed(2)}`}
-          >
-            🔀 Random Graph
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={edgeProbability}
-            onChange={(e) => setEdgeProbability(Number(e.target.value))}
-            style={{ width: "100px" }}
-            title={`Edge probability: ${edgeProbability.toFixed(2)}`}
-          />
-          <span style={{ fontSize: "12px", minWidth: "32px" }}>
-            p={edgeProbability.toFixed(2)}
-          </span>
-        </div>
+        {/* Random Loop */}
+        <button
+          onClick={handleRandomLoop}
+          disabled={busy}
+          style={{
+            padding: "6px 14px",
+            borderRadius: "4px",
+            border: "1px solid #2980b9",
+            backgroundColor: "#d6eaf8",
+            cursor: busy ? "wait" : "pointer",
+          }}
+          title="Random loop – DFS with random edge order, picks the longest cycle found"
+        >
+          🔄 Random Loop
+        </button>
       </div>
 
       {/* Stats */}
