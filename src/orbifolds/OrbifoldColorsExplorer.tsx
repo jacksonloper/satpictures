@@ -184,12 +184,13 @@ class UnionFind {
 function computeComponents(
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>,
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>,
-): Map<string, number> {
+): { components: Map<string, number>; nodesWithSolidEdge: Set<string> } {
   const nodeIds = Array.from(liftedGraph.nodes.keys());
   const idxMap = new Map<string, number>();
   nodeIds.forEach((id, i) => idxMap.set(id, i));
 
   const uf = new UnionFind(nodeIds.length);
+  const nodesWithSolidEdge = new Set<string>();
   for (const edge of liftedGraph.edges.values()) {
     const orbEdge = edge.orbifoldEdgeId
       ? orbifoldGrid.edges.get(edge.orbifoldEdgeId)
@@ -198,12 +199,14 @@ function computeComponents(
     const ia = idxMap.get(edge.a);
     const ib = idxMap.get(edge.b);
     if (ia !== undefined && ib !== undefined) uf.union(ia, ib);
+    nodesWithSolidEdge.add(edge.a);
+    nodesWithSolidEdge.add(edge.b);
   }
 
   // Map root indices → component ids (0-based sequential)
   const rootToComp = new Map<number, number>();
   let nextComp = 0;
-  const result = new Map<string, number>();
+  const components = new Map<string, number>();
   for (let i = 0; i < nodeIds.length; i++) {
     const root = uf.find(i);
     let comp = rootToComp.get(root);
@@ -211,9 +214,9 @@ function computeComponents(
       comp = nextComp++;
       rootToComp.set(root, comp);
     }
-    result.set(nodeIds[i], comp);
+    components.set(nodeIds[i], comp);
   }
-  return result;
+  return { components, nodesWithSolidEdge };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +294,7 @@ function renderToCanvas(
   if (polys.length === 0) return;
 
   // 2. Compute connected components
-  const components = computeComponents(liftedGraph, orbifoldGrid);
+  const { components, nodesWithSolidEdge } = computeComponents(liftedGraph, orbifoldGrid);
 
   // 3. Determine scale so the image fits canvasSize pixels (same size regardless of m)
   const rangeX = bMaxX - bMinX || 1;
@@ -307,11 +310,15 @@ function renderToCanvas(
   const toX = (x: number) => 2 + (x - bMinX) * scale;
   const toY = (y: number) => 2 + (y - bMinY) * scale;
 
-  // 4. Draw each polygon
+  // 4. Draw each polygon (white for nodes with no solid edges)
   for (const poly of polys) {
-    const compId = components.get(poly.liftedId) ?? 0;
-    const [r, g, b] = componentColor(compId);
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    if (!nodesWithSolidEdge.has(poly.liftedId)) {
+      ctx.fillStyle = "rgb(255,255,255)";
+    } else {
+      const compId = components.get(poly.liftedId) ?? 0;
+      const [r, g, b] = componentColor(compId);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+    }
     ctx.beginPath();
     const c0 = poly.corners[0];
     ctx.moveTo(toX(c0.x), toY(c0.y));
