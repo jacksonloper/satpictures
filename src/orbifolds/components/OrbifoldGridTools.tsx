@@ -75,7 +75,7 @@ export function OrbifoldGridTools({
 }) {
   // Groups with doubled coordinate systems (4-unit spacing) need halved visual scale
   // to match the appearance of standard (2-unit) groups.
-  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g";
+  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g" || wallpaperGroup === "P6";
 
   // Compute bounding box of all polygon vertices
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

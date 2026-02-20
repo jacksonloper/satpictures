@@ -232,7 +232,7 @@ export function OrbifoldWeaveExplorer() {
   const [tubeRadius, setTubeRadius] = useState(0.25);
   const [beadSpeed, setBeadSpeed] = useState(1.0);
 
-  const minSize = wallpaperGroup === "P4g" ? 4 : 2;
+  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
 
   // Create the undoubled orbifold (used for voltage computation)
   const [undoubledGrid, setUndoubledGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -283,7 +283,7 @@ export function OrbifoldWeaveExplorer() {
   }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    const nextSize = nextGroup === "P4g" && size < 4 ? 4 : size;
+    const nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
@@ -700,6 +700,7 @@ export function OrbifoldWeaveExplorer() {
             <option value="P3">P3 (120° rotation - axial)</option>
             <option value="P4">P4 (90° rotation)</option>
             <option value="P4g">P4g (90° rotation + diagonal flip)</option>
+            <option value="P6">P6 (120° rotation + diagonal flip)</option>
           </select>
         </div>
 
@@ -1122,7 +1123,7 @@ export function OrbifoldWeaveExplorer() {
             <WeaveThreeRenderer
               liftedGraph={liftedGraph}
               orbifoldGrid={doubledGrid}
-              useAxialTransform={wallpaperGroup === "P3"}
+              useAxialTransform={wallpaperGroup === "P3" || wallpaperGroup === "P6"}
               highlightedOrbifoldNodeId={highlightedNodeId}
               levelSpacing={levelHeight}
               tubeRadius={tubeRadius}
