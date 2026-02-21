@@ -27,7 +27,7 @@ import {
   buildAdjacency,
   voltageKey,
 } from "../orbifoldbasics";
-import { createOrbifoldGrid, type WallpaperGroupType } from "../createOrbifolds";
+import { createOrbifoldGrid, getEdgeLinestyle, type WallpaperGroupType } from "../createOrbifolds";
 import { computeSolidEdges, doStepPure } from "./orbifoldExamplesHelpers";
 
 // ─── helpers ────────────────────────────────────────────────────────
@@ -88,6 +88,28 @@ export function OrbifoldExamplesViewer({
 
   // Collect all unique voltages from the orbifold (identity first)
   const orbifoldVoltages = useMemo(() => collectOrbifoldVoltages(grid), [grid]);
+
+  // Collect dashed-edge polygon sides per orbifold node (for wall rendering).
+  // For each orbifold node, gather the set of polygon side indices that
+  // correspond to "dashed" edges (same logic as in LiftedGraphRenderer).
+  const dashedSidesPerNode = useMemo(() => {
+    const dashedSides = new Map<OrbifoldNodeId, Set<number>>();
+    for (const edge of grid.edges.values()) {
+      const linestyle = getEdgeLinestyle(grid, edge.id);
+      if (linestyle !== "dashed") continue;
+      for (const [nodeId, halfEdge] of edge.halfEdges) {
+        let set = dashedSides.get(nodeId);
+        if (!set) {
+          set = new Set();
+          dashedSides.set(nodeId, set);
+        }
+        for (const side of halfEdge.polygonSides) {
+          set.add(side);
+        }
+      }
+    }
+    return dashedSides;
+  }, [grid]);
 
   // ── state: voltage per node ──
   const [nodeVoltages, setNodeVoltages] = useState<Map<OrbifoldNodeId, Matrix3x3>>(() => {
@@ -231,7 +253,7 @@ export function OrbifoldExamplesViewer({
     const groups: Array<{
       groupIndex: number;
       groupVoltage: Matrix3x3;
-      polygons: Array<{ corners: Array<{ x: number; y: number }> }>;
+      polygons: Array<{ nodeId: OrbifoldNodeId; corners: Array<{ x: number; y: number }> }>;
     }> = [];
 
     for (let gi = 0; gi < orbifoldVoltages.length; gi++) {
@@ -243,11 +265,11 @@ export function OrbifoldExamplesViewer({
         groups.push({
           groupIndex: gi,
           groupVoltage: gv,
-          polygons: mainPolygonData.map(pd => ({ corners: pd.corners })),
+          polygons: mainPolygonData.map(pd => ({ nodeId: pd.nodeId, corners: pd.corners })),
         });
       } else {
         // Shifted copy: for each node, apply groupVoltage * nodeVoltage to polygon
-        const polys: Array<{ corners: Array<{ x: number; y: number }> }> = [];
+        const polys: Array<{ nodeId: OrbifoldNodeId; corners: Array<{ x: number; y: number }> }> = [];
         for (const [nid, node] of grid.nodes) {
           const nv = nodeVoltages.get(nid) ?? I3;
           const combined = matMul(gv, nv);
@@ -256,13 +278,35 @@ export function OrbifoldExamplesViewer({
             if (useAxial) pos = axialToCartesian(pos.x, pos.y);
             return pos;
           });
-          polys.push({ corners });
+          polys.push({ nodeId: nid, corners });
         }
         groups.push({ groupIndex: gi, groupVoltage: gv, polygons: polys });
       }
     }
     return groups;
   }, [grid, nodeVoltages, orbifoldVoltages, mainPolygonData, useAxial]);
+
+  // Compute wall segments for each group: for each polygon, find which sides
+  // correspond to dashed edges and emit the transformed line segments.
+  const groupWallSegments = useMemo(() => {
+    const allGroupWalls: Array<Array<{ x1: number; y1: number; x2: number; y2: number }>> = [];
+    for (const group of groupPolygonData) {
+      const walls: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+      for (const poly of group.polygons) {
+        const sides = dashedSidesPerNode.get(poly.nodeId);
+        if (!sides) continue;
+        for (const sideIdx of sides) {
+          const p1 = poly.corners[sideIdx];
+          const p2 = poly.corners[(sideIdx + 1) % poly.corners.length];
+          if (p1 && p2) {
+            walls.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+          }
+        }
+      }
+      allGroupWalls.push(walls);
+    }
+    return allGroupWalls;
+  }, [groupPolygonData, dashedSidesPerNode]);
 
   // Compute bounding box of the main group only (for auto-zoom with ~50% margin)
   const mainBounds = useMemo(() => {
@@ -333,8 +377,21 @@ export function OrbifoldExamplesViewer({
       }
     }
 
+    // Draw walls: thick black lines on polygon sides corresponding to dashed edges
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 2 * invScale;
+    ctx.lineCap = "round";
+    for (const walls of groupWallSegments) {
+      for (const w of walls) {
+        ctx.beginPath();
+        ctx.moveTo(w.x1, w.y1);
+        ctx.lineTo(w.x2, w.y2);
+        ctx.stroke();
+      }
+    }
+
     ctx.restore();
-  }, [groupPolygonData, mainBounds, zoom, pan]);
+  }, [groupPolygonData, groupWallSegments, mainBounds, zoom, pan]);
 
   // Stats
   const dashedCount = edgeIds.length - solidEdges.size;
