@@ -39,6 +39,7 @@ import {
   LiftedGraphRenderer,
   OrbifoldGridTools,
   LoopResultRenderer,
+  SpanningTreeExampleRenderer,
   type ToolType,
   type InspectionInfo,
 } from "./components";
@@ -63,6 +64,7 @@ export function OrbifoldsExplorer() {
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [showWalls, setShowWalls] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(() => {
     const grid = createOrbifoldGrid("P1", DEFAULT_SIZE);
@@ -809,6 +811,21 @@ export function OrbifoldsExplorer() {
           </select>
         </div>
         
+        {/* Show Examples Button */}
+        <button
+          onClick={() => setShowExamples(prev => !prev)}
+          style={{
+            padding: "6px 16px",
+            borderRadius: "6px",
+            border: "1px solid #888",
+            background: showExamples ? "#e0e0ff" : "#f0f0f0",
+            cursor: "pointer",
+            fontWeight: showExamples ? 600 : 400,
+          }}
+        >
+          {showExamples ? "Hide examples" : "Show examples"}
+        </button>
+        
         {/* Size Input */}
         <ValidatedInput
           value={size}
@@ -842,6 +859,13 @@ export function OrbifoldsExplorer() {
           </div>
         )}
       </div>
+      
+      {/* Spanning tree example animation */}
+      {showExamples && (
+        <div style={{ marginBottom: "20px" }}>
+          <SpanningTreeExampleRenderer />
+        </div>
+      )}
       
       {/* Error message display */}
       {errorMessage && (
