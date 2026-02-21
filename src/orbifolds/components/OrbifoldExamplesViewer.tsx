@@ -27,7 +27,7 @@ import {
   buildAdjacency,
   voltageKey,
 } from "../orbifoldbasics";
-import { createOrbifoldGrid, getEdgeLinestyle, type WallpaperGroupType } from "../createOrbifolds";
+import { createOrbifoldGrid, type WallpaperGroupType } from "../createOrbifolds";
 import { computeSolidEdges, doStepPure } from "./orbifoldExamplesHelpers";
 
 // ─── helpers ────────────────────────────────────────────────────────
@@ -89,28 +89,6 @@ export function OrbifoldExamplesViewer({
   // Collect all unique voltages from the orbifold (identity first)
   const orbifoldVoltages = useMemo(() => collectOrbifoldVoltages(grid), [grid]);
 
-  // Collect dashed-edge polygon sides per orbifold node (for wall rendering).
-  // For each orbifold node, gather the set of polygon side indices that
-  // correspond to "dashed" edges (same logic as in LiftedGraphRenderer).
-  const dashedSidesPerNode = useMemo(() => {
-    const dashedSidesMap = new Map<OrbifoldNodeId, Set<number>>();
-    for (const edge of grid.edges.values()) {
-      const linestyle = getEdgeLinestyle(grid, edge.id);
-      if (linestyle !== "dashed") continue;
-      for (const [nodeId, halfEdge] of edge.halfEdges) {
-        let set = dashedSidesMap.get(nodeId);
-        if (!set) {
-          set = new Set();
-          dashedSidesMap.set(nodeId, set);
-        }
-        for (const side of halfEdge.polygonSides) {
-          set.add(side);
-        }
-      }
-    }
-    return dashedSidesMap;
-  }, [grid]);
-
   // ── state: voltage per node ──
   const [nodeVoltages, setNodeVoltages] = useState<Map<OrbifoldNodeId, Matrix3x3>>(() => {
     const m = new Map<OrbifoldNodeId, Matrix3x3>();
@@ -123,6 +101,27 @@ export function OrbifoldExamplesViewer({
     () => computeSolidEdges(grid, nodeVoltages),
     [grid, nodeVoltages],
   );
+
+  // Collect dashed-edge polygon sides per orbifold node (for wall rendering).
+  // An edge is "dashed" (a wall) when the node voltages DON'T agree across it.
+  // We use the dynamic `solidEdges` set, not the static grid linestyle.
+  const dashedSidesPerNode = useMemo(() => {
+    const dashedSidesMap = new Map<OrbifoldNodeId, Set<number>>();
+    for (const [eid, edge] of grid.edges) {
+      if (solidEdges.has(eid)) continue; // solid = not a wall
+      for (const [nodeId, halfEdge] of edge.halfEdges) {
+        let set = dashedSidesMap.get(nodeId);
+        if (!set) {
+          set = new Set();
+          dashedSidesMap.set(nodeId, set);
+        }
+        for (const side of halfEdge.polygonSides) {
+          set.add(side);
+        }
+      }
+    }
+    return dashedSidesMap;
+  }, [grid, solidEdges]);
 
   // ── animation ──
   const [running, setRunning] = useState(true);
@@ -357,9 +356,8 @@ export function OrbifoldExamplesViewer({
     const invScale = 1 / scale;
     const totalGroups = groupPolygonData.length;
 
-    // Draw all groups: polygons only, each group in its own color
+    // Draw all groups: polygon outlines only (no fill) so walls are visible
     for (const group of groupPolygonData) {
-      const fill = groupColor(group.groupIndex, totalGroups, 0.75);
       const stroke = groupColor(group.groupIndex, totalGroups, 0.9);
       for (const poly of group.polygons) {
         ctx.beginPath();
@@ -369,8 +367,6 @@ export function OrbifoldExamplesViewer({
           else ctx.lineTo(c.x, c.y);
         }
         ctx.closePath();
-        ctx.fillStyle = fill;
-        ctx.fill();
         ctx.strokeStyle = stroke;
         ctx.lineWidth = 0.5 * invScale;
         ctx.stroke();
@@ -379,7 +375,7 @@ export function OrbifoldExamplesViewer({
 
     // Draw walls: thick black lines on polygon sides corresponding to dashed edges
     ctx.strokeStyle = "black";
-    ctx.lineWidth = 2 * invScale;
+    ctx.lineWidth = 6 * invScale;
     ctx.lineCap = "round";
     for (const walls of groupWallSegments) {
       for (const w of walls) {
