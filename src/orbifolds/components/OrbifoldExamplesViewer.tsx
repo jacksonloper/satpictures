@@ -361,13 +361,16 @@ export function OrbifoldExamplesViewer({
 
   // Compute bounding box of the main group only (for auto-zoom with ~50% margin)
   const mainBounds = useMemo(() => {
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const pd of mainPolygonData) {
-      for (const c of pd.corners) {
-        minX = Math.min(minX, c.x);
-        maxX = Math.max(maxX, c.x);
-        minY = Math.min(minY, c.y);
-        maxY = Math.max(maxY, c.y);
+    let minX = 0, maxX = 1, minY = 0, maxY = 1;
+    if (mainPolygonData.length > 0) {
+      minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+      for (const pd of mainPolygonData) {
+        for (const c of pd.corners) {
+          minX = Math.min(minX, c.x);
+          maxX = Math.max(maxX, c.x);
+          minY = Math.min(minY, c.y);
+          maxY = Math.max(maxY, c.y);
+        }
       }
     }
     return { minX, maxX, minY, maxY };
@@ -403,7 +406,7 @@ export function OrbifoldExamplesViewer({
     ctx.translate(-midX, -midY);
 
     const invScale = 1 / scale;
-    const totalGroups = orbifoldVoltages.length;
+    const totalGroups = groupPolygonData.length;
 
     // Draw all groups: polygons only, each group in its own color
     for (const group of groupPolygonData) {
@@ -426,7 +429,7 @@ export function OrbifoldExamplesViewer({
     }
 
     ctx.restore();
-  }, [groupPolygonData, mainBounds, zoom, pan, orbifoldVoltages.length]);
+  }, [groupPolygonData, mainBounds, zoom, pan]);
 
   // Stats
   const dashedCount = edgeIds.length - solidEdges.size;
