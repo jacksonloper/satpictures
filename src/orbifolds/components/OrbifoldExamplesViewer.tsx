@@ -93,22 +93,22 @@ export function OrbifoldExamplesViewer({
   // For each orbifold node, gather the set of polygon side indices that
   // correspond to "dashed" edges (same logic as in LiftedGraphRenderer).
   const dashedSidesPerNode = useMemo(() => {
-    const dashedSides = new Map<OrbifoldNodeId, Set<number>>();
+    const dashedSidesMap = new Map<OrbifoldNodeId, Set<number>>();
     for (const edge of grid.edges.values()) {
       const linestyle = getEdgeLinestyle(grid, edge.id);
       if (linestyle !== "dashed") continue;
       for (const [nodeId, halfEdge] of edge.halfEdges) {
-        let set = dashedSides.get(nodeId);
+        let set = dashedSidesMap.get(nodeId);
         if (!set) {
           set = new Set();
-          dashedSides.set(nodeId, set);
+          dashedSidesMap.set(nodeId, set);
         }
         for (const side of halfEdge.polygonSides) {
           set.add(side);
         }
       }
     }
-    return dashedSides;
+    return dashedSidesMap;
   }, [grid]);
 
   // ── state: voltage per node ──
@@ -289,7 +289,7 @@ export function OrbifoldExamplesViewer({
   // Compute wall segments for each group: for each polygon, find which sides
   // correspond to dashed edges and emit the transformed line segments.
   const groupWallSegments = useMemo(() => {
-    const allGroupWalls: Array<Array<{ x1: number; y1: number; x2: number; y2: number }>> = [];
+    const groupWalls: Array<Array<{ x1: number; y1: number; x2: number; y2: number }>> = [];
     for (const group of groupPolygonData) {
       const walls: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
       for (const poly of group.polygons) {
@@ -303,9 +303,9 @@ export function OrbifoldExamplesViewer({
           }
         }
       }
-      allGroupWalls.push(walls);
+      groupWalls.push(walls);
     }
-    return allGroupWalls;
+    return groupWalls;
   }, [groupPolygonData, dashedSidesPerNode]);
 
   // Compute bounding box of the main group only (for auto-zoom with ~50% margin)
