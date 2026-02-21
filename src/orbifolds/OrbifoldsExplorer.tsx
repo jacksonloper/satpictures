@@ -1564,6 +1564,7 @@ export function OrbifoldsExplorer() {
       {/* Examples Viewer Modal */}
       {showExamples && (
         <OrbifoldExamplesViewer
+          key={wallpaperGroup}
           wallpaperGroup={wallpaperGroup}
           onClose={() => setShowExamples(false)}
         />

@@ -31,6 +31,7 @@ import { createOrbifoldGrid, type WallpaperGroupType, type ColorData, type EdgeS
 // ─── helpers ────────────────────────────────────────────────────────
 
 const FIXED_N = 40;
+const SPEED_SLIDER_MAX = 200;
 
 /** Check if two node voltages "agree" across a half-edge voltage.
  *  Agreement means: voltageB == voltageA * edgeVoltage
@@ -141,13 +142,6 @@ export function OrbifoldExamplesViewer({
     return m;
   });
 
-  // Reset when wallpaper group changes
-  useEffect(() => {
-    const m = new Map<OrbifoldNodeId, Matrix3x3>();
-    for (const nid of grid.nodes.keys()) m.set(nid, I3);
-    setNodeVoltages(m);
-  }, [grid]);
-
   // Derived: solid edges
   const solidEdges = useMemo(
     () => computeSolidEdges(grid, nodeVoltages),
@@ -160,7 +154,9 @@ export function OrbifoldExamplesViewer({
   const animFrameRef = useRef<number | null>(null);
   const lastStepRef = useRef(0);
   const stateRef = useRef({ nodeVoltages, solidEdges, grid, nodeIds, edgeIds });
-  stateRef.current = { nodeVoltages, solidEdges, grid, nodeIds, edgeIds };
+  useEffect(() => {
+    stateRef.current = { nodeVoltages, solidEdges, grid, nodeIds, edgeIds };
+  });
 
   const doStep = useCallback(() => {
     const { nodeVoltages: nv, solidEdges: se, grid: g, nodeIds: nids, edgeIds: eids } = stateRef.current;
@@ -182,7 +178,7 @@ export function OrbifoldExamplesViewer({
 
     // pick a random endpoint to change
     const idx = Math.random() < 0.5 ? 0 : 1;
-    const [nodeToChange, _halfToChange] = entries[idx];
+    const [nodeToChange] = entries[idx];
     const [otherNode, halfFromOther] = entries[1 - idx];
 
     // Compute required voltage for nodeToChange so that the edge becomes solid
@@ -235,7 +231,10 @@ export function OrbifoldExamplesViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panRef = useRef(pan);
+  useEffect(() => { panRef.current = pan; });
   const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -244,8 +243,10 @@ export function OrbifoldExamplesViewer({
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
-  }, [pan]);
+    const p = panRef.current;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: p.x, panY: p.y };
+    setDragging(true);
+  }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragRef.current) return;
@@ -256,6 +257,7 @@ export function OrbifoldExamplesViewer({
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = null;
+    setDragging(false);
   }, []);
 
   // ── rendering to canvas ──
@@ -322,6 +324,7 @@ export function OrbifoldExamplesViewer({
 
     // Edge lookup for line drawing
     const edgeSolid = solidEdges;
+    const invScale = 1 / scale;
 
     // Draw filled polygons
     for (const pd of polygonData) {
@@ -335,7 +338,7 @@ export function OrbifoldExamplesViewer({
       ctx.fillStyle = "rgba(200, 220, 255, 0.4)";
       ctx.fill();
       ctx.strokeStyle = "rgba(100, 140, 200, 0.3)";
-      ctx.lineWidth = 0.5 / scale;
+      ctx.lineWidth = 0.5 * invScale;
       ctx.stroke();
     }
 
@@ -368,12 +371,12 @@ export function OrbifoldExamplesViewer({
 
       if (isSolid) {
         ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
-        ctx.lineWidth = 1.5 / scale;
+        ctx.lineWidth = 1.5 * invScale;
         ctx.setLineDash([]);
       } else {
         ctx.strokeStyle = "rgba(180, 180, 180, 0.3)";
-        ctx.lineWidth = 0.5 / scale;
-        ctx.setLineDash([2 / scale, 2 / scale]);
+        ctx.lineWidth = 0.5 * invScale;
+        ctx.setLineDash([2 * invScale, 2 * invScale]);
       }
       ctx.stroke();
       ctx.setLineDash([]);
@@ -456,9 +459,9 @@ export function OrbifoldExamplesViewer({
             <input
               type="range"
               min={1}
-              max={200}
-              value={201 - speed}
-              onChange={(e) => setSpeed(201 - Number(e.target.value))}
+              max={SPEED_SLIDER_MAX}
+              value={SPEED_SLIDER_MAX + 1 - speed}
+              onChange={(e) => setSpeed(SPEED_SLIDER_MAX + 1 - Number(e.target.value))}
               style={{ width: "80px" }}
             />
           </label>
@@ -480,7 +483,7 @@ export function OrbifoldExamplesViewer({
           style={{
             border: "1px solid #ccc",
             borderRadius: "8px",
-            cursor: dragRef.current ? "grabbing" : "grab",
+            cursor: dragging ? "grabbing" : "grab",
             width: "100%",
             height: "auto",
             backgroundColor: "#f8f9fa",
