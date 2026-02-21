@@ -39,8 +39,8 @@ import {
 const ORBIFOLD_N = 40;
 
 // OU process parameters
-const THETA = 2.0;
-const SIGMA = 1.5;
+const THETA = 0.3;
+const SIGMA = 0.25;
 
 /* ---------- helpers ---------- */
 
