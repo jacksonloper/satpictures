@@ -18,9 +18,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   type Matrix3x3,
-  type OrbifoldGrid,
   type OrbifoldNodeId,
-  type OrbifoldEdgeId,
   I3,
   matMul,
   matEq,
@@ -29,102 +27,21 @@ import {
   buildAdjacency,
   voltageKey,
 } from "../orbifoldbasics";
-import { createOrbifoldGrid, type WallpaperGroupType, type ColorData, type EdgeStyleData } from "../createOrbifolds";
+import { createOrbifoldGrid, type WallpaperGroupType } from "../createOrbifolds";
+import { computeSolidEdges, doStepPure } from "./orbifoldExamplesHelpers";
 
 // ─── helpers ────────────────────────────────────────────────────────
 
 const FIXED_N = 40;
 const SPEED_SLIDER_MAX = 200;
-
-/** Check if two node voltages "agree" across a half-edge voltage.
- *  Agreement means: voltageB == voltageA * edgeVoltage
- */
-function voltagesAgree(
-  voltageA: Matrix3x3,
-  edgeVoltage: Matrix3x3,
-  voltageB: Matrix3x3,
-): boolean {
-  return matEq(matMul(voltageA, edgeVoltage), voltageB);
-}
-
-/**
- * Check if the set of "solid" edges (those whose node voltages agree)
- * forms a single connected component over ALL orbifold nodes.
- */
-function isSingleComponent(
-  nodeIds: OrbifoldNodeId[],
-  solidEdges: Set<OrbifoldEdgeId>,
-  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
-): boolean {
-  if (nodeIds.length <= 1) return true;
-
-  // Build adjacency from solidEdges
-  const adj = new Map<OrbifoldNodeId, OrbifoldNodeId[]>();
-  for (const nid of nodeIds) adj.set(nid, []);
-
-  for (const eid of solidEdges) {
-    const edge = grid.edges.get(eid);
-    if (!edge) continue;
-    const endpoints = Array.from(edge.halfEdges.keys());
-    if (endpoints.length === 2) {
-      adj.get(endpoints[0])?.push(endpoints[1]);
-      adj.get(endpoints[1])?.push(endpoints[0]);
-    }
-    // self-edges don't contribute to connectivity between distinct nodes
-  }
-
-  // BFS from first node
-  const visited = new Set<OrbifoldNodeId>();
-  const queue = [nodeIds[0]];
-  visited.add(nodeIds[0]);
-  let head = 0;
-  while (head < queue.length) {
-    const cur = queue[head++];
-    for (const nb of adj.get(cur) ?? []) {
-      if (!visited.has(nb)) {
-        visited.add(nb);
-        queue.push(nb);
-      }
-    }
-  }
-  return visited.size === nodeIds.length;
-}
-
-/**
- * Compute the set of solid edges from the current node-voltage assignment.
- */
-function computeSolidEdges(
-  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
-  nodeVoltages: Map<OrbifoldNodeId, Matrix3x3>,
-): Set<OrbifoldEdgeId> {
-  const solid = new Set<OrbifoldEdgeId>();
-  for (const [eid, edge] of grid.edges) {
-    const entries = Array.from(edge.halfEdges.entries());
-    if (entries.length === 2) {
-      const [nA, hA] = entries[0];
-      const vA = nodeVoltages.get(nA);
-      const vB = nodeVoltages.get(hA.to);
-      if (vA && vB && voltagesAgree(vA, hA.voltage, vB)) {
-        solid.add(eid);
-      }
-    } else if (entries.length === 1) {
-      // self-edge: always "solid" when node voltage agrees with itself via the involutive voltage
-      const [nA, hA] = entries[0];
-      const vA = nodeVoltages.get(nA);
-      if (vA && voltagesAgree(vA, hA.voltage, vA)) {
-        solid.add(eid);
-      }
-    }
-  }
-  return solid;
-}
+const MAX_STEPS_PER_FRAME = 100;
 
 /**
  * Collect all unique voltages from the orbifold's half-edges.
  * Returns an array of unique Matrix3x3 voltages (including identity).
  */
 function collectOrbifoldVoltages(
-  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+  grid: Parameters<typeof computeSolidEdges>[0],
 ): Matrix3x3[] {
   const seen = new Set<string>();
   const voltages: Matrix3x3[] = [];
@@ -187,7 +104,8 @@ export function OrbifoldExamplesViewer({
 
   // ── animation ──
   const [running, setRunning] = useState(true);
-  const [speed, setSpeed] = useState(50); // ms per step
+  const [speed, setSpeed] = useState(50); // ms per step (1 = fastest single-step)
+  const [stepsPerFrame, setStepsPerFrame] = useState(1);
   const animFrameRef = useRef<number | null>(null);
   const lastStepRef = useRef(0);
   const stateRef = useRef({ nodeVoltages, solidEdges, grid, nodeIds, edgeIds });
@@ -198,50 +116,33 @@ export function OrbifoldExamplesViewer({
   const doStep = useCallback(() => {
     const { nodeVoltages: nv, solidEdges: se, grid: g, nodeIds: nids, edgeIds: eids } = stateRef.current;
 
-    // collect dashed edges
-    const dashedEdges: OrbifoldEdgeId[] = [];
-    for (const eid of eids) {
-      if (!se.has(eid)) dashedEdges.push(eid);
+    // Work on mutable copies so doStepPure can mutate in-place
+    const nvCopy = new Map(nv);
+    const seCopy = new Set(se);
+
+    const result = doStepPure(nvCopy, seCopy, g, nids, eids);
+    if (result.accepted) {
+      setNodeVoltages(nvCopy);
     }
-    if (dashedEdges.length === 0) return; // fully assembled
+  }, []);
 
-    // pick random dashed edge
-    const eid = dashedEdges[Math.floor(Math.random() * dashedEdges.length)];
-    const edge = g.edges.get(eid);
-    if (!edge) return;
+  const doMultipleSteps = useCallback((count: number) => {
+    const { nodeVoltages: nv, solidEdges: se, grid: g, nodeIds: nids, edgeIds: eids } = stateRef.current;
 
-    const entries = Array.from(edge.halfEdges.entries());
-    if (entries.length !== 2) return; // skip self-edges for animation
+    // Work on mutable copies for the whole batch
+    const nvCopy = new Map(nv);
+    const seCopy = new Set(se);
+    let anyAccepted = false;
 
-    // pick a random endpoint to change
-    const idx = Math.random() < 0.5 ? 0 : 1;
-    const [nodeToChange] = entries[idx];
-    const [otherNode, halfFromOther] = entries[1 - idx];
-
-    // Compute required voltage for nodeToChange so that the edge becomes solid
-    // Agreement: voltageOther * halfFromOther.voltage == voltageToChange
-    // (halfFromOther goes from otherNode → nodeToChange with voltage V)
-    // So: voltageToChange = voltageOther * V
-    const vOther = nv.get(otherNode);
-    if (!vOther) return;
-    const requiredVoltage = matMul(vOther, halfFromOther.voltage);
-
-    // Check if this is actually a change
-    const currentVoltage = nv.get(nodeToChange);
-    if (currentVoltage && matEq(currentVoltage, requiredVoltage)) return;
-
-    // Create new voltage map with the proposed change
-    const newNv = new Map(nv);
-    newNv.set(nodeToChange, requiredVoltage);
-
-    // Compute new solid edges with this change
-    const newSolid = computeSolidEdges(g, newNv);
-
-    // Accept only if the solid edges form a single connected component
-    if (isSingleComponent(nids, newSolid, g)) {
-      setNodeVoltages(newNv);
+    for (let i = 0; i < count; i++) {
+      const result = doStepPure(nvCopy, seCopy, g, nids, eids);
+      if (result.accepted) anyAccepted = true;
     }
-    // else: nothing changes
+
+    // Commit the final state in one React update
+    if (anyAccepted) {
+      setNodeVoltages(nvCopy);
+    }
   }, []);
 
   useEffect(() => {
@@ -253,7 +154,11 @@ export function OrbifoldExamplesViewer({
 
     const loop = (ts: number) => {
       if (ts - lastStepRef.current >= speed) {
-        doStep();
+        if (stepsPerFrame > 1) {
+          doMultipleSteps(stepsPerFrame);
+        } else {
+          doStep();
+        }
         lastStepRef.current = ts;
       }
       animFrameRef.current = requestAnimationFrame(loop);
@@ -262,7 +167,7 @@ export function OrbifoldExamplesViewer({
     return () => {
       if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [running, speed, doStep]);
+  }, [running, speed, stepsPerFrame, doStep, doMultipleSteps]);
 
   // ── zoom & pan ──
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -505,11 +410,29 @@ export function OrbifoldExamplesViewer({
             <input
               type="range"
               min={1}
-              max={SPEED_SLIDER_MAX}
-              value={SPEED_SLIDER_MAX + 1 - speed}
-              onChange={(e) => setSpeed(SPEED_SLIDER_MAX + 1 - Number(e.target.value))}
-              style={{ width: "80px" }}
+              max={SPEED_SLIDER_MAX * 2}
+              value={stepsPerFrame > 1
+                ? SPEED_SLIDER_MAX + Math.round(((stepsPerFrame - 2) / (MAX_STEPS_PER_FRAME - 2)) * SPEED_SLIDER_MAX)
+                : SPEED_SLIDER_MAX + 1 - speed}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (v <= SPEED_SLIDER_MAX) {
+                  // Normal range: 1 step per frame, variable delay
+                  setSpeed(SPEED_SLIDER_MAX + 1 - v);
+                  setStepsPerFrame(1);
+                } else {
+                  // Turbo range: 0 delay, multiple steps per frame
+                  setSpeed(0);
+                  // Scale from 2 to MAX_STEPS_PER_FRAME across the turbo range
+                  const frac = (v - SPEED_SLIDER_MAX) / SPEED_SLIDER_MAX;
+                  setStepsPerFrame(Math.max(2, Math.round(2 + frac * (MAX_STEPS_PER_FRAME - 2))));
+                }
+              }}
+              style={{ width: "120px" }}
             />
+            {stepsPerFrame > 1 && (
+              <span style={{ color: "#e67e22", fontWeight: "bold" }}>⚡ ×{stepsPerFrame}/frame</span>
+            )}
           </label>
           <span style={{ fontSize: "12px", color: "#666" }}>
             Solid: {solidEdges.size} | Dashed: {dashedCount}
