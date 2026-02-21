@@ -39,6 +39,7 @@ import {
   LiftedGraphRenderer,
   OrbifoldGridTools,
   LoopResultRenderer,
+  OrbifoldExamplesViewer,
   type ToolType,
   type InspectionInfo,
 } from "./components";
@@ -99,6 +100,7 @@ export function OrbifoldsExplorer() {
   const [maxLengthLoops, setMaxLengthLoops] = useState(10);
   const [minLengthLoops, setMinLengthLoops] = useState(0);
   const loopsWorkerRef = useRef<Worker | null>(null);
+  const [showExamples, setShowExamples] = useState(false);
 
   const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
   
@@ -807,6 +809,20 @@ export function OrbifoldsExplorer() {
             <option value="P4g">P4g (90° rotation + diagonal flip)</option>
             <option value="P6">P6 (120° rotation + diagonal flip)</option>
           </select>
+          <button
+            onClick={() => setShowExamples(true)}
+            style={{
+              padding: "4px 12px",
+              borderRadius: "4px",
+              border: "1px solid #27ae60",
+              backgroundColor: "#e8f6ef",
+              cursor: "pointer",
+              fontSize: "13px",
+            }}
+            title="Show an animated example of the orbifold assembly process"
+          >
+            🧩 Show Examples
+          </button>
         </div>
         
         {/* Size Input */}
@@ -1544,6 +1560,14 @@ export function OrbifoldsExplorer() {
           </p>
         )}
       </div>
+
+      {/* Examples Viewer Modal */}
+      {showExamples && (
+        <OrbifoldExamplesViewer
+          wallpaperGroup={wallpaperGroup}
+          onClose={() => setShowExamples(false)}
+        />
+      )}
     </div>
   );
 }
