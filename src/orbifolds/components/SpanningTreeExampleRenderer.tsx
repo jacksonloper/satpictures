@@ -293,7 +293,7 @@ export function SpanningTreeExampleRenderer({
     const colorAttr = geom.getAttribute("color") as THREE.BufferAttribute;
     const tmpColor  = new THREE.Color();
 
-    /* ---- sync vertex colours from voltage array ---- */
+    /* ---- sync vertex colors from voltage array ---- */
     function syncColors(forceAll: boolean) {
       // Compute min/max for normalisation
       let lo = Infinity, hi = -Infinity;
@@ -308,7 +308,7 @@ export function SpanningTreeExampleRenderer({
         if (!forceAll && voltages[i] === prevVolt[i]) continue;
         dirty = true;
 
-        // Map to [0, 1] and use HSL colour wheel (blue → cyan → green → yellow → red)
+        // Map to [0, 1] and use HSL color wheel (blue → cyan → green → yellow → red)
         const t = (voltages[i] - lo) / range;
         tmpColor.setHSL(0.66 * (1 - t), 0.85, 0.5);
 
