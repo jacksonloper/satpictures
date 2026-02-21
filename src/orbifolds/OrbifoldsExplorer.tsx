@@ -863,7 +863,7 @@ export function OrbifoldsExplorer() {
       {/* Spanning tree example animation */}
       {showExamples && (
         <div style={{ marginBottom: "20px" }}>
-          <SpanningTreeExampleRenderer />
+          <SpanningTreeExampleRenderer wallpaperGroup={wallpaperGroup} />
         </div>
       )}
       
