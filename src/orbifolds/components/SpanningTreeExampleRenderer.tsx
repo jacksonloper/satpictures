@@ -1,17 +1,15 @@
 /**
  * Animated spanning tree example renderer using actual orbifold structure.
  *
- * For a given wallpaper group, creates an orbifold grid with n=40, builds an
- * initial random spanning tree via Kruskal's, computes voltage (3x3 matrix) for
- * each node by multiplying voltages along the tree path from root. Each node is
- * rendered using its native polygon (square → 2 triangles, triangle → 1 triangle)
- * transformed by the voltage matrix (with axial transform for P3/P6).
+ * For a given wallpaper group, creates an orbifold grid with n=40. Picks a
+ * random root node and does BFS from it (randomly choosing among multi-edges),
+ * which induces a spanning tree used to compute voltage (3x3 matrix) for each
+ * node. Each node is rendered using its native polygon (square → 2 triangles,
+ * triangle → 1 triangle) transformed by the voltage matrix (with axial
+ * transform for P3/P6). Nodes are colored by BFS distance from root.
  *
- * Animation: each frame performs one step of a random walk on spanning trees —
- * pick a random non-tree edge, add it (forming a cycle), remove a random edge
- * from that cycle. Only nodes whose voltage changed are updated in Three.js.
- * Multi-edges are handled by the SimpleEdge grouping (parallel orbifold edges
- * between the same pair count as one logical edge).
+ * Animation: each frame moves the root to a random neighbor, then re-BFS.
+ * Only nodes whose voltage changed get geometry updates in Three.js.
  *
  * Three.js uses an orthographic camera with pan+zoom (no rotation).
  */
@@ -39,26 +37,15 @@ import {
 
 const ORBIFOLD_N = 40;
 
-/* ---------- helpers ---------- */
-
-function randn(): number {
-  let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
 /**
  * A "simple edge" groups parallel orbifold edges between the same pair of
- * distinct nodes. Each gets one OU weight; when the tree selects this edge
- * we randomly pick one of the parallel orbifold edges (which determines the
- * voltage matrix used).
+ * distinct nodes. During BFS we randomly pick one of the parallel orbifold
+ * edges (which determines the voltage matrix used).
  */
 interface SimpleEdge {
   a: number;
   b: number;
   orbEdgeIds: OrbifoldEdgeId[];
-  weight: number;
 }
 
 interface NodeInfo {
@@ -68,6 +55,8 @@ interface NodeInfo {
   vertexCount: number;   // 3 for triangle, 6 for quad (split into 2 tris)
   voltage: Matrix3x3;
   prevVoltage: Matrix3x3;
+  dist: number;          // BFS distance from root
+  prevDist: number;
 }
 
 /* ---------- component ---------- */
@@ -112,6 +101,8 @@ export function SpanningTreeExampleRenderer({
         vertexCount,
         voltage: I3,
         prevVoltage: I3,
+        dist: 0,
+        prevDist: 0,
       });
       vertexOffset += vertexCount;
     }
@@ -137,190 +128,78 @@ export function SpanningTreeExampleRenderer({
         simpleEdges[existing].orbEdgeIds.push(eid);
       } else {
         pairKeyToIdx.set(pk, simpleEdges.length);
-        simpleEdges.push({ a: lo, b: hi, orbEdgeIds: [eid], weight: randn() });
+        simpleEdges.push({ a: lo, b: hi, orbEdgeIds: [eid] });
       }
     }
-    const numEdges = simpleEdges.length;
 
-    /* ---- Kruskal buffers ---- */
-    const sortArr = Array.from({ length: numEdges }, (_, i) => i);
-    const ufParent = new Int32Array(numNodes);
-    const ufRank = new Int32Array(numNodes);
-    const treeOrbId: (OrbifoldEdgeId | null)[] = new Array(numEdges).fill(null);
+    /* ---- per-node adjacency into simpleEdges ---- */
+    const nodeAdj: number[][] = new Array(numNodes);
+    for (let i = 0; i < numNodes; i++) nodeAdj[i] = [];
+    for (let ei = 0; ei < simpleEdges.length; ei++) {
+      nodeAdj[simpleEdges[ei].a].push(ei);
+      nodeAdj[simpleEdges[ei].b].push(ei);
+    }
 
     /* ---- BFS buffers ---- */
     const bfsQueue = new Int32Array(numNodes);
     const bfsVisited = new Uint8Array(numNodes);
 
-    /* ---- per-node adjacency into simpleEdges ---- */
-    const nodeAdj: number[][] = new Array(numNodes);
-    for (let i = 0; i < numNodes; i++) nodeAdj[i] = [];
-    for (let ei = 0; ei < numEdges; ei++) {
-      nodeAdj[simpleEdges[ei].a].push(ei);
-      nodeAdj[simpleEdges[ei].b].push(ei);
-    }
-
-    /* ---- Kruskal functions ---- */
-    function find(x: number): number {
-      while (ufParent[x] !== x) { ufParent[x] = ufParent[ufParent[x]]; x = ufParent[x]; }
-      return x;
-    }
-
-    function buildTree(): void {
-      for (let i = 0; i < numNodes; i++) { ufParent[i] = i; ufRank[i] = 0; }
-      treeOrbId.fill(null);
-      sortArr.sort((a, b) => simpleEdges[a].weight - simpleEdges[b].weight);
-
-      let added = 0;
-      for (let si = 0; si < numEdges && added < numNodes - 1; si++) {
-        const ei = sortArr[si];
-        const e = simpleEdges[ei];
-        const ra = find(e.a), rb = find(e.b);
-        if (ra !== rb) {
-          if (ufRank[ra] < ufRank[rb]) ufParent[ra] = rb;
-          else if (ufRank[ra] > ufRank[rb]) ufParent[rb] = ra;
-          else { ufParent[rb] = ra; ufRank[ra]++; }
-          const ids = e.orbEdgeIds;
-          treeOrbId[ei] = ids[Math.floor(Math.random() * ids.length)];
-          added++;
-        }
-      }
-    }
+    /* ---- current root ---- */
+    let rootIdx = Math.floor(Math.random() * numNodes);
 
     /**
-     * BFS from root (node 0) through spanning tree edges.
-     * Each node gets voltage = parentVoltage * halfEdgeVoltage.
+     * BFS from rootIdx through ALL simple edges (randomly picking one orbifold
+     * edge per simple edge). This induces a spanning tree and computes:
+     * - voltage for each node (product of half-edge voltages along tree path)
+     * - dist for each node (BFS distance from root)
      */
-    function computeVoltages(): void {
+    function bfsFromRoot(): void {
       bfsVisited.fill(0);
-      nodes[0].voltage = I3;
-      bfsVisited[0] = 1;
-      bfsQueue[0] = 0;
+      nodes[rootIdx].voltage = I3;
+      nodes[rootIdx].dist = 0;
+      bfsVisited[rootIdx] = 1;
+      bfsQueue[0] = rootIdx;
       let head = 0, tail = 1;
 
       while (head < tail) {
         const ni = bfsQueue[head++];
         const W = nodes[ni].voltage;
+        const d = nodes[ni].dist;
 
-        for (const ei of nodeAdj[ni]) {
-          const orbId = treeOrbId[ei];
-          if (!orbId) continue;
+        // Shuffle adjacency to randomize BFS tree among multi-edges
+        const adj = nodeAdj[ni];
+        for (let i = adj.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = adj[i]; adj[i] = adj[j]; adj[j] = tmp;
+        }
 
+        for (const ei of adj) {
           const e = simpleEdges[ei];
           const nbIdx = e.a === ni ? e.b : e.a;
           if (bfsVisited[nbIdx]) continue;
           bfsVisited[nbIdx] = 1;
 
-          // Look up the half-edge from this node toward the neighbor.
+          // Randomly pick one orbifold edge from the parallel group
+          const ids = e.orbEdgeIds;
+          const orbId = ids[Math.floor(Math.random() * ids.length)];
+
+          // Compute voltage: look up half-edge from this node toward neighbor
           const orbEdge = grid.edges.get(orbId)!;
           const thisNodeId = nodes[ni].orbNodeId;
           const half = orbEdge.halfEdges.get(thisNodeId);
 
           if (half) {
-            // A --(V)--> B: child voltage = W * V
             nodes[nbIdx].voltage = matMul(W, half.voltage);
           } else {
-            // Fallback: use inverse of the other direction
             const nbNodeId = nodes[nbIdx].orbNodeId;
             const nbHalf = orbEdge.halfEdges.get(nbNodeId)!;
             nodes[nbIdx].voltage = matMul(W, matInvUnimodular(nbHalf.voltage));
           }
 
+          nodes[nbIdx].dist = d + 1;
           bfsQueue[tail++] = nbIdx;
         }
       }
-    }
-
-    /* ---- random tree walk ---- */
-    const twParent = new Int32Array(numNodes);
-    const twParentEdge = new Int32Array(numNodes);
-    const twVisited = new Uint8Array(numNodes);
-    const twQueue = new Int32Array(numNodes);
-
-    /**
-     * Find the path in the current spanning tree between two nodes.
-     * Returns array of simple-edge indices on the path, or null if unreachable.
-     */
-    function findTreePath(start: number, end: number): number[] | null {
-      twVisited.fill(0);
-      twParent.fill(-1);
-      twParentEdge.fill(-1);
-
-      twVisited[start] = 1;
-      twQueue[0] = start;
-      let head = 0, tail = 1;
-
-      while (head < tail) {
-        const ni = twQueue[head++];
-        if (ni === end) break;
-
-        for (const ei of nodeAdj[ni]) {
-          if (!treeOrbId[ei]) continue; // not a tree edge
-          const e = simpleEdges[ei];
-          const nb = e.a === ni ? e.b : e.a;
-          if (twVisited[nb]) continue;
-          twVisited[nb] = 1;
-          twParent[nb] = ni;
-          twParentEdge[nb] = ei;
-          twQueue[tail++] = nb;
-        }
-      }
-
-      if (!twVisited[end]) return null;
-
-      const path: number[] = [];
-      let cur = end;
-      while (cur !== start) {
-        path.push(twParentEdge[cur]);
-        cur = twParent[cur];
-      }
-      return path;
-    }
-
-    /**
-     * One step of the random walk on spanning trees:
-     * 1. Pick a random non-tree edge
-     * 2. Adding it creates a cycle with the existing tree
-     * 3. Pick a random edge from that cycle and remove it
-     *
-     * Multi-edges are safe because SimpleEdge groups all parallel orbifold
-     * edges between a pair of nodes into one logical edge.
-     *
-     * Returns true if the tree actually changed.
-     */
-    function randomTreeWalkStep(): boolean {
-      // Collect non-tree simple-edge indices
-      const nonTreeEdges: number[] = [];
-      for (let ei = 0; ei < numEdges; ei++) {
-        if (!treeOrbId[ei]) nonTreeEdges.push(ei);
-      }
-      if (nonTreeEdges.length === 0) return false;
-
-      // Pick a random non-tree edge to add
-      const addEi = nonTreeEdges[Math.floor(Math.random() * nonTreeEdges.length)];
-      const addEdge = simpleEdges[addEi];
-
-      // Find the tree path between the two endpoints → forms a cycle
-      const pathEdges = findTreePath(addEdge.a, addEdge.b);
-      if (!pathEdges || pathEdges.length === 0) return false;
-
-      // Cycle = path edges + the new edge; pick a random one to remove
-      const cycleSize = pathEdges.length + 1;
-      const removeIdx = Math.floor(Math.random() * cycleSize);
-
-      if (removeIdx === pathEdges.length) {
-        // We picked the edge we were about to add → tree stays the same
-        return false;
-      }
-
-      const removeEi = pathEdges[removeIdx];
-
-      // Swap: remove old tree edge, add the new one
-      treeOrbId[removeEi] = null;
-      const ids = addEdge.orbEdgeIds;
-      treeOrbId[addEi] = ids[Math.floor(Math.random() * ids.length)];
-
-      return true;
     }
 
     /* ---- vertex transform ---- */
@@ -372,18 +251,10 @@ export function SpanningTreeExampleRenderer({
       }
     }
 
-    /**
-     * Map a voltage matrix to a scalar for HSL coloring. We use the
-     * translation part (col 2) plus a trace contribution to spread colors.
-     */
-    function voltageToScalar(V: Matrix3x3): number {
-      return V[0][2] * 0.37 + V[1][2] * 0.61 + (V[0][0] + V[1][1]) * 0.13;
-    }
-
+    /** Color a node by its BFS distance (normalized to [0,1]). */
     function writeNodeColor(i: number, t: number): void {
       const info = nodes[i];
       const vb = info.vertexBase;
-      // Golden-ratio hue spread for perceptual variety
       tmpColor.setHSL(((t * 0.618033988749895) % 1 + 1) % 1, 0.85, 0.5);
       for (let k = 0; k < info.vertexCount; k++) {
         colorAttr.setXYZ(vb + k, tmpColor.r, tmpColor.g, tmpColor.b);
@@ -391,14 +262,11 @@ export function SpanningTreeExampleRenderer({
     }
 
     /* ---- initial computation ---- */
-    buildTree();
-    computeVoltages();
+    bfsFromRoot();
 
-    const voltageScalars = new Float64Array(numNodes);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
     for (let i = 0; i < numNodes; i++) {
-      voltageScalars[i] = voltageToScalar(nodes[i].voltage);
       writeNodeGeometry(i);
       const info = nodes[i];
       for (let k = 0; k < info.vertexCount; k++) {
@@ -409,14 +277,14 @@ export function SpanningTreeExampleRenderer({
       }
     }
 
-    let sLo = Infinity, sHi = -Infinity;
+    // Color by distance
+    let maxDist = 0;
     for (let i = 0; i < numNodes; i++) {
-      if (voltageScalars[i] < sLo) sLo = voltageScalars[i];
-      if (voltageScalars[i] > sHi) sHi = voltageScalars[i];
+      if (nodes[i].dist > maxDist) maxDist = nodes[i].dist;
     }
-    const sRange = sHi - sLo || 1;
+    const distRange = maxDist || 1;
     for (let i = 0; i < numNodes; i++) {
-      writeNodeColor(i, (voltageScalars[i] - sLo) / sRange);
+      writeNodeColor(i, nodes[i].dist / distRange);
     }
     posAttr.needsUpdate = true;
     colorAttr.needsUpdate = true;
@@ -466,40 +334,44 @@ export function SpanningTreeExampleRenderer({
     function tick() {
       animId = requestAnimationFrame(tick);
 
-      // Save previous voltages
-      for (let i = 0; i < numNodes; i++) nodes[i].prevVoltage = nodes[i].voltage;
-
-      // One step of the random walk on spanning trees
-      const changed = randomTreeWalkStep();
-
-      if (changed) {
-        computeVoltages();
-
-        // Recompute scalars
-        let newSLo = Infinity, newSHi = -Infinity;
-        for (let i = 0; i < numNodes; i++) {
-          voltageScalars[i] = voltageToScalar(nodes[i].voltage);
-          if (voltageScalars[i] < newSLo) newSLo = voltageScalars[i];
-          if (voltageScalars[i] > newSHi) newSHi = voltageScalars[i];
-        }
-        const newSRange = newSHi - newSLo || 1;
-
-        // Update geometry only for nodes whose voltage changed
-        let posDirty = false;
-        for (let i = 0; i < numNodes; i++) {
-          if (!matEq(nodes[i].voltage, nodes[i].prevVoltage)) {
-            writeNodeGeometry(i);
-            posDirty = true;
-          }
-        }
-        // Colors depend on global range so update all
-        for (let i = 0; i < numNodes; i++) {
-          writeNodeColor(i, (voltageScalars[i] - newSLo) / newSRange);
-        }
-
-        if (posDirty) posAttr.needsUpdate = true;
-        colorAttr.needsUpdate = true;
+      // Save previous state
+      for (let i = 0; i < numNodes; i++) {
+        nodes[i].prevVoltage = nodes[i].voltage;
+        nodes[i].prevDist = nodes[i].dist;
       }
+
+      // Move root to a random neighbor
+      const adj = nodeAdj[rootIdx];
+      if (adj.length > 0) {
+        const ei = adj[Math.floor(Math.random() * adj.length)];
+        const e = simpleEdges[ei];
+        rootIdx = e.a === rootIdx ? e.b : e.a;
+      }
+
+      // Re-BFS from new root
+      bfsFromRoot();
+
+      // Update geometry only for nodes whose voltage changed
+      let posDirty = false;
+      for (let i = 0; i < numNodes; i++) {
+        if (!matEq(nodes[i].voltage, nodes[i].prevVoltage)) {
+          writeNodeGeometry(i);
+          posDirty = true;
+        }
+      }
+
+      // Color by distance — update all since range may shift
+      let newMaxDist = 0;
+      for (let i = 0; i < numNodes; i++) {
+        if (nodes[i].dist > newMaxDist) newMaxDist = nodes[i].dist;
+      }
+      const newDistRange = newMaxDist || 1;
+      for (let i = 0; i < numNodes; i++) {
+        writeNodeColor(i, nodes[i].dist / newDistRange);
+      }
+
+      if (posDirty) posAttr.needsUpdate = true;
+      colorAttr.needsUpdate = true;
 
       controls.update();
       renderer.render(scene, camera);
