@@ -2,13 +2,13 @@
  * Animated spanning tree example renderer using actual orbifold structure.
  *
  * For a given wallpaper group, creates an orbifold grid with n=40. Picks a
- * random root node and does BFS from it (randomly choosing among multi-edges),
+ * random root node and does DFS from it (randomly choosing among multi-edges),
  * which induces a spanning tree used to compute voltage (3x3 matrix) for each
  * node. Each node is rendered using its native polygon (square → 2 triangles,
  * triangle → 1 triangle) transformed by the voltage matrix (with axial
- * transform for P3/P6). Nodes are colored by BFS distance from root.
+ * transform for P3/P6). Nodes are colored by tree depth from root.
  *
- * Animation: each frame moves the root to a random neighbor, then re-BFS.
+ * Animation: each frame moves the root to a random neighbor, then re-DFS.
  * Only nodes whose voltage changed get geometry updates in Three.js.
  *
  * Three.js uses an orthographic camera with pan+zoom (no rotation).
@@ -39,7 +39,7 @@ const ORBIFOLD_N = 40;
 
 /**
  * A "simple edge" groups parallel orbifold edges between the same pair of
- * distinct nodes. During BFS we randomly pick one of the parallel orbifold
+ * distinct nodes. During DFS we randomly pick one of the parallel orbifold
  * edges (which determines the voltage matrix used).
  */
 interface SimpleEdge {
@@ -55,7 +55,7 @@ interface NodeInfo {
   vertexCount: number;   // 3 for triangle, 6 for quad (split into 2 tris)
   voltage: Matrix3x3;
   prevVoltage: Matrix3x3;
-  dist: number;          // BFS distance from root
+  dist: number;          // DFS depth from root
   prevDist: number;
 }
 
@@ -140,33 +140,33 @@ export function SpanningTreeExampleRenderer({
       nodeAdj[simpleEdges[ei].b].push(ei);
     }
 
-    /* ---- BFS buffers ---- */
-    const bfsQueue = new Int32Array(numNodes);
-    const bfsVisited = new Uint8Array(numNodes);
+    /* ---- DFS buffers ---- */
+    const dfsStack = new Int32Array(numNodes);
+    const dfsVisited = new Uint8Array(numNodes);
 
     /* ---- current root ---- */
     let rootIdx = Math.floor(Math.random() * numNodes);
 
     /**
-     * BFS from rootIdx through ALL simple edges (randomly picking one orbifold
+     * DFS from rootIdx through ALL simple edges (randomly picking one orbifold
      * edge per simple edge). This induces a spanning tree and computes:
      * - voltage for each node (product of half-edge voltages along tree path)
-     * - dist for each node (BFS distance from root)
+     * - dist for each node (tree depth from root)
      */
-    function bfsFromRoot(): void {
-      bfsVisited.fill(0);
+    function dfsFromRoot(): void {
+      dfsVisited.fill(0);
       nodes[rootIdx].voltage = I3;
       nodes[rootIdx].dist = 0;
-      bfsVisited[rootIdx] = 1;
-      bfsQueue[0] = rootIdx;
-      let head = 0, tail = 1;
+      dfsVisited[rootIdx] = 1;
+      dfsStack[0] = rootIdx;
+      let top = 1;
 
-      while (head < tail) {
-        const ni = bfsQueue[head++];
+      while (top > 0) {
+        const ni = dfsStack[--top];
         const W = nodes[ni].voltage;
         const d = nodes[ni].dist;
 
-        // Shuffle adjacency to randomize BFS tree among multi-edges
+        // Shuffle adjacency to randomize DFS tree among multi-edges
         const adj = nodeAdj[ni];
         for (let i = adj.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -176,8 +176,8 @@ export function SpanningTreeExampleRenderer({
         for (const ei of adj) {
           const e = simpleEdges[ei];
           const nbIdx = e.a === ni ? e.b : e.a;
-          if (bfsVisited[nbIdx]) continue;
-          bfsVisited[nbIdx] = 1;
+          if (dfsVisited[nbIdx]) continue;
+          dfsVisited[nbIdx] = 1;
 
           // Randomly pick one orbifold edge from the parallel group
           const ids = e.orbEdgeIds;
@@ -197,7 +197,7 @@ export function SpanningTreeExampleRenderer({
           }
 
           nodes[nbIdx].dist = d + 1;
-          bfsQueue[tail++] = nbIdx;
+          dfsStack[top++] = nbIdx;
         }
       }
     }
@@ -251,7 +251,7 @@ export function SpanningTreeExampleRenderer({
       }
     }
 
-    /** Color a node by its BFS distance (normalized to [0,1]). */
+    /** Color a node by its tree depth (normalized to [0,1]). */
     function writeNodeColor(i: number, t: number): void {
       const info = nodes[i];
       const vb = info.vertexBase;
@@ -262,7 +262,7 @@ export function SpanningTreeExampleRenderer({
     }
 
     /* ---- initial computation ---- */
-    bfsFromRoot();
+    dfsFromRoot();
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
@@ -348,8 +348,8 @@ export function SpanningTreeExampleRenderer({
         rootIdx = e.a === rootIdx ? e.b : e.a;
       }
 
-      // Re-BFS from new root
-      bfsFromRoot();
+      // Re-DFS from new root
+      dfsFromRoot();
 
       // Update geometry only for nodes whose voltage changed
       let posDirty = false;
