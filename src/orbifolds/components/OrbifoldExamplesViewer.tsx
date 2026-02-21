@@ -104,7 +104,7 @@ export function OrbifoldExamplesViewer({
 
   // ── animation ──
   const [running, setRunning] = useState(true);
-  const [speed, setSpeed] = useState(50); // ms per step (1 = fastest single-step)
+  const [speed, setSpeed] = useState(50); // ms delay between steps (0 = every frame)
   const [stepsPerFrame, setStepsPerFrame] = useState(1);
   const animFrameRef = useRef<number | null>(null);
   const lastStepRef = useRef(0);

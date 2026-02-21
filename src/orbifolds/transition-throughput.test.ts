@@ -5,6 +5,7 @@
  * transitions (those that don't disconnect the solid-edge graph).
  *
  * Run with: npx tsx src/orbifolds/transition-throughput.test.ts
+ * Also runs as part of: npm test
  */
 
 import { createOrbifoldGrid, type WallpaperGroupType } from "./createOrbifolds.js";
