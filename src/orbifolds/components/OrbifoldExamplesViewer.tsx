@@ -7,6 +7,8 @@
  *   • An edge is "solid" when the two endpoint node voltages agree with the edge voltage
  *     (i.e. nodeVoltage_B == nodeVoltage_A * edgeVoltage), "dashed" otherwise.
  *   • Render each node's polygon transformed by its voltage (axial → Cartesian for P3 / P6).
+ *   • For each unique voltage in the orbifold, create a shifted copy of all polygons,
+ *     each group colored distinctly. The main group (identity) stays in place.
  *   • Animate: at each step pick a random dashed edge, pick one endpoint, compute the
  *     voltage it *would* need to agree with the other endpoint, check that the resulting
  *     set of solid edges still forms a single connected component, and if so accept.
@@ -25,6 +27,7 @@ import {
   applyMatrix,
   axialToCartesian,
   buildAdjacency,
+  voltageKey,
 } from "../orbifoldbasics";
 import { createOrbifoldGrid, type WallpaperGroupType, type ColorData, type EdgeStyleData } from "../createOrbifolds";
 
@@ -116,6 +119,37 @@ function computeSolidEdges(
   return solid;
 }
 
+/**
+ * Collect all unique voltages from the orbifold's half-edges.
+ * Returns an array of unique Matrix3x3 voltages (including identity).
+ */
+function collectOrbifoldVoltages(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+): Matrix3x3[] {
+  const seen = new Set<string>();
+  const voltages: Matrix3x3[] = [];
+  // Always include identity as the first entry
+  seen.add(voltageKey(I3));
+  voltages.push(I3);
+  for (const edge of grid.edges.values()) {
+    for (const halfEdge of edge.halfEdges.values()) {
+      const key = voltageKey(halfEdge.voltage);
+      if (!seen.has(key)) {
+        seen.add(key);
+        voltages.push(halfEdge.voltage);
+      }
+    }
+  }
+  return voltages;
+}
+
+/** Generate a distinct HSL color for a group index. */
+function groupColor(groupIndex: number, totalGroups: number, alpha: number = 0.75): string {
+  if (totalGroups <= 1) return `hsla(210, 80%, 55%, ${alpha})`;
+  const hue = (groupIndex * 360 / totalGroups) % 360;
+  return `hsla(${hue}, 80%, 55%, ${alpha})`;
+}
+
 // ─── component ──────────────────────────────────────────────────────
 
 export function OrbifoldExamplesViewer({
@@ -134,6 +168,9 @@ export function OrbifoldExamplesViewer({
 
   const nodeIds = useMemo(() => Array.from(grid.nodes.keys()), [grid]);
   const edgeIds = useMemo(() => Array.from(grid.edges.keys()), [grid]);
+
+  // Collect all unique voltages from the orbifold (identity first)
+  const orbifoldVoltages = useMemo(() => collectOrbifoldVoltages(grid), [grid]);
 
   // ── state: voltage per node ──
   const [nodeVoltages, setNodeVoltages] = useState<Map<OrbifoldNodeId, Matrix3x3>>(() => {
@@ -263,16 +300,17 @@ export function OrbifoldExamplesViewer({
   // ── rendering to canvas ──
   const useAxial = wallpaperGroup === "P3" || wallpaperGroup === "P6";
 
-  // Pre-compute polygon data for each node
-  const polygonData = useMemo(() => {
+  // Pre-compute polygon corners for the main group (identity voltage copy).
+  // Each node's polygon is transformed by its node voltage.
+  const mainPolygonData = useMemo(() => {
     const data: Array<{
       nodeId: OrbifoldNodeId;
       corners: Array<{ x: number; y: number }>;
     }> = [];
     for (const [nid, node] of grid.nodes) {
-      const voltage = nodeVoltages.get(nid) ?? I3;
+      const nv = nodeVoltages.get(nid) ?? I3;
       const corners = node.polygon.map(([px, py]) => {
-        let pos = applyMatrix(voltage, px, py);
+        let pos = applyMatrix(nv, px, py);
         if (useAxial) pos = axialToCartesian(pos.x, pos.y);
         return pos;
       });
@@ -281,10 +319,50 @@ export function OrbifoldExamplesViewer({
     return data;
   }, [grid, nodeVoltages, useAxial]);
 
-  // Compute bounding box
-  const bounds = useMemo(() => {
+  // For each orbifold voltage V, create a shifted copy of the main polygons.
+  // The main (identity) copy uses the node voltages as-is.
+  // Other copies shift every corner by V (applied before axial transform).
+  const groupPolygonData = useMemo(() => {
+    const groups: Array<{
+      groupIndex: number;
+      groupVoltage: Matrix3x3;
+      polygons: Array<{ corners: Array<{ x: number; y: number }> }>;
+    }> = [];
+
+    for (let gi = 0; gi < orbifoldVoltages.length; gi++) {
+      const gv = orbifoldVoltages[gi];
+      const isIdentity = matEq(gv, I3);
+
+      if (isIdentity) {
+        // Main group: use pre-computed data
+        groups.push({
+          groupIndex: gi,
+          groupVoltage: gv,
+          polygons: mainPolygonData.map(pd => ({ corners: pd.corners })),
+        });
+      } else {
+        // Shifted copy: for each node, apply groupVoltage * nodeVoltage to polygon
+        const polys: Array<{ corners: Array<{ x: number; y: number }> }> = [];
+        for (const [nid, node] of grid.nodes) {
+          const nv = nodeVoltages.get(nid) ?? I3;
+          const combined = matMul(gv, nv);
+          const corners = node.polygon.map(([px, py]) => {
+            let pos = applyMatrix(combined, px, py);
+            if (useAxial) pos = axialToCartesian(pos.x, pos.y);
+            return pos;
+          });
+          polys.push({ corners });
+        }
+        groups.push({ groupIndex: gi, groupVoltage: gv, polygons: polys });
+      }
+    }
+    return groups;
+  }, [grid, nodeVoltages, orbifoldVoltages, mainPolygonData, useAxial]);
+
+  // Compute bounding box of the main group only (for auto-zoom with ~50% margin)
+  const mainBounds = useMemo(() => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const pd of polygonData) {
+    for (const pd of mainPolygonData) {
       for (const c of pd.corners) {
         minX = Math.min(minX, c.x);
         maxX = Math.max(maxX, c.x);
@@ -293,7 +371,7 @@ export function OrbifoldExamplesViewer({
       }
     }
     return { minX, maxX, minY, maxY };
-  }, [polygonData]);
+  }, [mainPolygonData]);
 
   // Draw
   const CANVAS_W = 800;
@@ -308,82 +386,47 @@ export function OrbifoldExamplesViewer({
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.save();
 
-    // Apply pan + zoom (center the content)
-    const rangeX = bounds.maxX - bounds.minX || 1;
-    const rangeY = bounds.maxY - bounds.minY || 1;
-    const baseScale = Math.min((CANVAS_W - 40) / rangeX, (CANVAS_H - 40) / rangeY);
+    // Auto-zoom: fit main group with ~50% margin on each side
+    // (i.e. main group occupies ~2/3 of the viewport)
+    const rangeX = mainBounds.maxX - mainBounds.minX || 1;
+    const rangeY = mainBounds.maxY - mainBounds.minY || 1;
+    const margin = 1.5; // 50% extra on each side → scale by 1/1.5
+    const baseScale = Math.min(CANVAS_W / (rangeX * margin), CANVAS_H / (rangeY * margin));
     const scale = baseScale * zoom;
     const cx = CANVAS_W / 2 + pan.x;
     const cy = CANVAS_H / 2 + pan.y;
-    const midX = (bounds.minX + bounds.maxX) / 2;
-    const midY = (bounds.minY + bounds.maxY) / 2;
+    const midX = (mainBounds.minX + mainBounds.maxX) / 2;
+    const midY = (mainBounds.minY + mainBounds.maxY) / 2;
 
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
     ctx.translate(-midX, -midY);
 
-    // Edge lookup for line drawing
-    const edgeSolid = solidEdges;
     const invScale = 1 / scale;
+    const totalGroups = orbifoldVoltages.length;
 
-    // Draw filled polygons
-    for (const pd of polygonData) {
-      ctx.beginPath();
-      for (let i = 0; i < pd.corners.length; i++) {
-        const c = pd.corners[i];
-        if (i === 0) ctx.moveTo(c.x, c.y);
-        else ctx.lineTo(c.x, c.y);
-      }
-      ctx.closePath();
-      ctx.fillStyle = "rgba(200, 220, 255, 0.4)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(100, 140, 200, 0.3)";
-      ctx.lineWidth = 0.5 * invScale;
-      ctx.stroke();
-    }
-
-    // Draw edges
-    for (const eid of edgeIds) {
-      const edge = grid.edges.get(eid);
-      if (!edge) continue;
-      const entries = Array.from(edge.halfEdges.entries());
-      if (entries.length !== 2) continue;
-
-      const [nA] = entries[0];
-      const [nB] = entries[1];
-      const nodeA = grid.nodes.get(nA);
-      const nodeB = grid.nodes.get(nB);
-      if (!nodeA || !nodeB) continue;
-
-      const vA = nodeVoltages.get(nA) ?? I3;
-      const vB = nodeVoltages.get(nB) ?? I3;
-      let posA = applyMatrix(vA, nodeA.coord[0], nodeA.coord[1]);
-      let posB = applyMatrix(vB, nodeB.coord[0], nodeB.coord[1]);
-      if (useAxial) {
-        posA = axialToCartesian(posA.x, posA.y);
-        posB = axialToCartesian(posB.x, posB.y);
-      }
-
-      const isSolid = edgeSolid.has(eid);
-      ctx.beginPath();
-      ctx.moveTo(posA.x, posA.y);
-      ctx.lineTo(posB.x, posB.y);
-
-      if (isSolid) {
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
-        ctx.lineWidth = 1.5 * invScale;
-        ctx.setLineDash([]);
-      } else {
-        ctx.strokeStyle = "rgba(180, 180, 180, 0.3)";
+    // Draw all groups: polygons only, each group in its own color
+    for (const group of groupPolygonData) {
+      const fill = groupColor(group.groupIndex, totalGroups, 0.75);
+      const stroke = groupColor(group.groupIndex, totalGroups, 0.9);
+      for (const poly of group.polygons) {
+        ctx.beginPath();
+        for (let i = 0; i < poly.corners.length; i++) {
+          const c = poly.corners[i];
+          if (i === 0) ctx.moveTo(c.x, c.y);
+          else ctx.lineTo(c.x, c.y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.strokeStyle = stroke;
         ctx.lineWidth = 0.5 * invScale;
-        ctx.setLineDash([2 * invScale, 2 * invScale]);
+        ctx.stroke();
       }
-      ctx.stroke();
-      ctx.setLineDash([]);
     }
 
     ctx.restore();
-  }, [polygonData, solidEdges, bounds, zoom, pan, grid, nodeVoltages, edgeIds, useAxial]);
+  }, [groupPolygonData, mainBounds, zoom, pan, orbifoldVoltages.length]);
 
   // Stats
   const dashedCount = edgeIds.length - solidEdges.size;
