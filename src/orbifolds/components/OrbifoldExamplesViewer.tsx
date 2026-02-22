@@ -146,15 +146,12 @@ function buildSpanningTreeVoltages(
     const curV = voltages.get(cur)!;
     for (const { neighbor, edgeId } of treeAdj.get(cur) ?? []) {
       if (voltages.has(neighbor)) continue;
-      // Get the half-edge from cur's side to determine the voltage
       const edge = grid.edges.get(edgeId)!;
       const halfFromCur = edge.halfEdges.get(cur);
-      if (halfFromCur) {
-        // Agreement: neighborV = curV * halfEdgeVoltage
-        voltages.set(neighbor, matMul(curV, halfFromCur.voltage));
-      } else {
-        voltages.set(neighbor, I3);
-      }
+      // halfFromCur should always exist since we built the tree from this edge,
+      // but fall back to identity as a safety measure.
+      const neighborV = halfFromCur ? matMul(curV, halfFromCur.voltage) : I3;
+      voltages.set(neighbor, neighborV);
       queue.push(neighbor);
     }
   }
