@@ -19,6 +19,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   type Matrix3x3,
   type OrbifoldNodeId,
+  type OrbifoldEdgeId,
   I3,
   matMul,
   matEq,
@@ -37,26 +38,132 @@ const SPEED_SLIDER_MAX = 200;
 const MAX_STEPS_PER_FRAME = 100;
 
 /**
- * Collect all unique voltages from the orbifold's half-edges.
- * Returns an array of unique Matrix3x3 voltages (including identity).
+ * Collect all unique voltages from the orbifold's half-edges, up to second order.
+ * Returns an array of unique Matrix3x3 voltages (including identity):
+ * - Identity
+ * - All first-order voltages A from half-edges
+ * - All second-order products A*B for any two first-order voltages A, B
  */
 function collectOrbifoldVoltages(
   grid: Parameters<typeof computeSolidEdges>[0],
 ): Matrix3x3[] {
   const seen = new Set<string>();
   const voltages: Matrix3x3[] = [];
+
   // Always include identity as the first entry
   seen.add(voltageKey(I3));
   voltages.push(I3);
+
+  // Collect first-order voltages from half-edges
+  const firstOrder: Matrix3x3[] = [I3];
   for (const edge of grid.edges.values()) {
     for (const halfEdge of edge.halfEdges.values()) {
       const key = voltageKey(halfEdge.voltage);
       if (!seen.has(key)) {
         seen.add(key);
         voltages.push(halfEdge.voltage);
+        firstOrder.push(halfEdge.voltage);
       }
     }
   }
+
+  // Collect second-order products A*B for all first-order A, B
+  for (const a of firstOrder) {
+    for (const b of firstOrder) {
+      const product = matMul(a, b);
+      const key = voltageKey(product);
+      if (!seen.has(key)) {
+        seen.add(key);
+        voltages.push(product);
+      }
+    }
+  }
+
+  return voltages;
+}
+
+/**
+ * Build a random spanning tree of the orbifold and assign consistent node voltages.
+ * Uses Kruskal's algorithm with random weights, then BFS from an arbitrary root
+ * to assign voltages so that every tree edge is "solid" (voltages agree).
+ */
+function buildSpanningTreeVoltages(
+  grid: Parameters<typeof computeSolidEdges>[0],
+): Map<OrbifoldNodeId, Matrix3x3> {
+  const nodeIdList = Array.from(grid.nodes.keys());
+  if (nodeIdList.length === 0) return new Map();
+
+  // Kruskal's: collect non-self-loop edges with random weights
+  type WEdge = { source: OrbifoldNodeId; target: OrbifoldNodeId; edgeId: OrbifoldEdgeId; weight: number };
+  const weightedEdges: WEdge[] = [];
+  for (const [eid, edge] of grid.edges) {
+    const entries = Array.from(edge.halfEdges.entries());
+    if (entries.length !== 2) continue; // skip self-loops
+    const [source] = entries[0];
+    const [target] = entries[1];
+    if (source === target) continue;
+    weightedEdges.push({ source, target, edgeId: eid, weight: Math.random() });
+  }
+  weightedEdges.sort((a, b) => a.weight - b.weight);
+
+  // Union-Find
+  const parent = new Map<OrbifoldNodeId, OrbifoldNodeId>();
+  const rank = new Map<OrbifoldNodeId, number>();
+  for (const nid of nodeIdList) { parent.set(nid, nid); rank.set(nid, 0); }
+  const find = (x: OrbifoldNodeId): OrbifoldNodeId => {
+    const p = parent.get(x)!;
+    if (p !== x) { const r = find(p); parent.set(x, r); return r; }
+    return x;
+  };
+  const union = (a: OrbifoldNodeId, b: OrbifoldNodeId): boolean => {
+    const ra = find(a), rb = find(b);
+    if (ra === rb) return false;
+    const rka = rank.get(ra) ?? 0, rkb = rank.get(rb) ?? 0;
+    if (rka < rkb) parent.set(ra, rb);
+    else if (rka > rkb) parent.set(rb, ra);
+    else { parent.set(rb, ra); rank.set(ra, rka + 1); }
+    return true;
+  };
+
+  // Build spanning tree adjacency: for each tree edge, store which half-edge to use
+  const treeAdj = new Map<OrbifoldNodeId, Array<{ neighbor: OrbifoldNodeId; edgeId: OrbifoldEdgeId }>>();
+  for (const nid of nodeIdList) treeAdj.set(nid, []);
+  for (const we of weightedEdges) {
+    if (union(we.source, we.target)) {
+      treeAdj.get(we.source)!.push({ neighbor: we.target, edgeId: we.edgeId });
+      treeAdj.get(we.target)!.push({ neighbor: we.source, edgeId: we.edgeId });
+    }
+  }
+
+  // BFS from root to assign voltages
+  const voltages = new Map<OrbifoldNodeId, Matrix3x3>();
+  const root = nodeIdList[0];
+  voltages.set(root, I3);
+  const queue = [root];
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    const curV = voltages.get(cur)!;
+    for (const { neighbor, edgeId } of treeAdj.get(cur) ?? []) {
+      if (voltages.has(neighbor)) continue;
+      // Get the half-edge from cur's side to determine the voltage
+      const edge = grid.edges.get(edgeId)!;
+      const halfFromCur = edge.halfEdges.get(cur);
+      if (halfFromCur) {
+        // Agreement: neighborV = curV * halfEdgeVoltage
+        voltages.set(neighbor, matMul(curV, halfFromCur.voltage));
+      } else {
+        voltages.set(neighbor, I3);
+      }
+      queue.push(neighbor);
+    }
+  }
+
+  // Any unreached nodes (disconnected graph) get identity
+  for (const nid of nodeIdList) {
+    if (!voltages.has(nid)) voltages.set(nid, I3);
+  }
+
   return voltages;
 }
 
@@ -457,6 +564,38 @@ export function OrbifoldExamplesViewer({
             }}
           >
             ⏭ Step
+          </button>
+          <button
+            onClick={() => {
+              const m = new Map<OrbifoldNodeId, Matrix3x3>();
+              for (const nid of grid.nodes.keys()) m.set(nid, I3);
+              setNodeVoltages(m);
+            }}
+            style={{
+              padding: "4px 12px",
+              borderRadius: "4px",
+              border: "1px solid #e67e22",
+              backgroundColor: "#fef5e7",
+              cursor: "pointer",
+            }}
+            title="Reset all node voltages to identity"
+          >
+            🔄 Restart Identity
+          </button>
+          <button
+            onClick={() => {
+              setNodeVoltages(buildSpanningTreeVoltages(grid));
+            }}
+            style={{
+              padding: "4px 12px",
+              borderRadius: "4px",
+              border: "1px solid #27ae60",
+              backgroundColor: "#e8f6ef",
+              cursor: "pointer",
+            }}
+            title="Build random spanning tree and assign consistent voltages"
+          >
+            🌲 Restart Tree
           </button>
           <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px" }}>
             Speed:
