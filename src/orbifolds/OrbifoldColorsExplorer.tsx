@@ -3,12 +3,9 @@
  *
  * A large-scale rasterized view of wallpaper-group orbifolds. The user picks
  * a wallpaper type, size n (default 40), and expansion m (default 160), then
- * generates either a random spanning tree or a random loop. The lifted graph
- * is built, colored by connected component, and rendered on a <canvas> for
- * performance.
- *
- * Random loop is found by DFS with random edge ordering at each node,
- * tracking cycles and picking the longest one found.
+ * generates either a random spanning tree or a random DFS deep tree. The
+ * lifted graph is built, colored by connected component, and rendered on a
+ * <canvas> for performance.
  *
  * P3 always uses the axial transform.
  */
@@ -41,9 +38,9 @@ const DEFAULT_M = 160;
 const DEFAULT_DPI = 800;
 
 // ---------------------------------------------------------------------------
-// Random loop helper: DFS with random edge order, track cycles, pick longest
+// Random DFS tree: DFS from random root with random edge order at each node
 // ---------------------------------------------------------------------------
-function applyRandomLoop(
+function applyRandomDfsTree(
   grid: OrbifoldGrid<ColorData, EdgeStyleData>,
 ): OrbifoldGrid<ColorData, EdgeStyleData> {
   // Build simple adjacency: nodeId -> list of { neighbor, edgeId }
@@ -69,73 +66,43 @@ function applyRandomLoop(
     }
   }
 
-  // Iterative DFS tracking the current path; when we find a back-edge to an
-  // ancestor, extract the cycle and keep the longest one found.
-  let bestCycleEdges: string[] = [];
-
-  // Pick a random start node
+  // DFS from random root, collecting tree edges
+  const treeEdges = new Set<string>();
   const nodeIds = Array.from(grid.nodes.keys());
   const startIdx = Math.floor(Math.random() * nodeIds.length);
   const startNode = nodeIds[startIdx];
 
   const visited = new Set<string>();
-  // pathNodes[i] is the node, pathEdges[i] is the edge from pathNodes[i] to pathNodes[i+1]
-  const pathNodes: string[] = [];
-  const pathEdges: string[] = [];
-  const depthOf = new Map<string, number>(); // node -> index in pathNodes
-  // stack stores (node, edgeUsedToGetHere, adjIndex)
-  const stack: Array<{ node: string; edge: string; adjIdx: number }> = [];
-
-  // Initialize: push start node
   visited.add(startNode);
-  pathNodes.push(startNode);
-  depthOf.set(startNode, 0);
 
-  // Push first frame: we iterate over adj of startNode
-  stack.push({ node: startNode, edge: "", adjIdx: 0 });
+  // Iterative DFS: stack of (node, adjIndex)
+  const stack: Array<{ node: string; adjIdx: number }> = [];
+  stack.push({ node: startNode, adjIdx: 0 });
 
   while (stack.length > 0) {
     const frame = stack[stack.length - 1];
     const neighbors = adj.get(frame.node)!;
 
     if (frame.adjIdx >= neighbors.length) {
-      // Backtrack
       stack.pop();
-      pathNodes.pop();
-      pathEdges.pop();
-      depthOf.delete(frame.node);
       continue;
     }
 
     const { neighbor, edgeId } = neighbors[frame.adjIdx];
     frame.adjIdx++;
 
-    if (depthOf.has(neighbor)) {
-      // Back-edge found → cycle from depthOf(neighbor) .. current depth
-      const cycleStart = depthOf.get(neighbor)!;
-      const cycleEdges = pathEdges.slice(cycleStart);
-      cycleEdges.push(edgeId); // edge back to ancestor
-      if (cycleEdges.length > bestCycleEdges.length) {
-        bestCycleEdges = cycleEdges;
-      }
-      continue;
-    }
+    if (visited.has(neighbor)) continue;
 
-    if (visited.has(neighbor)) continue; // cross-edge, skip
-
-    // Tree edge: descend
+    // Tree edge: mark and descend
     visited.add(neighbor);
-    pathEdges.push(edgeId);
-    pathNodes.push(neighbor);
-    depthOf.set(neighbor, pathNodes.length - 1);
-    stack.push({ node: neighbor, edge: edgeId, adjIdx: 0 });
+    treeEdges.add(edgeId);
+    stack.push({ node: neighbor, adjIdx: 0 });
   }
 
-  // Mark loop edges as solid, everything else dashed
-  const loopEdgeSet = new Set(bestCycleEdges);
+  // Mark tree edges as solid, everything else dashed
   const newEdges = new Map(grid.edges);
   for (const [edgeId, edge] of newEdges) {
-    const linestyle: EdgeLinestyle = loopEdgeSet.has(edgeId) ? "solid" : "dashed";
+    const linestyle: EdgeLinestyle = treeEdges.has(edgeId) ? "solid" : "dashed";
     newEdges.set(edgeId, { ...edge, data: { linestyle } });
   }
   return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
@@ -390,12 +357,12 @@ export function OrbifoldColorsExplorer() {
     buildAndRender(treeGrid);
   }, [ensureGrid, buildAndRender]);
 
-  // Random Loop handler
-  const handleRandomLoop = useCallback(() => {
+  // Random Deep Tree handler
+  const handleRandomDfsTree = useCallback(() => {
     const grid = ensureGrid();
-    const loopGrid = applyRandomLoop(grid);
-    gridRef.current = loopGrid;
-    buildAndRender(loopGrid);
+    const treeGrid = applyRandomDfsTree(grid);
+    gridRef.current = treeGrid;
+    buildAndRender(treeGrid);
   }, [ensureGrid, buildAndRender]);
 
   // Size validation helper
@@ -520,9 +487,9 @@ export function OrbifoldColorsExplorer() {
           🌲 Random Tree
         </button>
 
-        {/* Random Loop */}
+        {/* Random Deep Tree */}
         <button
-          onClick={handleRandomLoop}
+          onClick={handleRandomDfsTree}
           disabled={busy}
           style={{
             padding: "6px 14px",
@@ -531,9 +498,9 @@ export function OrbifoldColorsExplorer() {
             backgroundColor: "#d6eaf8",
             cursor: busy ? "wait" : "pointer",
           }}
-          title="Random loop – DFS with random edge order, picks the longest cycle found"
+          title="Random DFS tree – deep spanning tree from random root with random edge choices"
         >
-          🔄 Random Loop
+          🌳 Random Deep Tree
         </button>
       </div>
 
