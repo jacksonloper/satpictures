@@ -278,14 +278,20 @@ function renderToCanvas(
   const toY = (y: number) => 2 + (y - bMinY) * scale;
 
   // 4. Draw each polygon (white for nodes with no solid edges)
+  // Stroke with the same color as fill to eliminate sub-pixel gaps between polygons.
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 1;
   for (const poly of polys) {
+    let color: string;
     if (!nodesWithSolidEdge.has(poly.liftedId)) {
-      ctx.fillStyle = "rgb(255,255,255)";
+      color = "rgb(255,255,255)";
     } else {
       const compId = components.get(poly.liftedId) ?? 0;
       const [r, g, b] = componentColor(compId);
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      color = `rgb(${r},${g},${b})`;
     }
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
     ctx.beginPath();
     const c0 = poly.corners[0];
     ctx.moveTo(toX(c0.x), toY(c0.y));
@@ -294,6 +300,7 @@ function renderToCanvas(
     }
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
   }
 }
 
