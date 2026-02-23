@@ -111,6 +111,62 @@ function applyRandomDfsTree(
 }
 
 // ---------------------------------------------------------------------------
+// Random BFS tree: BFS from random root with random edge order at each node
+// ---------------------------------------------------------------------------
+function applyRandomBfsTree(
+  grid: OrbifoldGrid<ColorData, EdgeStyleData>,
+): OrbifoldGrid<ColorData, EdgeStyleData> {
+  type Adj = { neighbor: string; edgeId: string };
+  const adj = new Map<string, Adj[]>();
+  for (const nodeId of grid.nodes.keys()) adj.set(nodeId, []);
+
+  for (const [edgeId, edge] of grid.edges) {
+    const endpoints = Array.from(edge.halfEdges.keys());
+    if (endpoints.length === 1) continue;
+    const [a, b] = endpoints;
+    if (a === b) continue;
+    adj.get(a)!.push({ neighbor: b, edgeId });
+    adj.get(b)!.push({ neighbor: a, edgeId });
+  }
+
+  // Shuffle each adjacency list (Fisher-Yates)
+  for (const list of adj.values()) {
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+  }
+
+  // BFS from random root, collecting tree edges
+  const treeEdges = new Set<string>();
+  const nodeIds = Array.from(grid.nodes.keys());
+  const startIdx = Math.floor(Math.random() * nodeIds.length);
+  const startNode = nodeIds[startIdx];
+
+  const visited = new Set<string>();
+  visited.add(startNode);
+  const queue: string[] = [startNode];
+  let qi = 0;
+
+  while (qi < queue.length) {
+    const current = queue[qi++];
+    for (const { neighbor, edgeId } of adj.get(current)!) {
+      if (visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      treeEdges.add(edgeId);
+      queue.push(neighbor);
+    }
+  }
+
+  const newEdges = new Map(grid.edges);
+  for (const [edgeId, edge] of newEdges) {
+    const linestyle: EdgeLinestyle = treeEdges.has(edgeId) ? "solid" : "dashed";
+    newEdges.set(edgeId, { ...edge, data: { linestyle } });
+  }
+  return { nodes: grid.nodes, edges: newEdges, adjacency: grid.adjacency };
+}
+
+// ---------------------------------------------------------------------------
 // Union-Find for fast connected components
 // ---------------------------------------------------------------------------
 class UnionFind {
@@ -520,6 +576,14 @@ export function OrbifoldColorsExplorer() {
     buildAndRender(treeGrid);
   }, [ensureGrid, buildAndRender]);
 
+  // Random Shallow Tree handler (BFS)
+  const handleRandomBfsTree = useCallback(() => {
+    const grid = ensureGrid();
+    const treeGrid = applyRandomBfsTree(grid);
+    gridRef.current = treeGrid;
+    buildAndRender(treeGrid);
+  }, [ensureGrid, buildAndRender]);
+
   // Size validation helper
   const validateSize = useCallback(
     (raw: string) => {
@@ -633,6 +697,22 @@ export function OrbifoldColorsExplorer() {
           title="Random DFS tree – deep spanning tree from random root with random edge choices"
         >
           🌳 Random Deep Tree
+        </button>
+
+        {/* Random Shallow Tree */}
+        <button
+          onClick={handleRandomBfsTree}
+          disabled={busy}
+          style={{
+            padding: "6px 14px",
+            borderRadius: "4px",
+            border: "1px solid #8e44ad",
+            backgroundColor: "#f0e6f6",
+            cursor: busy ? "wait" : "pointer",
+          }}
+          title="Random BFS tree – shallow spanning tree from random root with random edge choices"
+        >
+          🌿 Shallow Tree
         </button>
       </div>
 
