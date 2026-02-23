@@ -218,18 +218,21 @@ function componentColorNorm(compId: number): [number, number, number] {
 }
 
 // ---------------------------------------------------------------------------
-// Build Three.js mesh from lifted graph polygons
+// Build Three.js mesh + wall lines from lifted graph polygons
 // ---------------------------------------------------------------------------
-function buildPolygonMesh(
+function buildSceneObjects(
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>,
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>,
   useAxialTransform: boolean,
-): THREE.Mesh {
+): { mesh: THREE.Mesh; walls: THREE.LineSegments } {
   const { components, nodesWithSolidEdge } = computeComponents(liftedGraph, orbifoldGrid);
 
-  // Collect all triangles: fan-triangulate each polygon
+  // --- 1. Triangulated polygon mesh ---
   const positions: number[] = [];
   const colors: number[] = [];
+
+  // Pre-compute transformed corners per lifted node for reuse by wall drawing
+  const nodeCorners = new Map<string, { x: number; y: number }[]>();
 
   for (const [id, node] of liftedGraph.nodes) {
     const orbNode = orbifoldGrid.nodes.get(node.orbifoldNode);
@@ -240,6 +243,7 @@ function buildPolygonMesh(
       if (useAxialTransform) pos = axialToCartesian(pos.x, pos.y);
       return pos;
     });
+    nodeCorners.set(id, corners);
 
     // Determine color
     let r: number, g: number, b: number;
@@ -261,12 +265,55 @@ function buildPolygonMesh(
     }
   }
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const triGeometry = new THREE.BufferGeometry();
+  triGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  triGeometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const mesh = new THREE.Mesh(triGeometry, new THREE.MeshBasicMaterial({ vertexColors: true }));
 
-  const material = new THREE.MeshBasicMaterial({ vertexColors: true });
-  return new THREE.Mesh(geometry, material);
+  // --- 2. Wall line segments between differently-colored neighbors ---
+  const wallPositions: number[] = [];
+
+  for (const edge of liftedGraph.edges.values()) {
+    const compA = components.get(edge.a);
+    const compB = components.get(edge.b);
+    // Only draw wall if both nodes exist and have different component colors
+    if (compA === undefined || compB === undefined || compA === compB) continue;
+
+    // Also skip if either node has no solid edge (both would be white)
+    if (!nodesWithSolidEdge.has(edge.a) && !nodesWithSolidEdge.has(edge.b)) continue;
+
+    const orbEdgeId = edge.orbifoldEdgeId;
+    if (!orbEdgeId) continue;
+    const orbEdge = orbifoldGrid.edges.get(orbEdgeId);
+    if (!orbEdge) continue;
+
+    // Get node A's info to find wall segments
+    const nodeA = liftedGraph.nodes.get(edge.a);
+    if (!nodeA) continue;
+    const cornersA = nodeCorners.get(edge.a);
+    if (!cornersA) continue;
+
+    // Use the half-edge on node A's orbifold node to find polygon sides
+    const halfEdge = orbEdge.halfEdges.get(nodeA.orbifoldNode);
+    if (!halfEdge) continue;
+
+    for (const sideIdx of halfEdge.polygonSides) {
+      const p1 = cornersA[sideIdx];
+      const p2 = cornersA[(sideIdx + 1) % cornersA.length];
+      // Slightly above the polygon plane so walls render on top
+      wallPositions.push(p1.x, p1.y, 0.1);
+      wallPositions.push(p2.x, p2.y, 0.1);
+    }
+  }
+
+  const wallGeometry = new THREE.BufferGeometry();
+  wallGeometry.setAttribute("position", new THREE.Float32BufferAttribute(wallPositions, 3));
+  const walls = new THREE.LineSegments(
+    wallGeometry,
+    new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1 }),
+  );
+
+  return { mesh, walls };
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +334,7 @@ export function OrbifoldColorsExplorer() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameRef = useRef<number>(0);
   const meshRef = useRef<THREE.Mesh | null>(null);
+  const wallsRef = useRef<THREE.LineSegments | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
 
@@ -391,7 +439,7 @@ export function OrbifoldColorsExplorer() {
         for (let i = 0; i < expansion; i++) processAllNonInteriorOnce(lifted);
         const t1 = performance.now();
 
-        // Remove old mesh
+        // Remove old mesh and walls
         if (meshRef.current) {
           scene.remove(meshRef.current);
           meshRef.current.geometry.dispose();
@@ -400,11 +448,21 @@ export function OrbifoldColorsExplorer() {
           else (mat as THREE.Material).dispose();
           meshRef.current = null;
         }
+        if (wallsRef.current) {
+          scene.remove(wallsRef.current);
+          wallsRef.current.geometry.dispose();
+          const mat = wallsRef.current.material;
+          if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+          else (mat as THREE.Material).dispose();
+          wallsRef.current = null;
+        }
 
         const useAxial = wallpaperGroup === "P3";
-        const mesh = buildPolygonMesh(lifted, grid, useAxial);
+        const { mesh, walls } = buildSceneObjects(lifted, grid, useAxial);
         scene.add(mesh);
+        scene.add(walls);
         meshRef.current = mesh;
+        wallsRef.current = walls;
 
         // Fit camera to mesh bounding box
         mesh.geometry.computeBoundingBox();
