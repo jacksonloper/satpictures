@@ -1,16 +1,19 @@
 /**
  * Orbifold Colors Explorer Page
  *
- * A large-scale rasterized view of wallpaper-group orbifolds. The user picks
- * a wallpaper type, size n (default 40), and expansion m (default 160), then
- * generates either a random spanning tree or a random DFS deep tree. The
- * lifted graph is built, colored by connected component, and rendered on a
- * <canvas> for performance.
+ * A large-scale view of wallpaper-group orbifolds rendered with Three.js.
+ * The user picks a wallpaper type, size n (default 40), and expansion m
+ * (default 160), then generates either a random spanning tree or a random
+ * DFS deep tree. The lifted graph is built, colored by connected component,
+ * and rendered as triangulated polygons using an orthographic camera with
+ * pan and zoom.
  *
  * P3 always uses the axial transform.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   createOrbifoldGrid,
   type WallpaperGroupType,
@@ -35,7 +38,6 @@ import "../App.css";
 // ---------------------------------------------------------------------------
 const DEFAULT_N = 40;
 const DEFAULT_M = 160;
-const DEFAULT_DPI = 800;
 
 // ---------------------------------------------------------------------------
 // Random DFS tree: DFS from random root with random edge order at each node
@@ -187,11 +189,10 @@ function computeComponents(
 }
 
 // ---------------------------------------------------------------------------
-// Color from component id
+// Color from component id  (returns normalized [0,1] RGB)
 // ---------------------------------------------------------------------------
-function componentColor(compId: number): [number, number, number] {
+function componentColorNorm(compId: number): [number, number, number] {
   const hue = (compId * 137.508) % 360;
-  // HSL -> RGB (s=70%, l=50%)
   const s = 0.7,
     l = 0.5;
   const c = (1 - Math.abs(2 * l - 1)) * s;
@@ -213,95 +214,59 @@ function componentColor(compId: number): [number, number, number] {
   } else {
     r = c; g = 0; b = x;
   }
-  return [
-    Math.round((r + m) * 255),
-    Math.round((g + m) * 255),
-    Math.round((b + m) * 255),
-  ];
+  return [r + m, g + m, b + m];
 }
 
 // ---------------------------------------------------------------------------
-// Canvas rendering: rasterize polygons by scan-line fill
+// Build Three.js mesh from lifted graph polygons
 // ---------------------------------------------------------------------------
-function renderToCanvas(
-  canvas: HTMLCanvasElement,
+function buildPolygonMesh(
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>,
   orbifoldGrid: OrbifoldGrid<ColorData, EdgeStyleData>,
   useAxialTransform: boolean,
-  canvasSize: number,
-) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
+): THREE.Mesh {
+  const { components, nodesWithSolidEdge } = computeComponents(liftedGraph, orbifoldGrid);
 
-  // 1. Compute polygon corners for every lifted node
-  type Poly = { corners: { x: number; y: number }[]; liftedId: string };
-  const polys: Poly[] = [];
-  let bMinX = Infinity,
-    bMaxX = -Infinity,
-    bMinY = Infinity,
-    bMaxY = -Infinity;
+  // Collect all triangles: fan-triangulate each polygon
+  const positions: number[] = [];
+  const colors: number[] = [];
 
   for (const [id, node] of liftedGraph.nodes) {
     const orbNode = orbifoldGrid.nodes.get(node.orbifoldNode);
     if (!orbNode) continue;
+
     const corners = orbNode.polygon.map(([px, py]) => {
       let pos = applyMatrix(node.voltage, px, py);
       if (useAxialTransform) pos = axialToCartesian(pos.x, pos.y);
       return pos;
     });
-    for (const c of corners) {
-      if (c.x < bMinX) bMinX = c.x;
-      if (c.x > bMaxX) bMaxX = c.x;
-      if (c.y < bMinY) bMinY = c.y;
-      if (c.y > bMaxY) bMaxY = c.y;
-    }
-    polys.push({ corners, liftedId: id });
-  }
 
-  if (polys.length === 0) return;
-
-  // 2. Compute connected components
-  const { components, nodesWithSolidEdge } = computeComponents(liftedGraph, orbifoldGrid);
-
-  // 3. Determine scale so the image fits canvasSize pixels (same size regardless of m)
-  const rangeX = bMaxX - bMinX || 1;
-  const rangeY = bMaxY - bMinY || 1;
-  const scale = (canvasSize - 4) / Math.max(rangeX, rangeY);
-  const w = Math.ceil(rangeX * scale) + 4;
-  const h = Math.ceil(rangeY * scale) + 4;
-
-  canvas.width = w;
-  canvas.height = h;
-  ctx.clearRect(0, 0, w, h);
-
-  const toX = (x: number) => 2 + (x - bMinX) * scale;
-  const toY = (y: number) => 2 + (y - bMinY) * scale;
-
-  // 4. Draw each polygon (white for nodes with no solid edges)
-  // Stroke with the same color as fill to eliminate sub-pixel gaps between polygons.
-  ctx.lineJoin = "round";
-  ctx.lineWidth = 1;
-  for (const poly of polys) {
-    let color: string;
-    if (!nodesWithSolidEdge.has(poly.liftedId)) {
-      color = "rgb(255,255,255)";
+    // Determine color
+    let r: number, g: number, b: number;
+    if (!nodesWithSolidEdge.has(id)) {
+      r = 1; g = 1; b = 1; // white
     } else {
-      const compId = components.get(poly.liftedId) ?? 0;
-      const [r, g, b] = componentColor(compId);
-      color = `rgb(${r},${g},${b})`;
+      const compId = components.get(id) ?? 0;
+      [r, g, b] = componentColorNorm(compId);
     }
-    ctx.fillStyle = color;
-    ctx.strokeStyle = color;
-    ctx.beginPath();
-    const c0 = poly.corners[0];
-    ctx.moveTo(toX(c0.x), toY(c0.y));
-    for (let i = 1; i < poly.corners.length; i++) {
-      ctx.lineTo(toX(poly.corners[i].x), toY(poly.corners[i].y));
+
+    // Fan triangulation: vertex 0 connects to each consecutive pair
+    for (let i = 1; i < corners.length - 1; i++) {
+      positions.push(corners[0].x, corners[0].y, 0);
+      positions.push(corners[i].x, corners[i].y, 0);
+      positions.push(corners[i + 1].x, corners[i + 1].y, 0);
+      colors.push(r, g, b);
+      colors.push(r, g, b);
+      colors.push(r, g, b);
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
   }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+
+  const material = new THREE.MeshBasicMaterial({ vertexColors: true });
+  return new THREE.Mesh(geometry, material);
 }
 
 // ---------------------------------------------------------------------------
@@ -311,15 +276,96 @@ export function OrbifoldColorsExplorer() {
   const [wallpaperGroup, setWallpaperGroup] = useState<WallpaperGroupType>("P1");
   const [size, setSize] = useState(DEFAULT_N);
   const [expansion, setExpansion] = useState(DEFAULT_M);
-  const [dpi, setDpi] = useState(DEFAULT_DPI);
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<string>("");
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Three.js refs
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const animFrameRef = useRef<number>(0);
+  const meshRef = useRef<THREE.Mesh | null>(null);
 
   const minSize = wallpaperGroup === "P4g" ? 4 : 2;
 
-  // Keep a mutable ref to the current orbifold grid so we can mutate + rebuild
+  // Keep a mutable ref to the current orbifold grid
   const gridRef = useRef<OrbifoldGrid<ColorData, EdgeStyleData> | null>(null);
+
+  // Setup Three.js scene (once)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf8f9fa);
+    sceneRef.current = scene;
+
+    // Orthographic camera – initial frustum, will be updated on render
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    cameraRef.current = camera;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    // Orbit controls: disable rotation for 2D pan/zoom
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.25;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+    controls.touches = {
+      ONE: THREE.TOUCH.PAN,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    };
+    controlsRef.current = controls;
+
+    function animate() {
+      animFrameRef.current = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Handle resize
+    const resizeObserver = new ResizeObserver(() => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      renderer.setSize(w, h);
+      // Update ortho camera aspect
+      const aspect = w / h;
+      const halfH = (camera.top - camera.bottom) / 2;
+      const center = (camera.left + camera.right) / 2;
+      camera.left = center - halfH * aspect;
+      camera.right = center + halfH * aspect;
+      camera.updateProjectionMatrix();
+    });
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+      cancelAnimationFrame(animFrameRef.current);
+      controls.dispose();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+    };
+  }, []);
 
   // Ensure grid exists or rebuild when group / size changes
   const ensureGrid = useCallback(() => {
@@ -329,21 +375,65 @@ export function OrbifoldColorsExplorer() {
     return g;
   }, [wallpaperGroup, size]);
 
-  // Build lifted graph and render
+  // Build lifted graph and render to Three.js
   const buildAndRender = useCallback(
     (grid: OrbifoldGrid<ColorData, EdgeStyleData>) => {
       setBusy(true);
-      // defer to next frame so the UI can update
       requestAnimationFrame(() => {
+        const scene = sceneRef.current;
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        const container = containerRef.current;
+        if (!scene || !camera || !controls || !container) { setBusy(false); return; }
+
         const t0 = performance.now();
         const lifted = constructLiftedGraphFromOrbifold<ColorData, EdgeStyleData>(grid);
         for (let i = 0; i < expansion; i++) processAllNonInteriorOnce(lifted);
         const t1 = performance.now();
 
-        const useAxial = wallpaperGroup === "P3";
-        if (canvasRef.current) {
-          renderToCanvas(canvasRef.current, lifted, grid, useAxial, dpi);
+        // Remove old mesh
+        if (meshRef.current) {
+          scene.remove(meshRef.current);
+          meshRef.current.geometry.dispose();
+          const mat = meshRef.current.material;
+          if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+          else (mat as THREE.Material).dispose();
+          meshRef.current = null;
         }
+
+        const useAxial = wallpaperGroup === "P3";
+        const mesh = buildPolygonMesh(lifted, grid, useAxial);
+        scene.add(mesh);
+        meshRef.current = mesh;
+
+        // Fit camera to mesh bounding box
+        mesh.geometry.computeBoundingBox();
+        const box = mesh.geometry.boundingBox!;
+        const cx = (box.min.x + box.max.x) / 2;
+        const cy = (box.min.y + box.max.y) / 2;
+        const rangeX = box.max.x - box.min.x || 1;
+        const rangeY = box.max.y - box.min.y || 1;
+        const aspect = container.clientWidth / container.clientHeight;
+        const padding = 1.02; // slight padding
+
+        let halfW: number, halfH: number;
+        if (rangeX / rangeY > aspect) {
+          halfW = (rangeX / 2) * padding;
+          halfH = halfW / aspect;
+        } else {
+          halfH = (rangeY / 2) * padding;
+          halfW = halfH * aspect;
+        }
+
+        camera.left = cx - halfW;
+        camera.right = cx + halfW;
+        camera.top = cy + halfH;
+        camera.bottom = cy - halfH;
+        camera.position.set(cx, cy, 10);
+        camera.updateProjectionMatrix();
+        controls.target.set(cx, cy, 0);
+        controls.update();
+
         const t2 = performance.now();
 
         setStats(
@@ -353,7 +443,7 @@ export function OrbifoldColorsExplorer() {
         setBusy(false);
       });
     },
-    [expansion, wallpaperGroup, dpi],
+    [expansion, wallpaperGroup],
   );
 
   // Random Tree handler
@@ -455,29 +545,6 @@ export function OrbifoldColorsExplorer() {
           />
         </div>
 
-        {/* DPI / canvas pixels */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <label>Canvas px:</label>
-          <input
-            type="number"
-            defaultValue={dpi}
-            min={200}
-            max={4000}
-            step={100}
-            style={{ width: "70px", padding: "4px", borderRadius: "4px", border: "1px solid #ccc" }}
-            onBlur={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v) && v >= 200 && v <= 4000) setDpi(v);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const v = Number((e.target as HTMLInputElement).value);
-                if (Number.isFinite(v) && v >= 200 && v <= 4000) setDpi(v);
-              }
-            }}
-          />
-        </div>
-
         {/* Random Tree */}
         <button
           onClick={handleRandomTree}
@@ -516,14 +583,15 @@ export function OrbifoldColorsExplorer() {
         <div style={{ marginBottom: "8px", fontSize: "13px", color: "#555" }}>{stats}</div>
       )}
 
-      {/* Canvas */}
-      <canvas
-        ref={canvasRef}
+      {/* Three.js container */}
+      <div
+        ref={containerRef}
         style={{
+          width: "100%",
+          height: "700px",
           border: "1px solid #ccc",
           borderRadius: "4px",
           backgroundColor: "#f8f9fa",
-          maxWidth: "100%",
         }}
       />
     </div>
