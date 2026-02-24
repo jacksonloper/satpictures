@@ -626,6 +626,7 @@ export function OrbifoldColorsExplorer() {
             <option value="P3">P3</option>
             <option value="P4">P4</option>
             <option value="P4g">P4g</option>
+            <option value="P6">P6</option>
           </select>
         </div>
 

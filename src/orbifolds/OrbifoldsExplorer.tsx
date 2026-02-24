@@ -31,6 +31,7 @@ import {
   type OrbifoldNodeId,
 } from "./orbifoldbasics";
 import { applyRandomSpanningTreeToWhiteNodes } from "./spanningTree";
+import { OrbifoldColorsExplorer } from "./OrbifoldColorsExplorer";
 import LoopFinderWorker from "./loop-finder.worker?worker";
 import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 import {
@@ -63,6 +64,7 @@ export function OrbifoldsExplorer() {
   const [showDashedLines, setShowDashedLines] = useState(true);
   const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
   const [showWalls, setShowWalls] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(() => {
     const grid = createOrbifoldGrid("P1", DEFAULT_SIZE);
@@ -1542,6 +1544,29 @@ export function OrbifoldsExplorer() {
             <strong>Note:</strong> {wallpaperGroup} uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
             may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
           </p>
+        )}
+      </div>
+
+      {/* Show Examples toggle */}
+      <div style={{ marginTop: "30px" }}>
+        <button
+          onClick={() => setShowExamples((prev) => !prev)}
+          style={{
+            padding: "8px 16px",
+            borderRadius: "6px",
+            border: showExamples ? "2px solid #3498db" : "1px solid #3498db",
+            backgroundColor: showExamples ? "#ebf5fb" : "white",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: showExamples ? "bold" : "normal",
+          }}
+        >
+          {showExamples ? "Hide Examples" : "Show Examples"}
+        </button>
+        {showExamples && (
+          <div style={{ marginTop: "16px" }}>
+            <OrbifoldColorsExplorer />
+          </div>
         )}
       </div>
     </div>

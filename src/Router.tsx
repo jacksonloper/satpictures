@@ -4,9 +4,7 @@ import PolyformExplorer from './PolyformExplorer.tsx';
 import { WallpaperMazeExplorer } from './wallpaper-maze';
 import { OrbifoldsExplorer } from './orbifolds';
 import { OrbifoldWeaveExplorer } from './orbifolds/OrbifoldWeaveExplorer';
-import { OrbifoldColorsExplorer } from './orbifolds/OrbifoldColorsExplorer';
-
-type Page = 'main' | 'polyforms' | 'wallpapermazes' | 'orbifolds' | 'orbifoldweaves' | 'orbifoldcolors';
+type Page = 'main' | 'polyforms' | 'wallpapermazes' | 'orbifolds' | 'orbifoldweaves';
 
 /** Simple hash-based router. Empty hash or '#' defaults to main page. */
 export function Router() {
@@ -17,7 +15,6 @@ export function Router() {
     if (hash === 'wallpapermazes') return 'wallpapermazes';
     if (hash === 'orbifolds') return 'orbifolds';
     if (hash === 'orbifoldweaves') return 'orbifoldweaves';
-    if (hash === 'orbifoldcolors') return 'orbifoldcolors';
     return 'main';
   });
 
@@ -28,7 +25,6 @@ export function Router() {
       else if (hash === 'wallpapermazes') setPage('wallpapermazes');
       else if (hash === 'orbifolds') setPage('orbifolds');
       else if (hash === 'orbifoldweaves') setPage('orbifoldweaves');
-      else if (hash === 'orbifoldcolors') setPage('orbifoldcolors');
       else setPage('main');
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -89,17 +85,6 @@ export function Router() {
         >
           🧶 Orbifold Weaves
         </a>
-        <a
-          href="#orbifoldcolors"
-          style={{
-            color: page === 'orbifoldcolors' ? '#3498db' : 'white',
-            textDecoration: 'none',
-            fontWeight: page === 'orbifoldcolors' ? 'bold' : 'normal',
-            fontSize: '16px',
-          }}
-        >
-          🎨 Orbifold Colors
-        </a>
       </nav>
 
       {/* Page Content */}
@@ -108,7 +93,6 @@ export function Router() {
       {page === 'wallpapermazes' && <WallpaperMazeExplorer />}
       {page === 'orbifolds' && <OrbifoldsExplorer />}
       {page === 'orbifoldweaves' && <OrbifoldWeaveExplorer />}
-      {page === 'orbifoldcolors' && <OrbifoldColorsExplorer />}
     </>
   );
 }
