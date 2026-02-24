@@ -324,7 +324,7 @@ function buildSceneObjects(
   const triGeometry = new THREE.BufferGeometry();
   triGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   triGeometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  const mesh = new THREE.Mesh(triGeometry, new THREE.MeshBasicMaterial({ vertexColors: true }));
+  const mesh = new THREE.Mesh(triGeometry, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 
   // --- 2. Wall line segments between differently-colored neighbors ---
   const wallPositions: number[] = [];
