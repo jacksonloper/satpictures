@@ -8,7 +8,7 @@
  * and rendered as triangulated polygons using an orthographic camera with
  * pan and zoom.
  *
- * P3 always uses the axial transform.
+ * P3 and P6 always use the axial transform.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -324,7 +324,7 @@ function buildSceneObjects(
   const triGeometry = new THREE.BufferGeometry();
   triGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   triGeometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  const mesh = new THREE.Mesh(triGeometry, new THREE.MeshBasicMaterial({ vertexColors: true }));
+  const mesh = new THREE.Mesh(triGeometry, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 
   // --- 2. Wall line segments between differently-colored neighbors ---
   const wallPositions: number[] = [];
@@ -513,7 +513,7 @@ export function OrbifoldColorsExplorer() {
           wallsRef.current = null;
         }
 
-        const useAxial = wallpaperGroup === "P3";
+        const useAxial = wallpaperGroup === "P3" || wallpaperGroup === "P6";
         const { mesh, walls } = buildSceneObjects(lifted, grid, useAxial);
         scene.add(mesh);
         scene.add(walls);
@@ -626,6 +626,7 @@ export function OrbifoldColorsExplorer() {
             <option value="P3">P3</option>
             <option value="P4">P4</option>
             <option value="P4g">P4g</option>
+            <option value="P6">P6</option>
           </select>
         </div>
 
