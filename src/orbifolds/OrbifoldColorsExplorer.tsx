@@ -8,7 +8,7 @@
  * and rendered as triangulated polygons using an orthographic camera with
  * pan and zoom.
  *
- * P3 always uses the axial transform.
+ * P3 and P6 always use the axial transform.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -513,7 +513,7 @@ export function OrbifoldColorsExplorer() {
           wallsRef.current = null;
         }
 
-        const useAxial = wallpaperGroup === "P3";
+        const useAxial = wallpaperGroup === "P3" || wallpaperGroup === "P6";
         const { mesh, walls } = buildSceneObjects(lifted, grid, useAxial);
         scene.add(mesh);
         scene.add(walls);
