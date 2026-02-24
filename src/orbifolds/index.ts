@@ -1,5 +1,6 @@
 export { OrbifoldsExplorer } from "./OrbifoldsExplorer";
 export { OrbifoldWeaveExplorer } from "./OrbifoldWeaveExplorer";
+export { OrbifoldColorsExplorer } from "./OrbifoldColorsExplorer";
 export {
   createOrbifoldGrid,
   setNodeColor,
