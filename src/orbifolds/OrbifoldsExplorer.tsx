@@ -144,7 +144,7 @@ export function OrbifoldsExplorer() {
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
-    if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize++;
+    if ((nextGroup === "P2" || nextGroup === "HexP2") && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
@@ -809,6 +809,7 @@ export function OrbifoldsExplorer() {
             <option value="P4">P4 (90° rotation)</option>
             <option value="P4g">P4g (90° rotation + diagonal flip)</option>
             <option value="P6">P6 (120° rotation + diagonal flip)</option>
+            <option value="HexP2">HexP2 (180° rotation - hex lattice)</option>
           </select>
         </div>
         
@@ -819,7 +820,7 @@ export function OrbifoldsExplorer() {
           min={minSize}
           max={10}
           label="Size (n)"
-          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
+          extraValidate={wallpaperGroup === "P2" || wallpaperGroup === "HexP2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
         />
         
         {/* Expansion Input */}
@@ -832,7 +833,7 @@ export function OrbifoldsExplorer() {
         />
         
         {/* Axial Transform Checkbox (only visible for P3/P6) */}
-        {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
+        {(wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "HexP2") && (
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
               <input
@@ -1396,7 +1397,7 @@ export function OrbifoldsExplorer() {
         
         {/* Lifted Graph */}
         <div>
-          <h3 style={{ marginBottom: "10px" }}>Lifted Graph{(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
+          <h3 style={{ marginBottom: "10px" }}>Lifted Graph{(wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "HexP2") && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
             Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
             {inspectionInfo && (
@@ -1476,7 +1477,7 @@ export function OrbifoldsExplorer() {
             liftedGraph={liftedGraph}
             orbifoldGrid={orbifoldGrid}
             highlightOrbifoldNodeId={inspectionInfo?.nodeId}
-            useAxialTransform={(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform}
+            useAxialTransform={(wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "HexP2") && useAxialTransform}
             selectedVoltageKey={selectedVoltageKey}
             onNodeClick={handleLiftedNodeClick}
             showDomains={backgroundMode}
@@ -1536,13 +1537,14 @@ export function OrbifoldsExplorer() {
           <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
           <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
           <li><strong>P4g:</strong> Like P4, but folded across the NW-SE diagonal (requires n &ge; 4)</li>
+          <li><strong>HexP2:</strong> P2 (180° rotation) on a hexagonal lattice (uses axial coordinates, requires even n)</li>
         </ul>
         <p style={{ marginTop: "8px" }}>
           Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
         </p>
-        {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
+        {(wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "HexP2") && (
           <p style={{ marginTop: "8px", color: "#666" }}>
-            <strong>Note:</strong> {wallpaperGroup} uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
+            <strong>Note:</strong> {wallpaperGroup} uses axial coordinates. Neighbor distances in the lifted graph
             may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
           </p>
         )}

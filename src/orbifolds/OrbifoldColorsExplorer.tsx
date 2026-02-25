@@ -513,7 +513,7 @@ export function OrbifoldColorsExplorer() {
           wallsRef.current = null;
         }
 
-        const useAxial = wallpaperGroup === "P3" || wallpaperGroup === "P6";
+        const useAxial = wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "HexP2";
         const { mesh, walls } = buildSceneObjects(lifted, grid, useAxial);
         scene.add(mesh);
         scene.add(walls);
@@ -628,6 +628,7 @@ export function OrbifoldColorsExplorer() {
             <option value="P4">P4</option>
             <option value="P4g">P4g</option>
             <option value="P6">P6</option>
+            <option value="HexP2">HexP2</option>
           </select>
         </div>
 

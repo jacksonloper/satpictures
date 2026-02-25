@@ -283,7 +283,8 @@ export function OrbifoldWeaveExplorer() {
   }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    const nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
+    let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
+    if ((nextGroup === "P2" || nextGroup === "HexP2") && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
@@ -702,11 +703,12 @@ export function OrbifoldWeaveExplorer() {
             <option value="P4">P4 (90° rotation)</option>
             <option value="P4g">P4g (90° rotation + diagonal flip)</option>
             <option value="P6">P6 (120° rotation + diagonal flip)</option>
+            <option value="HexP2">HexP2 (180° rotation - hex lattice)</option>
           </select>
         </div>
 
         <ValidatedInput value={size} onChange={handleSizeChange} min={minSize} max={10} label="Size (n)"
-          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
+          extraValidate={wallpaperGroup === "P2" || wallpaperGroup === "HexP2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
         />
         <ValidatedInput value={expansion} onChange={setExpansion} min={0} max={20} label="Expansion (m)" />
       </div>
@@ -1124,7 +1126,7 @@ export function OrbifoldWeaveExplorer() {
             <WeaveThreeRenderer
               liftedGraph={liftedGraph}
               orbifoldGrid={doubledGrid}
-              useAxialTransform={wallpaperGroup === "P3" || wallpaperGroup === "P6"}
+              useAxialTransform={wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "HexP2"}
               highlightedOrbifoldNodeId={highlightedNodeId}
               levelSpacing={levelHeight}
               tubeRadius={tubeRadius}

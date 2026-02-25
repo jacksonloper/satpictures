@@ -22,6 +22,7 @@ const groups: { type: WallpaperGroupType; sizes: number[] }[] = [
   { type: "P6", sizes: [4, 5, 6] },
   { type: "pgg", sizes: [2, 3, 4, 5] },
   { type: "pmm", sizes: [2, 3, 4, 5] },
+  { type: "HexP2", sizes: [2, 4, 6] },
 ];
 
 let passed = 0;

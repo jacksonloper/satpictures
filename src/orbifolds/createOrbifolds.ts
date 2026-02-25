@@ -11,6 +11,7 @@ import { createP4gGrid } from "./p4g";
 import { createP6Grid } from "./p6";
 import { createPggGrid } from "./pgg";
 import { createPmmGrid } from "./pmm";
+import { createHexP2Grid } from "./hexP2";
 import { type ColorData, type EdgeStyleData, type WallpaperGroupType } from "./orbifoldShared";
 
 /**
@@ -42,6 +43,8 @@ export function createOrbifoldGrid(
       return createPggGrid(n, initialColors);
     case "pmm":
       return createPmmGrid(n, initialColors);
+    case "HexP2":
+      return createHexP2Grid(n, initialColors);
   }
 }
 
