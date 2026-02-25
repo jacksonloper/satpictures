@@ -77,19 +77,17 @@ export function ControlsPanel({
         label="Expansion (m)"
       />
       
-      {/* Axial Transform Checkbox (only visible for P3/P6/P2hex) */}
-      {(wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "P2hex") && (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={useAxialTransform}
-              onChange={(e) => onUseAxialTransformChange(e.target.checked)}
-            />
-            Show axial coordinates
-          </label>
-        </div>
-      )}
+      {/* Axial Transform Checkbox */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={useAxialTransform}
+            onChange={(e) => onUseAxialTransformChange(e.target.checked)}
+          />
+          Apply axial-to-screen transform
+        </label>
+      </div>
     </div>
   );
 }

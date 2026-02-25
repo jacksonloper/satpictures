@@ -1,10 +1,4 @@
-import type { WallpaperGroupType } from "../createOrbifolds";
-
-interface HelpSectionProps {
-  wallpaperGroup: WallpaperGroupType;
-}
-
-export function HelpSection({ wallpaperGroup }: HelpSectionProps) {
+export function HelpSection() {
   return (
     <div style={{ 
       marginTop: "30px", 
@@ -30,12 +24,9 @@ export function HelpSection({ wallpaperGroup }: HelpSectionProps) {
       <p style={{ marginTop: "8px" }}>
         Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
       </p>
-      {(wallpaperGroup === "P3" || wallpaperGroup === "P6" || wallpaperGroup === "P2hex") && (
-        <p style={{ marginTop: "8px", color: "#666" }}>
-          <strong>Note:</strong> {wallpaperGroup} uses axial coordinates. Neighbor distances in the lifted graph 
-          may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
-        </p>
-      )}
+      <p style={{ marginTop: "8px", color: "#666" }}>
+        <strong>Tip:</strong> Use "Apply axial-to-screen transform" to view the lifted graph with a sheared coordinate system that shows proper hexagonal structure.
+      </p>
     </div>
   );
 }

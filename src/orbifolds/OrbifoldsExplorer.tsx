@@ -435,7 +435,7 @@ export function OrbifoldsExplorer() {
       </div>
       
       {/* Help text */}
-      <HelpSection wallpaperGroup={wallpaperGroup} />
+      <HelpSection />
 
       {/* Show Examples toggle */}
       <div style={{ marginTop: "30px" }}>

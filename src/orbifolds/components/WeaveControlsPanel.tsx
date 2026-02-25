@@ -10,9 +10,11 @@ export interface WeaveControlsPanelProps {
   size: number;
   expansion: number;
   minSize: number;
+  useAxialTransform: boolean;
   onWallpaperGroupChange: (group: WallpaperGroupType) => void;
   onSizeChange: (size: number) => void;
   onExpansionChange: (expansion: number) => void;
+  onUseAxialTransformChange: (value: boolean) => void;
 }
 
 export function WeaveControlsPanel({
@@ -20,9 +22,11 @@ export function WeaveControlsPanel({
   size,
   expansion,
   minSize,
+  useAxialTransform,
   onWallpaperGroupChange,
   onSizeChange,
   onExpansionChange,
+  onUseAxialTransformChange,
 }: WeaveControlsPanelProps) {
   return (
     <div style={{
@@ -56,6 +60,18 @@ export function WeaveControlsPanel({
         extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
       />
       <ValidatedInput value={expansion} onChange={onExpansionChange} min={0} max={20} label="Expansion (m)" />
+      
+      {/* Axial Transform Checkbox */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={useAxialTransform}
+            onChange={(e) => onUseAxialTransformChange(e.target.checked)}
+          />
+          Apply axial-to-screen transform
+        </label>
+      </div>
     </div>
   );
 }
