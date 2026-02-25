@@ -589,7 +589,7 @@ export function OrbifoldColorsExplorer() {
     (raw: string) => {
       const n = Number(raw);
       if (!Number.isFinite(n) || n < minSize || n > 200 || n !== Math.floor(n)) return;
-      if (wallpaperGroup === "P2" && n % 2 !== 0) return;
+      if ((wallpaperGroup === "P2" || wallpaperGroup === "P2hex") && n % 2 !== 0) return;
       setSize(n);
     },
     [minSize, wallpaperGroup],
@@ -622,6 +622,7 @@ export function OrbifoldColorsExplorer() {
           >
             <option value="P1">P1</option>
             <option value="P2">P2</option>
+            <option value="P2hex">P2hex</option>
             <option value="pgg">pgg</option>
             <option value="pmm">pmm</option>
             <option value="P3">P3</option>
