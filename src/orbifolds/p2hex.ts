@@ -228,93 +228,123 @@ function getHexNeighbor(
     }
     case "NE": {
       // NE goes from (i,j) to (i+step, j-step)
-      // The target is only valid if it's within bounds OR at a specific corner
-      // Boundary cases:
-      // 1. NW corner going NE: pure translation to SE corner (special diagonal edge)
-      // 2. NE corner going NE: wraps to SW corner with 180° rotation
-      // 3. SE corner going NE: wraps to NW corner with 180° rotation (for side coverage)
-      // 4. Non-corner boundary node: NE direction that would go out of bounds returns null
+      // For P2hex (180° rotation symmetry), we need to handle:
+      // 1. Interior nodes: simple (i+step, j-step)
+      // 2. North border (not corner): 180° rotation around north boundary
+      // 3. East border (not corner): 180° rotation around east boundary
+      // 4. NE corner: pure translation to SW corner (special diagonal)
+      // 5. NW corner: 180° rotation to SE corner
+      // 6. SE corner: 180° rotation to NW corner
       
       const isNWCorner = onWestBorder && onNorthBorder;
       const isNECorner = onEastBorder && onNorthBorder;
       const isSECorner = onEastBorder && onSouthBorder;
-      const wouldExitNorth = j - step < minCoord;
-      const wouldExitEast = i + step > maxCoord;
       
-      if (isNWCorner) {
-        // NW corner (minCoord, minCoord) going NE: pure translation to SE corner
-        // This is the special diagonal edge mentioned in the problem
-        ni = maxCoord;
-        nj = maxCoord;
-        voltage = translationMatrix(L, L);
-        // Pure translation: arriving at SE's SW side
-        targetSide = HEX_DIR_TO_SIDE["SW"];
-      } else if (isNECorner) {
-        // NE corner (maxCoord, minCoord) going NE: wraps to SW corner (minCoord, maxCoord)
-        // This involves both north and east boundary crossings with 180° rotation
+      if (isNECorner) {
+        // NE corner going NE: pure translation to SW corner
+        // This is the special diagonal edge with translation-only voltage
         ni = minCoord;
         nj = maxCoord;
-        voltage = translationWith180(2 * L, 0);
-        // With 180° rotation, arriving at SW's SW side
+        voltage = translationMatrix(L, -L);  // Move by (L, -L) in axial coords
+        targetSide = HEX_DIR_TO_SIDE["SW"];
+      } else if (isNWCorner) {
+        // NW corner going NE: exits north border (j-step < minCoord)
+        // Wrap with 180° rotation around north border
+        // - i component: becomes L - (i + step) = L - i - step
+        // - j component: stays at minCoord
+        const reflectedI = L - i - step;
+        ni = reflectedI;
+        nj = minCoord;
+        voltage = translationWith180(L, 0);
         targetSide = HEX_DIR_TO_SIDE["SW"];
       } else if (isSECorner) {
-        // SE corner (maxCoord, maxCoord) going NE: goes to NW corner via "wrap around"
-        // This is a separate edge from the SW direction, covering SE's side 0 and NW's side 3
-        ni = minCoord;
-        nj = minCoord;
-        voltage = translationWith180(2 * L, 2 * L);
-        // Arriving at NW's SW side
+        // SE corner going NE: exits east border (i+step > maxCoord)
+        // Wrap with 180° rotation around east border
+        // - j component: becomes L - (j - step) = L - j + step
+        // - i component: stays at maxCoord
+        const reflectedJ = L - j + step;
+        ni = maxCoord;
+        nj = reflectedJ;
+        voltage = translationWith180(2 * L, L);
         targetSide = HEX_DIR_TO_SIDE["SW"];
-      } else if (wouldExitNorth || wouldExitEast) {
-        // Non-corner node trying to go NE but would exit boundary
-        // This edge doesn't exist in the orbifold
-        return null;
+      } else if (onNorthBorder && !onEastBorder) {
+        // North border (not corner) going NE: 180° rotation around north
+        // - i component: becomes L - (i + step) = L - i - step
+        // - j component: stays at minCoord (since we're reflecting on north border)
+        const reflectedI = L - i - step;
+        ni = reflectedI;
+        nj = minCoord;
+        voltage = translationWith180(L, 0);
+        // With 180° rotation, our NE becomes their SW at the target
+        targetSide = HEX_DIR_TO_SIDE["SW"];
+      } else if (onEastBorder && !onNorthBorder) {
+        // East border (not corner) going NE: 180° rotation around east
+        // Going NE from (maxCoord, j) where j > minCoord
+        // After 180° reflection around east border:
+        // - j component: becomes L - (j - step) = L - j + step
+        // - i component: stays at maxCoord
+        const reflectedJ = L - j + step;
+        ni = maxCoord;
+        nj = reflectedJ;
+        voltage = translationWith180(2 * L, L);
+        // With 180° rotation, our NE becomes their SW at the target
+        targetSide = HEX_DIR_TO_SIDE["SW"];
       }
       // For interior nodes, use the default ni/nj = i+step, j-step
       break;
     }
     case "SW": {
       // SW goes from (i,j) to (i-step, j+step)
-      // The target is only valid if it's within bounds OR at a specific corner
-      // Boundary cases:
-      // 1. SE corner going SW: pure translation to NW corner (inverse of NE case)
-      // 2. SW corner going SW: wraps to NE corner with 180° rotation
-      // 3. NW corner going SW: wraps to SE corner with 180° rotation (for side coverage)
-      // 4. Non-corner boundary node: SW direction that would go out of bounds returns null
+      // For P2hex (180° rotation symmetry), we need to handle:
+      // 1. Interior nodes: simple (i-step, j+step)
+      // 2. South border (not corner): 180° rotation around south boundary
+      // 3. West border (not corner): 180° rotation around west boundary
+      // 4. SW corner: pure translation to NE corner (inverse of NE→SW)
+      // 5. SE corner: 180° rotation to NW corner
+      // 6. NW corner: return null - this edge is already created by SE corner's NE direction
       
       const isSECorner = onEastBorder && onSouthBorder;
       const isSWCorner = onWestBorder && onSouthBorder;
       const isNWCorner = onWestBorder && onNorthBorder;
-      const wouldExitSouth = j + step > maxCoord;
-      const wouldExitWest = i - step < minCoord;
       
-      if (isSECorner) {
-        // SE corner (maxCoord, maxCoord) going SW: pure translation to NW corner
-        ni = minCoord;
-        nj = minCoord;
-        voltage = translationMatrix(-L, -L);
-        // Pure translation: arriving at NW's NE side
-        targetSide = HEX_DIR_TO_SIDE["NE"];
-      } else if (isSWCorner) {
-        // SW corner (minCoord, maxCoord) going SW: wraps to NE corner (maxCoord, minCoord)
-        ni = maxCoord;
-        nj = minCoord;
-        voltage = translationWith180(0, 2 * L);
-        // With 180° rotation, arriving at NE's NE side
-        targetSide = HEX_DIR_TO_SIDE["NE"];
-      } else if (isNWCorner) {
-        // NW corner (minCoord, minCoord) going SW: goes to SE corner via "wrap around"
-        // This is a separate edge from the NE direction, covering NW's side 3 and SE's side 0
-        // The voltage is the same 180° rotation that would result from going the "long way"
-        ni = maxCoord;
-        nj = maxCoord;
-        voltage = translationWith180(0, 0);
-        // Arriving at SE's NE side
-        targetSide = HEX_DIR_TO_SIDE["NE"];
-      } else if (wouldExitSouth || wouldExitWest) {
-        // Non-corner node trying to go SW but would exit boundary
-        // This edge doesn't exist in the orbifold
+      if (isNWCorner) {
+        // NW corner going SW: this edge (NW↔SE) is already created by SE's NE direction
         return null;
+      } else if (isSWCorner) {
+        // SW corner going SW: pure translation to NE corner
+        // This is the special diagonal edge with translation-only voltage (inverse)
+        ni = maxCoord;
+        nj = minCoord;
+        voltage = translationMatrix(-L, L);  // Move by (-L, L) in axial coords
+        targetSide = HEX_DIR_TO_SIDE["NE"];
+      } else if (isSECorner) {
+        // SE corner going SW: exits south border (j+step > maxCoord)
+        // Wrap with 180° rotation around south border
+        // - i component: becomes L - (i - step) = L - i + step
+        // - j component: stays at maxCoord
+        const reflectedI = L - i + step;
+        ni = reflectedI;
+        nj = maxCoord;
+        voltage = translationWith180(L, 2 * L);
+        targetSide = HEX_DIR_TO_SIDE["NE"];
+      } else if (onSouthBorder && !onWestBorder) {
+        // South border (not corner) going SW: 180° rotation around south
+        // - i component: becomes L - (i - step) = L - i + step
+        // - j component: stays at maxCoord
+        const reflectedI = L - i + step;
+        ni = reflectedI;
+        nj = maxCoord;
+        voltage = translationWith180(L, 2 * L);
+        targetSide = HEX_DIR_TO_SIDE["NE"];
+      } else if (onWestBorder && !onSouthBorder) {
+        // West border (not corner) going SW: 180° rotation around west
+        // - j component: becomes L - (j + step) = L - j - step
+        // - i component: stays at minCoord
+        const reflectedJ = L - j - step;
+        ni = minCoord;
+        nj = reflectedJ;
+        voltage = translationWith180(0, L);
+        targetSide = HEX_DIR_TO_SIDE["NE"];
       }
       // For interior nodes, use the default ni/nj = i-step, j+step
       break;
@@ -335,13 +365,13 @@ function getHexNeighbor(
   // - E and W → |EW (horizontal edges)
   // - NE and SW → |NESW (diagonal edges)
   // Exception: for NW↔SE diagonal corners, use direction-specific labels since
-  // there are TWO edges between them (one pure translation, one 180° rotation)
+  // there are TWO edges between them (both with 180° rotation, one via NE, one via SW)
   const isNW_SE_diagonal = (fromId === nodeIdFromCoord([minCoord, minCoord]) && toId === nodeIdFromCoord([maxCoord, maxCoord])) ||
                            (fromId === nodeIdFromCoord([maxCoord, maxCoord]) && toId === nodeIdFromCoord([minCoord, minCoord]));
   
   let edgeTypeLabel: string;
   if (isNW_SE_diagonal) {
-    // Use direction-specific label to distinguish the two diagonal edges
+    // Use direction-specific label to distinguish the two diagonal edges between NW and SE
     edgeTypeLabel = dir; // "NE" or "SW"
   } else {
     const labels: Record<HexDirection, string> = {
