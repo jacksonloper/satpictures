@@ -18,6 +18,12 @@ import {
   toTriPlacements,
 } from "../PolyformExplorerHelpers";
 import { MazeResultSection } from "./MazeResultSection";
+import { TilingSizeInputs } from "./TilingSizeInputs";
+import { TilingStatusDisplay } from "./TilingStatusDisplay";
+import { EdgeDebuggerPanel } from "./EdgeDebuggerPanel";
+import { PlacementControls } from "./PlacementControls";
+import { EdgeDebuggingControls } from "./EdgeDebuggingControls";
+import { TilingDownloadButtons } from "./TilingDownloadButtons";
 
 export interface TilingSectionProps {
   // Tiling solver inputs
@@ -173,140 +179,28 @@ export function TilingSection({
       </p>
 
       {/* Tiling Grid Size Inputs */}
-      <div
-        style={{
-          marginBottom: "16px",
-          display: "flex",
-          gap: "20px",
-          flexWrap: "wrap",
-          alignItems: "center",
-        }}
-      >
-        <div>
-          <label style={{ marginRight: "8px" }}>Tiling Width:</label>
-          <input
-            type="text"
-            value={tilingWidthInput}
-            onChange={(e) => {
-              onTilingWidthInputChange(e.target.value);
-              setTilingWidthError(false);
-            }}
-            onBlur={onTilingWidthBlur}
-            disabled={solving}
-            style={{
-              width: "60px",
-              padding: "8px",
-              fontSize: "14px",
-              borderRadius: "4px",
-              border: tilingWidthError
-                ? "2px solid #e74c3c"
-                : "1px solid #bdc3c7",
-              backgroundColor: tilingWidthError ? "#fdecea" : "white",
-            }}
-          />
-          {tilingWidthError && (
-            <span
-              style={{ color: "#e74c3c", marginLeft: "8px", fontSize: "12px" }}
-            >
-              Enter an integer (1-50)
-            </span>
-          )}
-        </div>
-        <div>
-          <label style={{ marginRight: "8px" }}>Tiling Height:</label>
-          <input
-            type="text"
-            value={tilingHeightInput}
-            onChange={(e) => {
-              onTilingHeightInputChange(e.target.value);
-              setTilingHeightError(false);
-            }}
-            onBlur={onTilingHeightBlur}
-            disabled={solving}
-            style={{
-              width: "60px",
-              padding: "8px",
-              fontSize: "14px",
-              borderRadius: "4px",
-              border: tilingHeightError
-                ? "2px solid #e74c3c"
-                : "1px solid #bdc3c7",
-              backgroundColor: tilingHeightError ? "#fdecea" : "white",
-            }}
-          />
-          {tilingHeightError && (
-            <span
-              style={{ color: "#e74c3c", marginLeft: "8px", fontSize: "12px" }}
-            >
-              Enter an integer (1-50)
-            </span>
-          )}
-        </div>
-        <button
-          onClick={onSolveTiling}
-          disabled={solving}
-          style={{
-            padding: "8px 20px",
-            backgroundColor: solving ? "#95a5a6" : "#27ae60",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: solving ? "not-allowed" : "pointer",
-            fontWeight: "bold",
-          }}
-        >
-          {solving ? "⏳ Solving..." : "🔍 Solve Tiling"}
-        </button>
-        {solving && (
-          <button
-            onClick={onCancelSolving}
-            style={{
-              padding: "8px 20px",
-              backgroundColor: "#e74c3c",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            ❌ Cancel
-          </button>
-        )}
-      </div>
+      <TilingSizeInputs
+        tilingWidthInput={tilingWidthInput}
+        tilingHeightInput={tilingHeightInput}
+        tilingWidthError={tilingWidthError}
+        tilingHeightError={tilingHeightError}
+        solving={solving}
+        onTilingWidthInputChange={onTilingWidthInputChange}
+        onTilingHeightInputChange={onTilingHeightInputChange}
+        onTilingWidthBlur={onTilingWidthBlur}
+        onTilingHeightBlur={onTilingHeightBlur}
+        setTilingWidthError={setTilingWidthError}
+        setTilingHeightError={setTilingHeightError}
+        onSolveTiling={onSolveTiling}
+        onCancelSolving={onCancelSolving}
+      />
 
-      {/* Progress/Stats display */}
-      {solving && tilingStats && (
-        <div
-          style={{
-            padding: "12px",
-            backgroundColor: "#e8f4fd",
-            borderRadius: "4px",
-            marginBottom: "12px",
-            fontSize: "14px",
-          }}
-        >
-          <strong>Solving...</strong>{" "}
-          {tilingStats.numVars.toLocaleString()} variables,{" "}
-          {tilingStats.numClauses.toLocaleString()} clauses
-        </div>
-      )}
-
-      {/* Error display */}
-      {tilingError && (
-        <div
-          style={{
-            padding: "12px",
-            backgroundColor: "#fdecea",
-            borderRadius: "4px",
-            marginBottom: "12px",
-            color: "#e74c3c",
-            fontSize: "14px",
-          }}
-        >
-          ❌ {tilingError}
-        </div>
-      )}
+      {/* Progress/Stats and Error display */}
+      <TilingStatusDisplay
+        solving={solving}
+        tilingStats={tilingStats}
+        tilingError={tilingError}
+      />
 
       {/* Result display */}
       {tilingResult && (
@@ -369,212 +263,15 @@ export function TilingSection({
               )}
 
               {/* Edge Debugger - shows ALL edges */}
-              {allEdges.length > 0 && (
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#e7f3ff",
-                    border: "1px solid #b6d4fe",
-                    borderRadius: "4px",
-                    marginBottom: "12px",
-                    fontSize: "12px",
-                  }}
-                >
-                  <strong>🔍 Edge Debugger</strong>
-                  <span style={{ marginLeft: "8px", color: "#666" }}>
-                    ({allEdges.length} edges total,{" "}
-                    {allEdges.filter((e) => !e.isConsistent).length} violations)
-                  </span>
-                  <div style={{ marginTop: "8px" }}>
-                    <label style={{ marginRight: "8px" }}>Filter:</label>
-                    <select
-                      value={edgeFilter}
-                      onChange={(e) => {
-                        setEdgeFilter(
-                          e.target.value as "all" | "violations" | "consistent"
-                        );
-                        setSelectedEdgeIndex(null);
-                      }}
-                      style={{ marginRight: "16px" }}
-                    >
-                      <option value="all">All edges ({allEdges.length})</option>
-                      <option value="violations">
-                        Violations only (
-                        {allEdges.filter((e) => !e.isConsistent).length})
-                      </option>
-                      <option value="consistent">
-                        Consistent only (
-                        {allEdges.filter((e) => e.isConsistent).length})
-                      </option>
-                    </select>
-
-                    <label style={{ marginRight: "8px" }}>Select edge:</label>
-                    <select
-                      value={selectedEdgeIndex ?? ""}
-                      onChange={(e) =>
-                        setSelectedEdgeIndex(
-                          e.target.value === "" ? null : Number(e.target.value)
-                        )
-                      }
-                      style={{ maxWidth: "350px" }}
-                    >
-                      <option value="">-- Choose an edge --</option>
-                      {allEdges
-                        .map((e, i) => ({ edge: e, originalIndex: i }))
-                        .filter(({ edge }) =>
-                          edgeFilter === "all"
-                            ? true
-                            : edgeFilter === "violations"
-                              ? !edge.isConsistent
-                              : edge.isConsistent
-                        )
-                        .map(({ edge, originalIndex }) => (
-                          <option key={originalIndex} value={originalIndex}>
-                            {edge.isConsistent ? "🟢" : "🔴"} ({edge.cell1.q},
-                            {edge.cell1.r})#{edge.edgeIdx1} ↔ ({edge.cell2.q},
-                            {edge.cell2.r})#{edge.edgeIdx2}:{" "}
-                            {edge.value1 ? "●" : "○"} vs{" "}
-                            {edge.value2 ? "●" : "○"}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-
-                  {selectedEdgeIndex !== null &&
-                    allEdges[selectedEdgeIndex] && (
-                      <div
-                        style={{
-                          marginTop: "8px",
-                          padding: "8px",
-                          backgroundColor: "#fff",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        <div style={{ marginBottom: "4px" }}>
-                          <strong>Toggle side:</strong>{" "}
-                          <button
-                            onClick={() => setShowDebugSide("A")}
-                            style={{
-                              marginRight: "4px",
-                              fontWeight:
-                                showDebugSide === "A" ? "bold" : "normal",
-                              backgroundColor:
-                                showDebugSide === "A" ? "#007bff" : "#e9ecef",
-                              color:
-                                showDebugSide === "A" ? "#fff" : "#212529",
-                              border: "none",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Side A
-                          </button>
-                          <button
-                            onClick={() => setShowDebugSide("B")}
-                            style={{
-                              fontWeight:
-                                showDebugSide === "B" ? "bold" : "normal",
-                              backgroundColor:
-                                showDebugSide === "B" ? "#007bff" : "#e9ecef",
-                              color:
-                                showDebugSide === "B" ? "#fff" : "#212529",
-                              border: "none",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Side B
-                          </button>
-                          <span
-                            style={{
-                              marginLeft: "12px",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                              backgroundColor: allEdges[selectedEdgeIndex]
-                                .isConsistent
-                                ? "#d4edda"
-                                : "#f8d7da",
-                              color: allEdges[selectedEdgeIndex].isConsistent
-                                ? "#155724"
-                                : "#721c24",
-                            }}
-                          >
-                            {allEdges[selectedEdgeIndex].isConsistent
-                              ? "✓ Consistent"
-                              : "✗ Mismatch!"}
-                          </span>
-                        </div>
-                        <div
-                          style={{ fontFamily: "monospace", fontSize: "11px" }}
-                        >
-                          {showDebugSide === "A" ? (
-                            <>
-                              <div>
-                                <strong>Cell:</strong> (
-                                {allEdges[selectedEdgeIndex].cell1.q},{" "}
-                                {allEdges[selectedEdgeIndex].cell1.r})
-                              </div>
-                              <div>
-                                <strong>Edge Index:</strong>{" "}
-                                {allEdges[selectedEdgeIndex].edgeIdx1}
-                              </div>
-                              <div>
-                                <strong>Filledness:</strong>{" "}
-                                <span
-                                  style={{
-                                    color: allEdges[selectedEdgeIndex].value1
-                                      ? "green"
-                                      : "red",
-                                  }}
-                                >
-                                  {allEdges[selectedEdgeIndex].value1
-                                    ? "●  FILLED"
-                                    : "○  UNFILLED"}
-                                </span>
-                              </div>
-                              <div>
-                                <strong>Placement:</strong> #
-                                {allEdges[selectedEdgeIndex].placementIdx1}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div>
-                                <strong>Cell:</strong> (
-                                {allEdges[selectedEdgeIndex].cell2.q},{" "}
-                                {allEdges[selectedEdgeIndex].cell2.r})
-                              </div>
-                              <div>
-                                <strong>Edge Index:</strong>{" "}
-                                {allEdges[selectedEdgeIndex].edgeIdx2}
-                              </div>
-                              <div>
-                                <strong>Filledness:</strong>{" "}
-                                <span
-                                  style={{
-                                    color: allEdges[selectedEdgeIndex].value2
-                                      ? "green"
-                                      : "red",
-                                  }}
-                                >
-                                  {allEdges[selectedEdgeIndex].value2
-                                    ? "●  FILLED"
-                                    : "○  UNFILLED"}
-                                </span>
-                              </div>
-                              <div>
-                                <strong>Placement:</strong> #
-                                {allEdges[selectedEdgeIndex].placementIdx2}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                </div>
-              )}
+              <EdgeDebuggerPanel
+                allEdges={allEdges}
+                selectedEdgeIndex={selectedEdgeIndex}
+                showDebugSide={showDebugSide}
+                edgeFilter={edgeFilter}
+                setSelectedEdgeIndex={setSelectedEdgeIndex}
+                setShowDebugSide={setShowDebugSide}
+                setEdgeFilter={setEdgeFilter}
+              />
 
               {solvedPolyformType === "polyhex" ? (
                 <HexTilingViewer
@@ -607,310 +304,41 @@ export function TilingSection({
                 />
               )}
 
-              {/* Highlight controls */}
-              <div
-                style={{
-                  marginTop: "12px",
-                  display: "flex",
-                  gap: "8px",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  onClick={onPrevPlacement}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#007bff",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  ◀ Prev
-                </button>
-                <button
-                  onClick={onNextPlacement}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#007bff",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  Next ▶
-                </button>
-                <button
-                  onClick={onClearHighlight}
-                  disabled={highlightedPlacement === null}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor:
-                      highlightedPlacement !== null ? "#6c757d" : "#adb5bd",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor:
-                      highlightedPlacement !== null ? "pointer" : "not-allowed",
-                    fontSize: "14px",
-                  }}
-                >
-                  Clear Highlight
-                </button>
-                {highlightedPlacement !== null && tilingResult.placements && (
-                  <span style={{ fontSize: "14px", color: "#495057" }}>
-                    Placement <strong>{highlightedPlacement + 1}</strong> of{" "}
-                    {tilingResult.placements.length}
-                    {" | "}
-                    Transform:{" "}
-                    <strong>
-                      {tilingResult.placements[highlightedPlacement].transformIndex}
-                    </strong>
-                  </span>
-                )}
-              </div>
-
-              {/* Hide fills checkbox (only for polyhex) */}
-              {solvedPolyformType === "polyhex" && (
-                <div style={{ marginTop: "12px" }}>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={hideFills}
-                      onChange={(e) => setHideFills(e.target.checked)}
-                      style={{
-                        width: "16px",
-                        height: "16px",
-                        cursor: "pointer",
-                      }}
-                    />
-                    Hide filled hexes (show edges only)
-                  </label>
-                </div>
-              )}
+              <PlacementControls
+                highlightedPlacement={highlightedPlacement}
+                tilingResult={tilingResult}
+                solvedPolyformType={solvedPolyformType}
+                hideFills={hideFills}
+                onPrevPlacement={onPrevPlacement}
+                onNextPlacement={onNextPlacement}
+                onClearHighlight={onClearHighlight}
+                setHideFills={setHideFills}
+              />
 
               {/* Edge debugging controls (only for polyhex when placement is highlighted) */}
               {solvedPolyformType === "polyhex" &&
                 highlightedPlacement !== null &&
                 tilingResult.placements && (
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      padding: "12px",
-                      backgroundColor: "#f8f9fa",
-                      borderRadius: "4px",
-                      border: "1px solid #dee2e6",
-                    }}
-                  >
-                    <div
-                      style={{
-                        marginBottom: "8px",
-                        fontWeight: "bold",
-                        fontSize: "14px",
-                      }}
-                    >
-                      🔍 Edge Debugging
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "8px",
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <button
-                        onClick={onPrevEdge}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#28a745",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                        }}
-                      >
-                        ◀ Prev Edge
-                      </button>
-                      <button
-                        onClick={onNextEdge}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#28a745",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                        }}
-                      >
-                        Next Edge ▶
-                      </button>
-                      <button
-                        onClick={onClearEdge}
-                        disabled={highlightedEdge === null}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor:
-                            highlightedEdge !== null ? "#6c757d" : "#adb5bd",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor:
-                            highlightedEdge !== null ? "pointer" : "not-allowed",
-                          fontSize: "12px",
-                        }}
-                      >
-                        Clear Edge
-                      </button>
-                      {highlightedEdge !== null && (
-                        <span style={{ fontSize: "12px", color: "#495057" }}>
-                          Edge <strong>{highlightedEdge + 1}</strong> of{" "}
-                          {tilingResult.placements[highlightedPlacement].cells
-                            .length * 6}
-                        </span>
-                      )}
-                    </div>
-                    {edgeInfo && (
-                      <div
-                        style={{
-                          marginTop: "8px",
-                          padding: "8px",
-                          backgroundColor: edgeInfo.isInternal
-                            ? "#d4edda"
-                            : "#f8d7da",
-                          borderRadius: "4px",
-                          fontSize: "12px",
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        <div>
-                          <strong>Edge Type:</strong>{" "}
-                          {edgeInfo.isInternal ? "🔗 INTERNAL" : "🚧 EXTERNAL"}{" "}
-                          (direction: {edgeInfo.direction})
-                        </div>
-                        <div>
-                          <strong>Cell:</strong> ({edgeInfo.coord1.q},{" "}
-                          {edgeInfo.coord1.r}) [cell #{edgeInfo.cellIndex + 1},
-                          edge #{edgeInfo.edgeIndex}]
-                        </div>
-                        {edgeInfo.isInternal && edgeInfo.coord2 && (
-                          <div>
-                            <strong>Connects to:</strong> ({edgeInfo.coord2.q},{" "}
-                            {edgeInfo.coord2.r})
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <EdgeDebuggingControls
+                    highlightedPlacement={highlightedPlacement}
+                    highlightedEdge={highlightedEdge}
+                    tilingResult={tilingResult}
+                    edgeInfo={edgeInfo}
+                    onPrevEdge={onPrevEdge}
+                    onNextEdge={onNextEdge}
+                    onClearEdge={onClearEdge}
+                  />
                 )}
 
               {/* Download buttons */}
-              <div
-                style={{
-                  marginTop: "12px",
-                  display: "flex",
-                  gap: "8px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  onClick={onDownloadSvg}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#6c757d",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  💾 Save as SVG
-                </button>
-                <button
-                  onClick={onDownloadPlacementsJson}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#17a2b8",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  📥 Download Placements JSON
-                </button>
-                {/* Generate Maze button - only for polyomino */}
-                {solvedPolyformType === "polyomino" && (
-                  <button
-                    onClick={onGenerateMaze}
-                    style={{
-                      padding: "8px 16px",
-                      backgroundColor: "#9b59b6",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    🌲 Generate Maze
-                  </button>
-                )}
-                {/* Generate Hex Maze button - only for polyhex */}
-                {solvedPolyformType === "polyhex" && (
-                  <button
-                    onClick={onGenerateHexMaze}
-                    style={{
-                      padding: "8px 16px",
-                      backgroundColor: "#9b59b6",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    🌲 Generate Maze
-                  </button>
-                )}
-                {/* Generate Triangle Maze button - only for polyiamond */}
-                {solvedPolyformType === "polyiamond" && (
-                  <button
-                    onClick={onGenerateTriMaze}
-                    style={{
-                      padding: "8px 16px",
-                      backgroundColor: "#9b59b6",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    🌲 Generate Maze
-                  </button>
-                )}
-              </div>
+              <TilingDownloadButtons
+                solvedPolyformType={solvedPolyformType}
+                onDownloadSvg={onDownloadSvg}
+                onDownloadPlacementsJson={onDownloadPlacementsJson}
+                onGenerateMaze={onGenerateMaze}
+                onGenerateHexMaze={onGenerateHexMaze}
+                onGenerateTriMaze={onGenerateTriMaze}
+              />
 
               {/* Maze Results */}
               <MazeResultSection
