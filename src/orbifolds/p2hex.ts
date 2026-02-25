@@ -52,145 +52,71 @@ type HexDirection = "E" | "W" | "N" | "S" | "NE" | "SW";
  * Build a hexagon polygon in axial coordinates that will look like a hexagon
  * after the axialToCartesian transform.
  *
- * In axial coords, a regular hexagon centered at (i, j) has vertices at
- * offsets that form a hexagon in Cartesian space.
+ * With step=6, the hex vertices are computed as centroids of the three hexagons
+ * meeting at each corner, which guarantees integer coordinates.
  *
- * For axial hex with pointy-top orientation after transform:
- * The six vertices in clockwise order (starting from top):
- *   (i, j-2/3), (i+1/2, j-1/3), (i+1/2, j+1/3), (i, j+2/3), (i-1/2, j+1/3), (i-1/2, j-1/3)
+ * The 6 neighbors of (i, j) with step=6 are at:
+ *   E:  (i+6, j)
+ *   NE: (i+6, j-6)
+ *   N:  (i, j-6)
+ *   W:  (i-6, j)
+ *   SW: (i-6, j+6)
+ *   S:  (i, j+6)
  *
- * But we need integer coordinates, so we scale up by 6. Using 6-unit spacing:
- * Center at (6*col+3, 6*row+3), vertices at ±3 in various directions.
+ * Vertices (clockwise from v0 at E-NE corner):
+ *   v0: centroid of (i,j), (i+6,j), (i+6,j-6)  = (i+4, j-2)   -- between E and NE
+ *   v1: centroid of (i,j), (i+6,j-6), (i,j-6)  = (i+2, j-4)   -- between NE and N
+ *   v2: centroid of (i,j), (i,j-6), (i-6,j)    = (i-2, j-2)   -- between N and W
+ *   v3: centroid of (i,j), (i-6,j), (i-6,j+6)  = (i-4, j+2)   -- between W and SW
+ *   v4: centroid of (i,j), (i-6,j+6), (i,j+6)  = (i-2, j+4)   -- between SW and S
+ *   v5: centroid of (i,j), (i,j+6), (i+6,j)    = (i+2, j+2)   -- between S and E
  *
- * Polygon sides (clockwise from top vertex):
- * 0: Top-right (connects to NE neighbor)
- * 1: Right (connects to E neighbor)
- * 2: Bottom-right (connects to SE neighbor → S in axial)
- * 3: Bottom-left (connects to SW neighbor)
- * 4: Left (connects to W neighbor)
- * 5: Top-left (connects to NW neighbor → N in axial)
+ * Sides (clockwise):
+ *   side 0: v0→v1, faces NE neighbor
+ *   side 1: v1→v2, faces N neighbor
+ *   side 2: v2→v3, faces W neighbor
+ *   side 3: v3→v4, faces SW neighbor
+ *   side 4: v4→v5, faces S neighbor
+ *   side 5: v5→v0, faces E neighbor
  */
 function hexPolygon(i: Int, j: Int): readonly (readonly [number, number])[] {
-  // Hexagon vertices in axial coordinates (will become regular hexagon after transform)
-  // Scaled by 3 from center for integer coords with 6-unit spacing
-  // Starting from top vertex, going clockwise
-  //
-  // In axial coords, a pointy-top hex has vertices at these offsets from center:
-  //   Top: (0, -1) * scale
-  //   Top-right: (1, -1) * scale/2 → but we need integers, so use 2-unit scale
-  //
-  // Using a different approach: vertices form a parallelogram-ish shape in axial coords
-  // that becomes a hexagon after transform.
-  //
-  // After axialToCartesian: x' = x + y/2, y' = y * sqrt(3)/2
-  //
-  // For a regular hexagon centered at origin with "radius" r:
-  //   Vertices in Cartesian: r*[cos(30° + k*60°), sin(30° + k*60°)] for k=0..5
-  //
-  // In axial coords (with unit = 2 for integers), the hexagon vertices are:
-  //   From center (i,j), offset by these axial vectors scaled:
-  //   Top:       (0, -2)
-  //   Top-right: (2, -2) → transforms to (2 + (-2)/2, -2*√3/2) = (1, -√3)
-  //   Right:     (2, 0)  → transforms to (2 + 0, 0) = (2, 0)
-  //   etc.
-  //
-  // Actually, for hexagonal tiling in axial coordinates:
-  // The hex shape in axial coords should have 6 equal-length sides after transform.
-  //
-  // Simpler: define vertices in axial coords that become regular hexagon.
-  // With step=6, hex radius in axial = 2 gives good integers.
-  //
-  // Vertices (clockwise from N, with center at (i,j)):
   return [
-    [i, j - 2],       // N (top) - side 0 connects N to NE
-    [i + 2, j - 2],   // NE - side 1 connects NE to E
-    [i + 2, j],       // E (right) - side 2 connects E to SE
-    [i, j + 2],       // S (bottom) - side 3 connects S to SW
-    [i - 2, j + 2],   // SW - side 4 connects SW to W
-    [i - 2, j],       // W (left) - side 5 connects W to N
+    [i + 4, j - 2],   // v0: between E and NE
+    [i + 2, j - 4],   // v1: between NE and N
+    [i - 2, j - 2],   // v2: between N and W
+    [i - 4, j + 2],   // v3: between W and SW
+    [i - 2, j + 4],   // v4: between SW and S
+    [i + 2, j + 2],   // v5: between S and E
   ] as const;
 }
 
 /**
  * Map hex direction to polygon side index.
- * Polygon sides in clockwise order from N:
- * 0: N→NE (top-right side)
- * 1: NE→E (right-top side)
- * 2: E→S (right-bottom side) - note: goes from E to S, connects to SE neighbor
- * 3: S→SW (bottom-left side)
- * 4: SW→W (left-bottom side)
- * 5: W→N (left-top side)
+ * 
+ * With the new hexPolygon (step=6, centroid-based vertices):
+ * Vertices (clockwise from v0):
+ *   v0: between E and NE
+ *   v1: between NE and N
+ *   v2: between N and W
+ *   v3: between W and SW
+ *   v4: between SW and S
+ *   v5: between S and E
  *
- * Edges:
- * - NE direction: uses side 0 (from) and side 3 (to, the SW side of target)
- * - E direction: uses side 1+2 midpoint → side 1 for connection
- * - etc.
- *
- * Actually, for 6-neighbor hex, each edge connects one polygon side to one side on neighbor.
- * In axial coords:
- * - N neighbor (0, -1): uses top portion → side 0 (connects to their side 3)
- * - NE neighbor (+1, -1): uses side 0/1 → side 0 for us
- * - E neighbor (+1, 0): uses side 1 or 2
- * - S neighbor (0, +1): uses side 3 (connects to their side 0)
- * - SW neighbor (-1, +1): uses side 4
- * - W neighbor (-1, 0): uses side 5
- *
- * Let me re-examine the polygon:
- * Vertices: N, NE, E, S, SW, W (6 vertices, 6 sides)
- * Side 0: N→NE
- * Side 1: NE→E
- * Side 2: E→S
- * Side 3: S→SW
- * Side 4: SW→W
- * Side 5: W→N
- *
- * Which sides connect to which neighbors?
- * - The N neighbor (above, +q direction in some hex conventions) uses the top side
- * - In axial coords with the polygon above:
- *   - N direction (x, y-1): neighbor is north, uses side 5 (W→N) as the connecting side? No...
- *
- * Let me think about this more carefully with the axial hex layout:
- * In axial coords (q,r) with our polygon vertices:
- *   N: (i, j-2), NE: (i+2, j-2), E: (i+2, j), S: (i, j+2), SW: (i-2, j+2), W: (i-2, j)
- *
- * The 6 axial neighbors are:
- *   E:  (i+1, j) → center moves +q, polygon shifts right
- *   W:  (i-1, j) → center moves -q
- *   S:  (i, j+1) → center moves +r (down in axial)
- *   N:  (i, j-1) → center moves -r (up in axial)
- *   NE: (i+1, j-1) → moves +q, -r (diagonal)
- *   SW: (i-1, j+1) → moves -q, +r (diagonal)
- *
- * With our polygon at 4-unit spacing (step=4, vertices at ±2):
- * Side assignment for neighbors:
- *   NE neighbor: shares the side going from vertex N to vertex NE? No, that's within our hex.
- *
- * Hmm, I think I need to reconsider. In hex tilings, each side of a hexagon
- * touches exactly one neighbor. With 6 neighbors in axial hex:
- *
- * Looking at a pointy-top hexagon in Cartesian (after axial transform):
- *   Side pointing NE (upper-right) → touches NE neighbor
- *   Side pointing E (right) → touches E neighbor
- *   Side pointing SE (lower-right) → but this is S neighbor in axial
- *   etc.
- *
- * Given our polygon vertices [N, NE, E, S, SW, W]:
- *   Side 0 (N→NE): faces the NE direction → connects to NE neighbor (i+1, j-1)
- *   Side 1 (NE→E): faces the E direction → connects to E neighbor (i+1, j)
- *   Side 2 (E→S): faces the SE direction → but that's S in axial → connects to S neighbor (i, j+1)
- *   Side 3 (S→SW): faces the SW direction → connects to SW neighbor (i-1, j+1)
- *   Side 4 (SW→W): faces the W direction → connects to W neighbor (i-1, j)
- *   Side 5 (W→N): faces the NW direction → but that's N in axial → connects to N neighbor (i, j-1)
- *
- * Wait, that's only 6 sides for 6 neighbors - perfect!
+ * Sides (clockwise):
+ *   side 0: v0→v1, faces NE neighbor
+ *   side 1: v1→v2, faces N neighbor
+ *   side 2: v2→v3, faces W neighbor
+ *   side 3: v3→v4, faces SW neighbor
+ *   side 4: v4→v5, faces S neighbor
+ *   side 5: v5→v0, faces E neighbor
  */
 const HEX_DIR_TO_SIDE: Record<HexDirection, number> = {
-  NE: 0,  // Side 0: N→NE vertex
-  E: 1,   // Side 1: NE→E vertex
-  S: 2,   // Side 2: E→S vertex (SE in Cartesian, but S in axial)
-  SW: 3,  // Side 3: S→SW vertex
-  W: 4,   // Side 4: SW→W vertex
-  N: 5,   // Side 5: W→N vertex (NW in Cartesian, but N in axial)
+  NE: 0,  // Side 0: v0→v1, faces NE neighbor
+  N: 1,   // Side 1: v1→v2, faces N neighbor
+  W: 2,   // Side 2: v2→v3, faces W neighbor
+  SW: 3,  // Side 3: v3→v4, faces SW neighbor
+  S: 4,   // Side 4: v4→v5, faces S neighbor
+  E: 5,   // Side 5: v5→v0, faces E neighbor
 };
 
 const OPPOSITE_HEX_DIR: Record<HexDirection, HexDirection> = {
@@ -211,7 +137,7 @@ interface HexNeighborResult {
 
 /**
  * Get the neighbor info for a given hex direction.
- * Uses 4-unit spacing: nodes at (4*col+2, 4*row+2).
+ * Uses 6-unit spacing: nodes at (6*col+3, 6*row+3).
  */
 function getHexNeighbor(
   i: Int,
@@ -219,10 +145,10 @@ function getHexNeighbor(
   dir: HexDirection,
   n: Int
 ): HexNeighborResult | null {
-  const step = 4;
-  const minCoord = step / 2; // 2
-  const maxCoord = step * (n - 1) + minCoord; // 4*(n-1)+2
-  const L = step * n; // 4*n = size of fundamental domain
+  const step = 6;
+  const minCoord = step / 2; // 3
+  const maxCoord = step * (n - 1) + minCoord; // 6*(n-1)+3
+  const L = step * n; // 6*n = size of fundamental domain
   const fromId = nodeIdFromCoord([i, j]);
 
   // Axial neighbor offsets
@@ -481,8 +407,8 @@ function addEdge(
  * Each node is a hexagon with 6 neighbors. Boundary edges have 180° rotation
  * voltages, similar to the square P2.
  *
- * The grid uses 4-unit spacing: nodes at (4*col+2, 4*row+2).
- * Polygon vertices are at ±2 from center.
+ * The grid uses 6-unit spacing: nodes at (6*col+3, 6*row+3).
+ * Polygon vertices are computed using centroids of adjacent hexagons.
  *
  * @param n - Grid size (n×n hexagons). Must be at least 2 and even.
  * @param initialColors - Optional initial colors for each cell
@@ -495,7 +421,7 @@ export function createP2hexGrid(n: Int, initialColors?: ("black" | "white")[][])
     throw new Error("P2hex grid size n must be even");
   }
 
-  const step = 4;
+  const step = 6;
   const nodes = new Map<OrbifoldNodeId, OrbifoldNode<ColorData>>();
   const edges = new Map<OrbifoldEdgeId, OrbifoldEdge<EdgeStyleData>>();
   const processedEdges = new Set<string>();
