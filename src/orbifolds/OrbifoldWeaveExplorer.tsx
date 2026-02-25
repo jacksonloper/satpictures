@@ -30,155 +30,23 @@ import {
   type OrbifoldGrid,
   type OrbifoldNodeId,
 } from "./orbifoldbasics";
-import { doubleOrbifold, getLevelFromNodeId } from "./doubleOrbifold";
+import { doubleOrbifold } from "./doubleOrbifold";
 import LoopFinderWorker from "./loop-finder.worker?worker";
 import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 import {
-  ErrorBoundary,
-  ValidatedInput,
+  WeaveControlsPanel,
+  WeaveLoopFinderPanel,
+  WeaveLoopsFinderPanel,
+  PendingLoopPanel,
+  AcceptedLoopPanel,
+  type SolveAllResult,
+  type PendingLoopResult,
 } from "./components";
-import { WeaveThreeRenderer } from "./components/WeaveThreeRenderer";
 import "../App.css";
 
 // Constants
 const DEFAULT_SIZE = 3;
 const DEFAULT_EXPANSION = 10;
-
-/**
- * Render two 2D views (level 0 and level 1) of the doubled orbifold,
- * showing only nodes (no edges) with their step number in the loop path.
- * Nodes not in the loop are shown as small grey dots.
- */
-function DoubledOrbifoldLoopDisplay({
-  doubledGrid,
-  pathNodeIds,
-  onNodeClick,
-  highlightedNodeId,
-}: {
-  doubledGrid: OrbifoldGrid<ColorData, EdgeStyleData>;
-  pathNodeIds: string[];
-  onNodeClick?: (nodeId: string) => void;
-  highlightedNodeId?: string | null;
-}) {
-  // Build a map from nodeId → step number (1-based)
-  const nodeStep = useMemo(() => {
-    const map = new Map<string, number>();
-    for (let i = 0; i < pathNodeIds.length; i++) {
-      // If a node appears more than once (start == end), keep the first
-      if (!map.has(pathNodeIds[i])) {
-        map.set(pathNodeIds[i], i + 1);
-      }
-    }
-    return map;
-  }, [pathNodeIds]);
-
-  // Collect nodes per level
-  const levelNodes = useMemo(() => {
-    const byLevel: [typeof nodes0, typeof nodes1] = [[], []];
-    type NodeInfo = { id: string; x: number; y: number; step: number | null };
-    const nodes0: NodeInfo[] = [];
-    const nodes1: NodeInfo[] = [];
-    byLevel[0] = nodes0;
-    byLevel[1] = nodes1;
-    for (const [nodeId, node] of doubledGrid.nodes) {
-      const level = getLevelFromNodeId(nodeId);
-      if (level === undefined) continue;
-      const step = nodeStep.get(nodeId) ?? null;
-      const entry = { id: nodeId, x: node.coord[0], y: node.coord[1], step };
-      byLevel[level].push(entry);
-    }
-    return byLevel;
-  }, [doubledGrid, nodeStep]);
-
-  const cellSize = 36;
-  const padding = 24;
-
-  return (
-    <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-      {([0, 1] as const).map((level) => {
-        const nodes = levelNodes[level];
-        if (nodes.length === 0) return null;
-        const xs = nodes.map(n => n.x);
-        const ys = nodes.map(n => n.y);
-        const minX = Math.min(...xs);
-        const maxX = Math.max(...xs);
-        const minY = Math.min(...ys);
-        const maxY = Math.max(...ys);
-        const rangeX = maxX - minX || 1;
-        const rangeY = maxY - minY || 1;
-        const svgW = rangeX * cellSize / 2 + 2 * padding + 30;
-        const svgH = rangeY * cellSize / 2 + 2 * padding + 30;
-
-        const toSvgX = (c: number) => ((c - minX) * cellSize / 2) + padding + 15;
-        const toSvgY = (c: number) => ((c - minY) * cellSize / 2) + padding + 15;
-
-        return (
-          <div key={level}>
-            <h4 style={{ marginBottom: "4px", fontSize: "13px" }}>
-              Level {level} ({level === 0 ? "Low" : "High"})
-            </h4>
-            <svg
-              width={Math.min(svgW, 350)}
-              height={Math.min(svgH, 350)}
-              viewBox={`0 0 ${svgW} ${svgH}`}
-              style={{
-                border: "1px solid #ccc",
-                borderRadius: "4px",
-                backgroundColor: level === 0 ? "#f0fafa" : "#fef8f0",
-              }}
-            >
-              {nodes.map((nd) => {
-                const cx = toSvgX(nd.x);
-                const cy = toSvgY(nd.y);
-                if (nd.step !== null) {
-                  // Node is in the loop — draw a filled circle with step number
-                  const fill = level === 0 ? "#00838f" : "#ff8c00";
-                  const isHighlighted = nd.id === highlightedNodeId;
-                  return (
-                    <g
-                      key={nd.id}
-                      onClick={() => onNodeClick?.(nd.id)}
-                      style={{ cursor: onNodeClick ? "pointer" : undefined }}
-                    >
-                      {isHighlighted && (
-                        <circle cx={cx} cy={cy} r={16} fill="none" stroke="#FFD700" strokeWidth={3} />
-                      )}
-                      <circle cx={cx} cy={cy} r={11} fill={fill} stroke={isHighlighted ? "#FFD700" : "#333"} strokeWidth={isHighlighted ? 2 : 1} />
-                      <text
-                        x={cx}
-                        y={cy}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fontSize="9"
-                        fontWeight="bold"
-                        fill="#fff"
-                      >
-                        {nd.step}
-                      </text>
-                    </g>
-                  );
-                } else {
-                  // Node not in loop — small grey dot
-                  return (
-                    <circle
-                      key={nd.id}
-                      cx={cx}
-                      cy={cy}
-                      r={3}
-                      fill="#ccc"
-                      stroke="#999"
-                      strokeWidth={0.5}
-                    />
-                  );
-                }
-              })}
-            </svg>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 /**
  * Main Orbifold Weaves Explorer component.
@@ -197,24 +65,14 @@ export function OrbifoldWeaveExplorer() {
   const [computingVoltages, setComputingVoltages] = useState(false);
   const [reachableVoltages, setReachableVoltages] = useState<Array<{ key: string; matrix: VoltageMatrix }>>([]);
   const [selectedTargetVoltageKey, setSelectedTargetVoltageKey] = useState<string | null>(null);
-  const [pendingLoopResult, setPendingLoopResult] = useState<{
-    pathNodeIds: string[];
-    loopEdgeIds: string[];
-    pathEdgeIds?: string[];
-  } | null>(null);
+  const [pendingLoopResult, setPendingLoopResult] = useState<PendingLoopResult | null>(null);
   const loopWorkerRef = useRef<Worker | null>(null);
 
   // Find Loops (plural) state
   const [showLoopsFinder, setShowLoopsFinder] = useState(false);
   const [solvingAllLoops, setSolvingAllLoops] = useState(false);
   const [solveAllProgress, setSolveAllProgress] = useState<{ current: number; total: number } | null>(null);
-  const [solveAllResults, setSolveAllResults] = useState<Array<{
-    key: string;
-    matrix: VoltageMatrix;
-    pathNodeIds: string[];
-    loopEdgeIds: string[];
-    pathEdgeIds?: string[];
-  }> | null>(null);
+  const [solveAllResults, setSolveAllResults] = useState<SolveAllResult[] | null>(null);
   const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
   const [maxLengthLoops, setMaxLengthLoops] = useState(10);
   const [minLengthLoops, setMinLengthLoops] = useState(0);
@@ -678,38 +536,15 @@ export function OrbifoldWeaveExplorer() {
       <h1 style={{ marginBottom: "20px" }}>🧶 Orbifold Weaves</h1>
 
       {/* Controls */}
-      <div style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "20px",
-        marginBottom: "20px",
-        padding: "16px",
-        backgroundColor: "#f8f9fa",
-        borderRadius: "8px",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <label>Wallpaper Group:</label>
-          <select
-            value={wallpaperGroup}
-            onChange={(e) => handleWallpaperGroupChange(e.target.value as WallpaperGroupType)}
-            style={{ padding: "4px 8px", borderRadius: "4px", border: "1px solid #ccc" }}
-          >
-            <option value="P1">P1 (Torus)</option>
-            <option value="P2">P2 (180° rotation)</option>
-            <option value="pgg">pgg (glide reflections)</option>
-            <option value="pmm">pmm (mirrors)</option>
-            <option value="P3">P3 (120° rotation - axial)</option>
-            <option value="P4">P4 (90° rotation)</option>
-            <option value="P4g">P4g (90° rotation + diagonal flip)</option>
-            <option value="P6">P6 (120° rotation + diagonal flip)</option>
-          </select>
-        </div>
-
-        <ValidatedInput value={size} onChange={handleSizeChange} min={minSize} max={10} label="Size (n)"
-          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
-        />
-        <ValidatedInput value={expansion} onChange={setExpansion} min={0} max={20} label="Expansion (m)" />
-      </div>
+      <WeaveControlsPanel
+        wallpaperGroup={wallpaperGroup}
+        size={size}
+        expansion={expansion}
+        minSize={minSize}
+        onWallpaperGroupChange={handleWallpaperGroupChange}
+        onSizeChange={handleSizeChange}
+        onExpansionChange={setExpansion}
+      />
 
       {/* Error message */}
       {errorMessage && (
@@ -766,372 +601,84 @@ export function OrbifoldWeaveExplorer() {
 
       {/* Find Loop Panel */}
       {showLoopFinder && (
-        <div style={{
-          marginBottom: "16px",
-          padding: "12px",
-          backgroundColor: "#f4ecf7",
-          borderRadius: "8px",
-          border: "1px solid #8e44ad",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-            <ValidatedInput
-              value={maxLength}
-              onChange={(v) => {
-                setMaxLength(v);
-                setReachableVoltages([]);
-                setSelectedTargetVoltageKey(null);
-                if (minLength > v) setMinLength(v);
-              }}
-              min={2}
-              max={9999}
-              label="Max steps"
-              disabled={solvingLoop || computingVoltages}
-            />
-            <ValidatedInput
-              value={minLength}
-              onChange={setMinLength}
-              min={0}
-              max={maxLength}
-              label="Min steps"
-              disabled={solvingLoop || computingVoltages}
-            />
-            <button
-              onClick={handleComputeVoltages}
-              disabled={solvingLoop || computingVoltages}
-              style={{
-                padding: "4px 12px",
-                borderRadius: "4px",
-                border: "1px solid #8e44ad",
-                backgroundColor: computingVoltages ? "#d5d8dc" : "#e8daef",
-                cursor: computingVoltages ? "not-allowed" : "pointer",
-                fontSize: "13px",
-              }}
-            >
-              {computingVoltages ? "Computing…" : "Compute Voltages"}
-            </button>
-            <button
-              onClick={handleCancelLoopFind}
-              style={{
-                padding: "4px 12px",
-                borderRadius: "4px",
-                border: "1px solid #e74c3c",
-                backgroundColor: "#fadbd8",
-                cursor: "pointer",
-                fontSize: "13px",
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-
-          {reachableVoltages.length > 0 && (
-            <div style={{ marginBottom: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <label style={{ fontSize: "13px" }}>Target voltage:</label>
-                <select
-                  value={selectedTargetVoltageKey ?? ""}
-                  onChange={(e) => setSelectedTargetVoltageKey(e.target.value)}
-                  disabled={solvingLoop}
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ccc",
-                    fontSize: "12px",
-                    fontFamily: "monospace",
-                    maxWidth: "300px",
-                  }}
-                >
-                  {reachableVoltages.map((v) => {
-                    const m = v.matrix;
-                    const label = `[[${m[0].join(",")}],[${m[1].join(",")}],[${m[2].join(",")}]]`;
-                    return <option key={v.key} value={v.key}>{label}</option>;
-                  })}
-                </select>
-                <button
-                  onClick={handleSolveLoop}
-                  disabled={solvingLoop || !selectedTargetVoltageKey}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    border: "1px solid #27ae60",
-                    backgroundColor: solvingLoop ? "#d5d8dc" : "#d5f5e3",
-                    cursor: solvingLoop || !selectedTargetVoltageKey ? "not-allowed" : "pointer",
-                    fontSize: "13px",
-                  }}
-                >
-                  {solvingLoop ? "Solving…" : "Solve"}
-                </button>
-              </div>
-              <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                {reachableVoltages.length} reachable voltage{reachableVoltages.length !== 1 ? "s" : ""} found
-              </p>
-            </div>
-          )}
-
-          <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-            Root: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{rootNodeId}</code>
-            {" "}(doubled: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{doubledRootNodeId}</code>)
-          </p>
-        </div>
+        <WeaveLoopFinderPanel
+          maxLength={maxLength}
+          minLength={minLength}
+          solvingLoop={solvingLoop}
+          computingVoltages={computingVoltages}
+          reachableVoltages={reachableVoltages}
+          selectedTargetVoltageKey={selectedTargetVoltageKey}
+          rootNodeId={rootNodeId}
+          doubledRootNodeId={doubledRootNodeId}
+          onMaxLengthChange={(v) => {
+            setMaxLength(v);
+            setReachableVoltages([]);
+            setSelectedTargetVoltageKey(null);
+            if (minLength > v) setMinLength(v);
+          }}
+          onMinLengthChange={setMinLength}
+          onTargetVoltageChange={setSelectedTargetVoltageKey}
+          onComputeVoltages={handleComputeVoltages}
+          onSolveLoop={handleSolveLoop}
+          onCancel={handleCancelLoopFind}
+        />
       )}
 
       {/* Find Loops Panel */}
       {showLoopsFinder && (
-        <div style={{
-          marginBottom: "16px",
-          padding: "12px",
-          backgroundColor: "#d6eaf8",
-          borderRadius: "8px",
-          border: "1px solid #2980b9",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-            <ValidatedInput
-              value={maxLengthLoops}
-              onChange={(v) => {
-                setMaxLengthLoops(v);
-                resetLoopsFinderState();
-                if (minLengthLoops > v) setMinLengthLoops(v);
-              }}
-              min={2}
-              max={9999}
-              label="Max steps"
-              disabled={solvingAllLoops}
-            />
-            <ValidatedInput
-              value={minLengthLoops}
-              onChange={(v) => {
-                setMinLengthLoops(v);
-                resetLoopsFinderState();
-              }}
-              min={0}
-              max={maxLengthLoops}
-              label="Min steps"
-              disabled={solvingAllLoops}
-            />
-            <button
-              onClick={handleFindAllLoops}
-              disabled={solvingAllLoops}
-              style={{
-                padding: "4px 12px",
-                borderRadius: "4px",
-                border: "1px solid #2980b9",
-                backgroundColor: solvingAllLoops ? "#d5d8dc" : "#aed6f1",
-                cursor: solvingAllLoops ? "not-allowed" : "pointer",
-                fontSize: "13px",
-              }}
-            >
-              {solvingAllLoops ? "Searching…" : "Find All Loops"}
-            </button>
-            {solvingAllLoops && (
-              <button
-                onClick={handleCancelLoopsFind}
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: "4px",
-                  border: "1px solid #e74c3c",
-                  backgroundColor: "#fadbd8",
-                  cursor: "pointer",
-                  fontSize: "13px",
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-
-          {solvingAllLoops && solveAllProgress && (
-            <div style={{ marginBottom: "8px" }}>
-              <div style={{
-                width: "100%",
-                height: "20px",
-                backgroundColor: "#e0e0e0",
-                borderRadius: "4px",
-                overflow: "hidden",
-              }}>
-                <div style={{
-                  width: `${(solveAllProgress.current / solveAllProgress.total) * 100}%`,
-                  height: "100%",
-                  backgroundColor: "#2980b9",
-                  transition: "width 0.3s ease",
-                }} />
-              </div>
-              <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                Testing voltage {solveAllProgress.current} / {solveAllProgress.total}…
-              </p>
-            </div>
-          )}
-
-          {solveAllResults && solveAllResults.length > 0 && (
-            <div style={{ marginBottom: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <label style={{ fontSize: "13px" }}>SAT voltage:</label>
-                <select
-                  value={selectedLoopsVoltageKey ?? ""}
-                  onChange={(e) => {
-                    setSelectedLoopsVoltageKey(e.target.value);
-                    setPendingLoopResult(null);
-                  }}
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ccc",
-                    fontSize: "12px",
-                    fontFamily: "monospace",
-                    maxWidth: "300px",
-                  }}
-                >
-                  {solveAllResults.map((v) => {
-                    const m = v.matrix;
-                    const label = `[[${m[0].join(",")}],[${m[1].join(",")}],[${m[2].join(",")}]]`;
-                    return <option key={v.key} value={v.key}>{label}</option>;
-                  })}
-                </select>
-                <button
-                  onClick={handlePreviewLoopsResult}
-                  disabled={!selectedLoopsVoltageKey}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    border: "1px solid #27ae60",
-                    backgroundColor: !selectedLoopsVoltageKey ? "#d5d8dc" : "#d5f5e3",
-                    cursor: !selectedLoopsVoltageKey ? "not-allowed" : "pointer",
-                    fontSize: "13px",
-                  }}
-                >
-                  Preview
-                </button>
-              </div>
-              <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                {solveAllResults.length} satisfiable voltage{solveAllResults.length !== 1 ? "s" : ""} found
-              </p>
-            </div>
-          )}
-
-          <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-            Root: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{rootNodeId}</code>
-          </p>
-        </div>
+        <WeaveLoopsFinderPanel
+          maxLengthLoops={maxLengthLoops}
+          minLengthLoops={minLengthLoops}
+          solvingAllLoops={solvingAllLoops}
+          solveAllProgress={solveAllProgress}
+          solveAllResults={solveAllResults}
+          selectedLoopsVoltageKey={selectedLoopsVoltageKey}
+          rootNodeId={rootNodeId}
+          onMaxLengthChange={(v) => {
+            setMaxLengthLoops(v);
+            resetLoopsFinderState();
+            if (minLengthLoops > v) setMinLengthLoops(v);
+          }}
+          onMinLengthChange={(v) => {
+            setMinLengthLoops(v);
+            resetLoopsFinderState();
+          }}
+          onFindAllLoops={handleFindAllLoops}
+          onCancel={handleCancelLoopsFind}
+          onVoltageKeyChange={(key) => {
+            setSelectedLoopsVoltageKey(key);
+            setPendingLoopResult(null);
+          }}
+          onPreview={handlePreviewLoopsResult}
+        />
       )}
 
       {/* Pending loop result: accept/reject with 2D loop display */}
       {pendingLoopResult && (
-        <div style={{
-          marginBottom: "16px",
-          padding: "16px",
-          backgroundColor: "#fef9e7",
-          borderRadius: "8px",
-          border: "1px solid #f39c12",
-        }}>
-          <h3 style={{ marginBottom: "12px" }}>🔍 Loop Found — Review</h3>
-          <p style={{ fontSize: "13px", marginBottom: "12px" }}>
-            Path: {pendingLoopResult.pathNodeIds.length} nodes, {pendingLoopResult.loopEdgeIds.length} edges in loop
-          </p>
-
-          <DoubledOrbifoldLoopDisplay
-            doubledGrid={doubledGrid}
-            pathNodeIds={pendingLoopResult.pathNodeIds}
-          />
-
-          <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
-            <button
-              onClick={handleAcceptLoop}
-              style={{
-                padding: "6px 16px",
-                borderRadius: "4px",
-                border: "1px solid #27ae60",
-                backgroundColor: "#d5f5e3",
-                cursor: "pointer",
-                fontSize: "14px",
-                fontWeight: "bold",
-              }}
-            >
-              ✓ Accept
-            </button>
-            <button
-              onClick={handleRejectLoop}
-              style={{
-                padding: "6px 16px",
-                borderRadius: "4px",
-                border: "1px solid #e74c3c",
-                backgroundColor: "#fadbd8",
-                cursor: "pointer",
-                fontSize: "14px",
-              }}
-            >
-              ✗ Reject
-            </button>
-          </div>
-        </div>
+        <PendingLoopPanel
+          pendingLoopResult={pendingLoopResult}
+          doubledGrid={doubledGrid}
+          onAccept={handleAcceptLoop}
+          onReject={handleRejectLoop}
+        />
       )}
 
       {/* Accepted loop: 2D cross-reference + 3D lifted graph */}
       {loopAccepted && (
-        <div>
-          <h3 style={{ marginBottom: "10px" }}>Loop Path (Cross Reference)</h3>
-          <DoubledOrbifoldLoopDisplay
-            doubledGrid={doubledGrid}
-            pathNodeIds={acceptedPathNodeIds}
-            onNodeClick={(nodeId) => setHighlightedNodeId(prev => prev === nodeId ? null : nodeId)}
-            highlightedNodeId={highlightedNodeId}
-          />
-
-          <h3 style={{ marginTop: "20px", marginBottom: "10px" }}>3D Weave (Lifted Graph)</h3>
-          <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
-            Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
-          </p>
-          <div style={{ display: "flex", gap: "20px", marginBottom: "10px", fontSize: "13px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              Level height:
-              <input
-                type="range"
-                min={0}
-                max={6}
-                step={0.1}
-                value={levelHeight}
-                onChange={(e) => setLevelHeight(parseFloat(e.target.value))}
-                style={{ width: "120px" }}
-              />
-              <span style={{ minWidth: "32px" }}>{levelHeight.toFixed(1)}</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              Tube radius:
-              <input
-                type="range"
-                min={0}
-                max={0.5}
-                step={0.01}
-                value={tubeRadius}
-                onChange={(e) => setTubeRadius(parseFloat(e.target.value))}
-                style={{ width: "120px" }}
-              />
-              <span style={{ minWidth: "32px" }}>{tubeRadius.toFixed(2)}</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              Bead speed:
-              <input
-                type="range"
-                min={0}
-                max={5}
-                step={0.1}
-                value={beadSpeed}
-                onChange={(e) => setBeadSpeed(parseFloat(e.target.value))}
-                style={{ width: "120px" }}
-              />
-              <span style={{ minWidth: "32px" }}>{beadSpeed.toFixed(1)}</span>
-            </label>
-          </div>
-          <ErrorBoundary>
-            <WeaveThreeRenderer
-              liftedGraph={liftedGraph}
-              orbifoldGrid={doubledGrid}
-              useAxialTransform={wallpaperGroup === "P3" || wallpaperGroup === "P6"}
-              highlightedOrbifoldNodeId={highlightedNodeId}
-              levelSpacing={levelHeight}
-              tubeRadius={tubeRadius}
-              beadSpeed={beadSpeed}
-            />
-          </ErrorBoundary>
-        </div>
+        <AcceptedLoopPanel
+          doubledGrid={doubledGrid}
+          acceptedPathNodeIds={acceptedPathNodeIds}
+          highlightedNodeId={highlightedNodeId}
+          onNodeClick={(nodeId) => setHighlightedNodeId(prev => prev === nodeId ? null : nodeId)}
+          liftedGraph={liftedGraph}
+          wallpaperGroup={wallpaperGroup}
+          levelHeight={levelHeight}
+          tubeRadius={tubeRadius}
+          beadSpeed={beadSpeed}
+          onLevelHeightChange={setLevelHeight}
+          onTubeRadiusChange={setTubeRadius}
+          onBeadSpeedChange={setBeadSpeed}
+        />
       )}
     </div>
   );
