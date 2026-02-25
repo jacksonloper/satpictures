@@ -6,4 +6,8 @@ export { SketchpadGrid } from "./SketchpadGrid";
 export { SolutionGrid } from "./SolutionGrid";
 export { KidFriendlyMapView } from "./KidFriendlyMapView";
 export { downloadSolutionSVG } from "./svgDownload";
+export { ToolPanel } from "./ToolPanel";
+export type { EditingTool } from "./ToolPanel";
+export { DistanceInputDialog } from "./DistanceInputDialog";
+export { SolutionPanel } from "./SolutionPanel";
 export * from "./gridConstants";
