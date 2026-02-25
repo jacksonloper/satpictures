@@ -13,7 +13,7 @@
  * - See the generated lifted graph with highlighting for inspected nodes
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import {
   createOrbifoldGrid,
   type WallpaperGroupType,
@@ -25,24 +25,28 @@ import {
   constructLiftedGraphFromOrbifold,
   processAllNonInteriorOnce,
   buildAdjacency,
-  formatVoltageRows,
   type OrbifoldGrid,
   type OrbifoldEdgeId,
   type OrbifoldNodeId,
 } from "./orbifoldbasics";
 import { applyRandomSpanningTreeToWhiteNodes } from "./spanningTree";
 import { OrbifoldColorsExplorer } from "./OrbifoldColorsExplorer";
-import LoopFinderWorker from "./loop-finder.worker?worker";
-import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 import {
   ErrorBoundary,
-  ValidatedInput,
-  LiftedGraphRenderer,
   OrbifoldGridTools,
   LoopResultRenderer,
+  ControlsPanel,
+  ToolSelector,
+  LoopFinderPanel,
+  LoopsFinderPanel,
+  InspectionPanel,
+  LiftedGraphSection,
+  HelpSection,
   type ToolType,
   type InspectionInfo,
+  type BackgroundMode,
 } from "./components";
+import { useLoopFinder } from "./hooks";
 import "../App.css";
 
 // Constants
@@ -60,9 +64,9 @@ export function OrbifoldsExplorer() {
   const [inspectionInfo, setInspectionInfo] = useState<InspectionInfo | null>(null);
   const [useAxialTransform, setUseAxialTransform] = useState(false);
   const [selectedVoltageKey, setSelectedVoltageKey] = useState<string | null>(null);
-  const [backgroundMode, setBackgroundMode] = useState<"none" | "domain" | "component">("domain");
+  const [backgroundMode, setBackgroundMode] = useState<BackgroundMode>("domain");
   const [showDashedLines, setShowDashedLines] = useState(true);
-  const [showNodes, setShowNodes] = useState(false); // Nodes hidden by default
+  const [showNodes, setShowNodes] = useState(false);
   const [showWalls, setShowWalls] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -71,56 +75,22 @@ export function OrbifoldsExplorer() {
     const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
     return firstNodeId ?? null;
   });
-  const [maxLength, setMaxLength] = useState(10);
-  const [minLength, setMinLength] = useState(0);
-  const [showLoopFinder, setShowLoopFinder] = useState(false);
-  const [solvingLoop, setSolvingLoop] = useState(false);
-  const [computingVoltages, setComputingVoltages] = useState(false);
-  const [loopSatStats, setLoopSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
-  const [reachableVoltages, setReachableVoltages] = useState<Array<{ key: string; matrix: VoltageMatrix }>>([]);
-  const [selectedTargetVoltageKey, setSelectedTargetVoltageKey] = useState<string | null>(null);
-  const [pendingLoopResult, setPendingLoopResult] = useState<{
-    pathNodeIds: string[];
-    loopEdgeIds: string[];
-    pathEdgeIds?: string[];
-  } | null>(null);
-  const loopWorkerRef = useRef<Worker | null>(null);
-
-  // "Find Loops" (plural) flow state
-  const [showLoopsFinder, setShowLoopsFinder] = useState(false);
-  const [solvingAllLoops, setSolvingAllLoops] = useState(false);
-  const [solveAllProgress, setSolveAllProgress] = useState<{ current: number; total: number } | null>(null);
-  const [solveAllResults, setSolveAllResults] = useState<Array<{
-    key: string;
-    matrix: VoltageMatrix;
-    pathNodeIds: string[];
-    loopEdgeIds: string[];
-    pathEdgeIds?: string[];
-  }> | null>(null);
-  const [selectedLoopsVoltageKey, setSelectedLoopsVoltageKey] = useState<string | null>(null);
-  const [maxLengthLoops, setMaxLengthLoops] = useState(10);
-  const [minLengthLoops, setMinLengthLoops] = useState(0);
-  const loopsWorkerRef = useRef<Worker | null>(null);
 
   const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
-  
-  // Ref for SVG export
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
   
-  // Initialize orbifold grid with adjacency built
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
     const grid = createOrbifoldGrid(wallpaperGroup, size);
     buildAdjacency(grid);
     return grid;
   });
 
-  // Helper: reset Find Loops state
-  const resetLoopsFinderState = useCallback(() => {
-    setSolvingAllLoops(false);
-    setSolveAllProgress(null);
-    setSolveAllResults(null);
-    setSelectedLoopsVoltageKey(null);
-  }, []);
+  // Use the loop finder hook
+  const loopFinder = useLoopFinder({
+    orbifoldGrid,
+    rootNodeId,
+    onError: setErrorMessage,
+  });
 
   // Recreate grid and reset dependent state when wallpaper group or size changes
   const resetGrid = useCallback((nextGroup: WallpaperGroupType, nextSize: number) => {
@@ -131,16 +101,8 @@ export function OrbifoldsExplorer() {
     setSelectedVoltageKey(null);
     const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
     setRootNodeId(firstNodeId ?? null);
-    setShowLoopFinder(false);
-    setSolvingLoop(false);
-    setComputingVoltages(false);
-    setLoopSatStats(null);
-    setReachableVoltages([]);
-    setSelectedTargetVoltageKey(null);
-    setPendingLoopResult(null);
-    setShowLoopsFinder(false);
-    resetLoopsFinderState();
-  }, [resetLoopsFinderState]);
+    loopFinder.resetAllLoopState();
+  }, [loopFinder]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
@@ -155,7 +117,6 @@ export function OrbifoldsExplorer() {
     resetGrid(wallpaperGroup, nextSize);
   }, [wallpaperGroup, resetGrid]);
 
-  // Handle cell color toggle (by node ID)
   const handleColorToggle = useCallback((nodeId: OrbifoldNodeId) => {
     setOrbifoldGrid((prev) => {
       const newGrid: OrbifoldGrid<ColorData, EdgeStyleData> = {
@@ -163,26 +124,21 @@ export function OrbifoldsExplorer() {
         edges: prev.edges,
         adjacency: prev.adjacency,
       };
-      
       const node = newGrid.nodes.get(nodeId);
       if (node) {
         const currentColor = node.data?.color ?? "white";
         const newColor = currentColor === "black" ? "white" : "black";
         node.data = { color: newColor };
       }
-      
       return newGrid;
     });
   }, []);
 
-  // Handle edge linestyle toggle
-  // Helper function to toggle linestyle
   const toggleLinestyle = (current: EdgeLinestyle): EdgeLinestyle => 
     current === "solid" ? "dashed" : "solid";
 
   const handleEdgeLinestyleToggle = useCallback((edgeId: OrbifoldEdgeId) => {
     setOrbifoldGrid((prev) => {
-      // Create a shallow copy of the grid with edges also copied
       const newEdges = new Map(prev.edges);
       const edge = newEdges.get(edgeId);
       if (edge) {
@@ -190,27 +146,15 @@ export function OrbifoldsExplorer() {
         const newLinestyle = toggleLinestyle(currentLinestyle);
         newEdges.set(edgeId, { ...edge, data: { linestyle: newLinestyle } });
       }
-      
-      const newGrid: OrbifoldGrid<ColorData, EdgeStyleData> = {
-        nodes: prev.nodes,
-        edges: newEdges,
-        adjacency: prev.adjacency,
-      };
-      
-      return newGrid;
+      return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
     });
-    
-    // Also update the inspection info to reflect the new linestyle
     setInspectionInfo((prevInfo) => {
       if (!prevInfo) return null;
       return {
         ...prevInfo,
         edges: prevInfo.edges.map((e) => {
           if (e.edgeId === edgeId) {
-            return {
-              ...e,
-              linestyle: toggleLinestyle(e.linestyle),
-            };
+            return { ...e, linestyle: toggleLinestyle(e.linestyle) };
           }
           return e;
         }),
@@ -218,480 +162,37 @@ export function OrbifoldsExplorer() {
     });
   }, []);
 
-  // Handle inspection
   const handleInspect = useCallback((info: InspectionInfo | null) => {
     setInspectionInfo(info);
   }, []);
 
-  // Handle random spanning tree button click
   const handleRandomSpanningTree = useCallback(() => {
     try {
-      setErrorMessage(null); // Clear any previous error
-      setOrbifoldGrid((prev) => {
-        const newGrid = applyRandomSpanningTreeToWhiteNodes(prev);
-        return newGrid;
-      });
-      // Clear inspection info since edge linestyles have changed
+      setErrorMessage(null);
+      setOrbifoldGrid((prev) => applyRandomSpanningTreeToWhiteNodes(prev));
       setInspectionInfo(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "An unexpected error occurred";
       setErrorMessage(`Random tree generation failed: ${message}`);
-      console.error("Random spanning tree error:", error);
     }
   }, []);
 
-  // Handle root node setting
   const handleSetRoot = useCallback((nodeId: OrbifoldNodeId) => {
     setRootNodeId(nodeId);
   }, []);
 
-  // Handle loop finder toggle
-  const handleToggleLoopFinder = useCallback(() => {
-    setShowLoopFinder(prev => !prev);
-    setErrorMessage(null);
-  }, []);
-
-  // Handle loop finder cancel
-  const handleCancelLoopFind = useCallback(() => {
-    if (loopWorkerRef.current) {
-      loopWorkerRef.current.terminate();
-      loopWorkerRef.current = null;
-      setSolvingLoop(false);
-      setComputingVoltages(false);
-      setErrorMessage("Loop search cancelled");
-    }
-  }, []);
-
-  // Handle loops finder toggle
-  const handleToggleLoopsFinder = useCallback(() => {
-    setShowLoopsFinder(prev => !prev);
-    setErrorMessage(null);
-  }, []);
-
-  // Handle loops finder cancel
-  const handleCancelLoopsFind = useCallback(() => {
-    if (loopsWorkerRef.current) {
-      loopsWorkerRef.current.terminate();
-      loopsWorkerRef.current = null;
-      resetLoopsFinderState();
-      setErrorMessage("Loops search cancelled");
-    }
-  }, [resetLoopsFinderState]);
-
-  // Helper: build edge data with voltages for the worker
-  const buildWorkerEdgeData = useCallback((grid: OrbifoldGrid<ColorData, EdgeStyleData>) => {
-    const edgesData: Array<{
-      edgeId: string;
-      endpoints: [string, string];
-      halfEdgeVoltages: Record<string, readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]]>;
-    }> = [];
-    for (const [edgeId, edge] of grid.edges) {
-      const endpoints = Array.from(edge.halfEdges.keys());
-      const halfEdgeVoltages: Record<string, readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]]> = {};
-      for (const [nodeId, halfEdge] of edge.halfEdges) {
-        halfEdgeVoltages[nodeId] = halfEdge.voltage;
-      }
-      if (endpoints.length === 1) {
-        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[0]], halfEdgeVoltages });
-      } else {
-        edgesData.push({ edgeId, endpoints: [endpoints[0], endpoints[1]], halfEdgeVoltages });
-      }
-    }
-    return edgesData;
-  }, []);
-
-  // Helper: resolve effective root and validate
-  const resolveEffectiveRoot = useCallback((grid: OrbifoldGrid<ColorData, EdgeStyleData>, nodeIds: string[], blackNodeIds: string[]): string | null => {
-    if (!rootNodeId) return null;
-
-    const blackSet = new Set(blackNodeIds);
-    let effectiveRootNodeId = rootNodeId;
-    if (blackSet.has(effectiveRootNodeId)) {
-      const rootEdgeIds = grid.adjacency?.get(effectiveRootNodeId) ?? [];
-      let newRoot: string | null = null;
-      for (const edgeId of rootEdgeIds) {
-        const edge = grid.edges.get(edgeId);
-        if (!edge) continue;
-        const halfEdge = edge.halfEdges.get(effectiveRootNodeId);
-        if (!halfEdge) continue;
-        if (!blackSet.has(halfEdge.to)) {
-          newRoot = halfEdge.to;
-          break;
-        }
-      }
-      if (!newRoot) {
-        newRoot = nodeIds.find(id => !blackSet.has(id)) ?? null;
-      }
-      if (!newRoot) return null;
-      effectiveRootNodeId = newRoot;
-    }
-    return effectiveRootNodeId;
-  }, [rootNodeId]);
-
-  // Phase 1: Compute reachable voltages via BFS
-  const handleComputeVoltages = useCallback(() => {
-    if (!rootNodeId) {
-      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
-      return;
-    }
-
-    setErrorMessage(null);
-    setComputingVoltages(true);
-    setReachableVoltages([]);
-    setSelectedTargetVoltageKey(null);
-    setLoopSatStats(null);
-    setPendingLoopResult(null);
-
-    const grid = orbifoldGrid;
-    const nodeIds = Array.from(grid.nodes.keys());
-
-    const blackNodeIds: string[] = [];
-    for (const [, node] of grid.nodes) {
-      if (node.data?.color === "black") {
-        blackNodeIds.push(node.id);
-      }
-    }
-
-    if (blackNodeIds.length === nodeIds.length) {
-      setErrorMessage("No non-black nodes available for the loop");
-      setComputingVoltages(false);
-      return;
-    }
-
-    const effectiveRootNodeId = resolveEffectiveRoot(grid, nodeIds, blackNodeIds);
-    if (!effectiveRootNodeId) {
-      setErrorMessage("No non-black nodes available for the loop");
-      setComputingVoltages(false);
-      return;
-    }
-
-    const adj: Record<string, string[]> = {};
-    for (const nodeId of nodeIds) {
-      const edgeIds = grid.adjacency?.get(nodeId) ?? [];
-      const neighbors: string[] = [];
-      for (const edgeId of edgeIds) {
-        const edge = grid.edges.get(edgeId);
-        if (!edge) continue;
-        const halfEdge = edge.halfEdges.get(nodeId);
-        if (!halfEdge) continue;
-        if (!neighbors.includes(halfEdge.to)) {
-          neighbors.push(halfEdge.to);
-        }
-      }
-      adj[nodeId] = neighbors;
-    }
-
-    const edgesData = buildWorkerEdgeData(grid);
-
-    const request: LoopFinderRequest = {
-      mode: "computeVoltages",
-      maxLength,
-      rootNodeId: effectiveRootNodeId,
-      nodeIds,
-      adjacency: adj,
-      edges: edgesData,
-      blackNodeIds,
-    };
-
-    const worker = new LoopFinderWorker();
-    loopWorkerRef.current = worker;
-
-    worker.onmessage = (event: MessageEvent<LoopFinderResponse>) => {
-      const response = event.data;
-
-      if (response.success && response.reachableVoltages) {
-        setReachableVoltages(response.reachableVoltages);
-        if (response.reachableVoltages.length > 0) {
-          setSelectedTargetVoltageKey(response.reachableVoltages[0].key);
-        }
-        if (response.reachableVoltages.length === 0) {
-          setErrorMessage("No reachable voltages found for this max length");
-        }
-      } else {
-        setErrorMessage(response.error || "Voltage computation failed");
-      }
-
-      setComputingVoltages(false);
-      loopWorkerRef.current = null;
-    };
-
-    worker.onerror = (error) => {
-      setErrorMessage(`Worker error: ${error.message}`);
-      setComputingVoltages(false);
-      loopWorkerRef.current = null;
-    };
-
-    worker.postMessage(request);
-  }, [maxLength, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData]);
-
-  // Phase 2: Solve for a loop with the selected target voltage
-  const handleSolveLoop = useCallback(() => {
-    if (!rootNodeId) {
-      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
-      return;
-    }
-    if (!selectedTargetVoltageKey || reachableVoltages.length === 0) {
-      setErrorMessage("Please compute voltages and select a target voltage first");
-      return;
-    }
-
-    setErrorMessage(null);
-    setSolvingLoop(true);
-    setLoopSatStats(null);
-    setPendingLoopResult(null);
-
-    const grid = orbifoldGrid;
-    const nodeIds = Array.from(grid.nodes.keys());
-
-    const blackNodeIds: string[] = [];
-    for (const [, node] of grid.nodes) {
-      if (node.data?.color === "black") {
-        blackNodeIds.push(node.id);
-      }
-    }
-
-    const blackSet = new Set(blackNodeIds);
-    if (blackNodeIds.length === nodeIds.length) {
-      setErrorMessage("No non-black nodes available for the loop");
-      setSolvingLoop(false);
-      return;
-    }
-
-    const effectiveRootNodeId = resolveEffectiveRoot(grid, nodeIds, blackNodeIds);
-    if (!effectiveRootNodeId) {
-      setErrorMessage("No non-black nodes available for the loop");
-      setSolvingLoop(false);
-      return;
-    }
-
-    if (blackSet.has(effectiveRootNodeId)) {
-      setErrorMessage("Root node must not be black-colored");
-      setSolvingLoop(false);
-      return;
-    }
-
-    const adj: Record<string, string[]> = {};
-    for (const nodeId of nodeIds) {
-      const edgeIds = grid.adjacency?.get(nodeId) ?? [];
-      const neighbors: string[] = [];
-      for (const edgeId of edgeIds) {
-        const edge = grid.edges.get(edgeId);
-        if (!edge) continue;
-        const halfEdge = edge.halfEdges.get(nodeId);
-        if (!halfEdge) continue;
-        if (!neighbors.includes(halfEdge.to)) {
-          neighbors.push(halfEdge.to);
-        }
-      }
-      adj[nodeId] = neighbors;
-    }
-
-    const edgesData = buildWorkerEdgeData(grid);
-
-    const request: LoopFinderRequest = {
-      mode: "solve",
-      maxLength,
-      minLength,
-      rootNodeId: effectiveRootNodeId,
-      nodeIds,
-      adjacency: adj,
-      edges: edgesData,
-      blackNodeIds,
-      targetVoltageKey: selectedTargetVoltageKey,
-      reachableVoltages,
-    };
-
-    const worker = new LoopFinderWorker();
-    loopWorkerRef.current = worker;
-
-    worker.onmessage = (event: MessageEvent<LoopFinderResponse>) => {
-      const response = event.data;
-
-      if (response.messageType === "progress") {
-        if (response.stats) {
-          setLoopSatStats(response.stats);
-        }
-        return;
-      }
-
-      if (response.success && response.loopEdgeIds && response.pathNodeIds) {
-        setPendingLoopResult({
-          pathNodeIds: response.pathNodeIds,
-          loopEdgeIds: response.loopEdgeIds,
-          pathEdgeIds: response.pathEdgeIds,
-        });
-        setErrorMessage(null);
-      } else {
-        setErrorMessage(response.error || "Loop search failed");
-      }
-
-      setSolvingLoop(false);
-      loopWorkerRef.current = null;
-    };
-
-    worker.onerror = (error) => {
-      setErrorMessage(`Worker error: ${error.message}`);
-      setSolvingLoop(false);
-      loopWorkerRef.current = null;
-    };
-
-    worker.postMessage(request);
-  }, [maxLength, minLength, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, resolveEffectiveRoot, buildWorkerEdgeData]);
-
-  // Handle "Find Loops" - solve all voltages
-  const handleFindAllLoops = useCallback(() => {
-    if (!rootNodeId) {
-      setErrorMessage("Please set a root node first (use the 📌 Root tool)");
-      return;
-    }
-
-    setErrorMessage(null);
-    resetLoopsFinderState();
-    setSolvingAllLoops(true);
-    setPendingLoopResult(null);
-
-    const grid = orbifoldGrid;
-    const nodeIds = Array.from(grid.nodes.keys());
-
-    const blackNodeIds: string[] = [];
-    for (const [, node] of grid.nodes) {
-      if (node.data?.color === "black") {
-        blackNodeIds.push(node.id);
-      }
-    }
-
-    if (blackNodeIds.length === nodeIds.length) {
-      setErrorMessage("No non-black nodes available for loops");
-      setSolvingAllLoops(false);
-      return;
-    }
-
-    const effectiveRootNodeId = resolveEffectiveRoot(grid, nodeIds, blackNodeIds);
-    if (!effectiveRootNodeId) {
-      setErrorMessage("No non-black nodes available for loops");
-      setSolvingAllLoops(false);
-      return;
-    }
-
-    const adj: Record<string, string[]> = {};
-    for (const nodeId of nodeIds) {
-      const edgeIds = grid.adjacency?.get(nodeId) ?? [];
-      const neighbors: string[] = [];
-      for (const edgeId of edgeIds) {
-        const edge = grid.edges.get(edgeId);
-        if (!edge) continue;
-        const halfEdge = edge.halfEdges.get(nodeId);
-        if (!halfEdge) continue;
-        if (!neighbors.includes(halfEdge.to)) {
-          neighbors.push(halfEdge.to);
-        }
-      }
-      adj[nodeId] = neighbors;
-    }
-
-    const edgesData = buildWorkerEdgeData(grid);
-
-    const request: LoopFinderRequest = {
-      mode: "solveAll",
-      maxLength: maxLengthLoops,
-      minLength: minLengthLoops,
-      rootNodeId: effectiveRootNodeId,
-      nodeIds,
-      adjacency: adj,
-      edges: edgesData,
-      blackNodeIds,
-    };
-
-    const worker = new LoopFinderWorker();
-    loopsWorkerRef.current = worker;
-
-    worker.onmessage = (event: MessageEvent<LoopFinderResponse>) => {
-      const response = event.data;
-
-      if (response.messageType === "progress") {
-        if (response.solveAllProgress) {
-          setSolveAllProgress(response.solveAllProgress);
-        }
-        return;
-      }
-
-      if (response.success && response.solveAllResults) {
-        setSolveAllResults(response.solveAllResults);
-        if (response.solveAllResults.length > 0) {
-          setSelectedLoopsVoltageKey(response.solveAllResults[0].key);
-        }
-        if (response.solveAllResults.length === 0) {
-          setErrorMessage("No satisfiable loops found for any voltage");
-        }
-      } else {
-        setErrorMessage(response.error || "Loops search failed");
-      }
-
-      setSolvingAllLoops(false);
-      setSolveAllProgress(null);
-      loopsWorkerRef.current = null;
-    };
-
-    worker.onerror = (error) => {
-      setErrorMessage(`Worker error: ${error.message}`);
-      setSolvingAllLoops(false);
-      setSolveAllProgress(null);
-      loopsWorkerRef.current = null;
-    };
-
-    worker.postMessage(request);
-  }, [maxLengthLoops, minLengthLoops, rootNodeId, orbifoldGrid, resolveEffectiveRoot, buildWorkerEdgeData, resetLoopsFinderState]);
-
-  // Handle selecting a loops result for preview
-  const handlePreviewLoopsResult = useCallback(() => {
-    if (!solveAllResults || !selectedLoopsVoltageKey) return;
-    const result = solveAllResults.find(r => r.key === selectedLoopsVoltageKey);
-    if (result) {
-      setPendingLoopResult({
-        pathNodeIds: result.pathNodeIds,
-        loopEdgeIds: result.loopEdgeIds,
-        pathEdgeIds: result.pathEdgeIds,
-      });
-    }
-  }, [solveAllResults, selectedLoopsVoltageKey]);
-
-  // Handle dismissing loops results (no effect on grid state)
-  const handleDismissLoops = useCallback(() => {
-    resetLoopsFinderState();
-    setPendingLoopResult(null);
-  }, [resetLoopsFinderState]);
-
-  // Cleanup workers on unmount
-  useEffect(() => {
-    return () => {
-      if (loopWorkerRef.current) {
-        loopWorkerRef.current.terminate();
-        loopWorkerRef.current = null;
-      }
-      if (loopsWorkerRef.current) {
-        loopsWorkerRef.current.terminate();
-        loopsWorkerRef.current = null;
-      }
-    };
-  }, []);
-
-  // Handle accepting the loop result: set selected loop edges as solid, others as dashed.
-  // Also assign black color to all orbifold nodes not involved in the loop.
-  // `selectedEdgeIds` is the per-step edge selection made by the user in the LoopResultRenderer.
   const handleAcceptLoop = useCallback((selectedEdgeIds: string[]) => {
-    if (!pendingLoopResult) return;
+    if (!loopFinder.pendingLoopResult) return;
 
     const chosenEdges = new Set(selectedEdgeIds);
-    const loopNodeIds = new Set(pendingLoopResult.pathNodeIds);
+    const loopNodeIds = new Set(loopFinder.pendingLoopResult.pathNodeIds);
 
     setOrbifoldGrid((prev) => {
-      // Set chosen edges to solid, all others to dashed
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
         const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
         newEdges.set(edgeId, { ...edge, data: { linestyle } });
       }
-      // Set non-loop nodes to black
       const newNodes = new Map(prev.nodes);
       for (const [nodeId, node] of newNodes) {
         if (!loopNodeIds.has(nodeId)) {
@@ -702,16 +203,10 @@ export function OrbifoldsExplorer() {
     });
 
     setInspectionInfo(null);
-    setPendingLoopResult(null);
-    resetLoopsFinderState();
-  }, [pendingLoopResult, resetLoopsFinderState]);
+    loopFinder.setPendingLoopResult(null);
+    loopFinder.resetLoopsFinderState();
+  }, [loopFinder]);
 
-  // Handle rejecting the loop result: keep original edge styles
-  const handleRejectLoop = useCallback(() => {
-    setPendingLoopResult(null);
-  }, []);
-
-  // Handle clearing the grid: set all nodes to white and all edges to solid
   const handleClear = useCallback(() => {
     setOrbifoldGrid((prev) => {
       const newNodes = new Map(prev.nodes);
@@ -726,28 +221,17 @@ export function OrbifoldsExplorer() {
     });
   }, []);
 
-  // Handle SVG export
   const handleExportSvg = useCallback(() => {
     const svgElement = liftedGraphSvgRef.current;
     if (!svgElement) return;
-    
-    // Clone the SVG to avoid modifying the original
     const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
-    
-    // Add xmlns attribute for standalone SVG file
     svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    
-    // Serialize to string
     const serializer = new XMLSerializer();
     const svgString = serializer.serializeToString(svgClone);
-    
-    // Create blob and download
     const blob = new Blob([svgString], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
-    
     const link = document.createElement("a");
     link.href = url;
-    // Sanitize filename components (wallpaperGroup is already constrained to P1/P2/P3/P4/pgg)
     const safeGroup = wallpaperGroup.toLowerCase();
     link.download = `lifted-graph-${safeGroup}-${size}x${size}.svg`;
     document.body.appendChild(link);
@@ -756,22 +240,15 @@ export function OrbifoldsExplorer() {
     URL.revokeObjectURL(url);
   }, [wallpaperGroup, size]);
 
-  // Handle lifted node click (for domain highlighting)
-  // Note: liftedNodeId is available for future extension (e.g., showing node details)
   const handleLiftedNodeClick = useCallback((_liftedNodeId: string, voltageKey: string) => {
-    // Toggle selection: if same voltage is clicked again, deselect
     setSelectedVoltageKey(prev => prev === voltageKey ? null : voltageKey);
   }, []);
 
-  // Build the lifted graph
   const liftedGraph = useMemo(() => {
     const lifted = constructLiftedGraphFromOrbifold<ColorData, EdgeStyleData>(orbifoldGrid);
-    
-    // Expand the graph m times
     for (let i = 0; i < expansion; i++) {
       processAllNonInteriorOnce(lifted);
     }
-    
     return lifted;
   }, [orbifoldGrid, expansion]);
 
@@ -780,71 +257,17 @@ export function OrbifoldsExplorer() {
       <h1 style={{ marginBottom: "20px" }}>🔮 Orbifolds Explorer</h1>
       
       {/* Controls */}
-      <div style={{ 
-        display: "flex", 
-        flexWrap: "wrap",
-        gap: "20px", 
-        marginBottom: "20px",
-        padding: "16px",
-        backgroundColor: "#f8f9fa",
-        borderRadius: "8px",
-      }}>
-        {/* Wallpaper Group Selector */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <label>Wallpaper Group:</label>
-          <select
-            value={wallpaperGroup}
-            onChange={(e) => handleWallpaperGroupChange(e.target.value as WallpaperGroupType)}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-            }}
-          >
-            <option value="P1">P1 (Torus)</option>
-            <option value="P2">P2 (180° rotation)</option>
-            <option value="pgg">pgg (glide reflections)</option>
-            <option value="pmm">pmm (mirrors)</option>
-            <option value="P3">P3 (120° rotation - axial)</option>
-            <option value="P4">P4 (90° rotation)</option>
-            <option value="P4g">P4g (90° rotation + diagonal flip)</option>
-            <option value="P6">P6 (120° rotation + diagonal flip)</option>
-          </select>
-        </div>
-        
-        {/* Size Input */}
-        <ValidatedInput
-          value={size}
-          onChange={handleSizeChange}
-          min={minSize}
-          max={10}
-          label="Size (n)"
-          extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
-        />
-        
-        {/* Expansion Input */}
-        <ValidatedInput
-          value={expansion}
-          onChange={setExpansion}
-          min={0}
-          max={20}
-          label="Expansion (m)"
-        />
-        
-        {/* Axial Transform Checkbox (only visible for P3/P6) */}
-        {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={useAxialTransform}
-                onChange={(e) => setUseAxialTransform(e.target.checked)}
-              />
-              Show axial coordinates
-            </label>
-          </div>
-        )}
-      </div>
+      <ControlsPanel
+        wallpaperGroup={wallpaperGroup}
+        onWallpaperGroupChange={handleWallpaperGroupChange}
+        size={size}
+        onSizeChange={handleSizeChange}
+        minSize={minSize}
+        expansion={expansion}
+        onExpansionChange={setExpansion}
+        useAxialTransform={useAxialTransform}
+        onUseAxialTransformChange={setUseAxialTransform}
+      />
       
       {/* Error message display */}
       {errorMessage && (
@@ -882,416 +305,83 @@ export function OrbifoldsExplorer() {
           <h3 style={{ marginBottom: "10px" }}>Orbifold Grid ({size}×{size})</h3>
           
           {/* Tool selector */}
-          <div style={{ 
-            display: "flex", 
-            gap: "8px", 
-            marginBottom: "10px",
-          }}>
-            <button
-              onClick={() => setTool("color")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: tool === "color" ? "2px solid #3498db" : "1px solid #ccc",
-                backgroundColor: tool === "color" ? "#ebf5fb" : "white",
-                cursor: "pointer",
-                fontWeight: tool === "color" ? "bold" : "normal",
-              }}
-            >
-              🎨 Color
-            </button>
-            <button
-              onClick={() => setTool("inspect")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: tool === "inspect" ? "2px solid #3498db" : "1px solid #ccc",
-                backgroundColor: tool === "inspect" ? "#ebf5fb" : "white",
-                cursor: "pointer",
-                fontWeight: tool === "inspect" ? "bold" : "normal",
-              }}
-            >
-              🔍 Inspect
-            </button>
-            <button
-              onClick={() => setTool("root")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: tool === "root" ? "2px solid #e67e22" : "1px solid #ccc",
-                backgroundColor: tool === "root" ? "#fef5e7" : "white",
-                cursor: "pointer",
-                fontWeight: tool === "root" ? "bold" : "normal",
-              }}
-              title="Click a node to set it as the root for loop finding"
-            >
-              📌 Root
-            </button>
-            <button
-              onClick={handleRandomSpanningTree}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: "1px solid #27ae60",
-                backgroundColor: "#e8f6ef",
-                cursor: "pointer",
-              }}
-              title="Generate a random spanning tree of white nodes (solid = in tree, dashed = not in tree)"
-            >
-              🌲 Random Tree
-            </button>
-            <button
-              onClick={handleToggleLoopFinder}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: showLoopFinder ? "2px solid #8e44ad" : "1px solid #8e44ad",
-                backgroundColor: showLoopFinder ? "#f4ecf7" : "#faf5ff",
-                cursor: "pointer",
-                fontWeight: showLoopFinder ? "bold" : "normal",
-              }}
-              title="Find a non-self-intersecting loop with target voltage via SAT solver"
-            >
-              🔄 Find Loop
-            </button>
-            <button
-              onClick={handleToggleLoopsFinder}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: showLoopsFinder ? "2px solid #2980b9" : "1px solid #2980b9",
-                backgroundColor: showLoopsFinder ? "#d6eaf8" : "#eaf2f8",
-                cursor: "pointer",
-                fontWeight: showLoopsFinder ? "bold" : "normal",
-              }}
-              title="Find all non-self-intersecting loops across all voltages via SAT solver"
-            >
-              🔄 Find Loops
-            </button>
-            <button
-              onClick={handleClear}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "4px",
-                border: "1px solid #e74c3c",
-                backgroundColor: "#fdedec",
-                cursor: "pointer",
-              }}
-              title="Reset all nodes to white and all edges to solid"
-            >
-              🧹 Clear
-            </button>
-          </div>
-          
-          <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
-            {tool === "color" 
-              ? "Click cells to toggle black/white" 
-              : tool === "root"
-              ? "Click a node to set it as root"
-              : "Click cells to inspect node info and voltages"}
-          </p>
+          <ToolSelector
+            tool={tool}
+            onToolChange={setTool}
+            onRandomSpanningTree={handleRandomSpanningTree}
+            onToggleLoopFinder={loopFinder.handleToggleLoopFinder}
+            showLoopFinder={loopFinder.showLoopFinder}
+            onToggleLoopsFinder={loopFinder.handleToggleLoopsFinder}
+            showLoopsFinder={loopFinder.showLoopsFinder}
+            onClear={handleClear}
+          />
           
           {/* Loop Finder Panel */}
-          {showLoopFinder && (
-            <div style={{
-              marginBottom: "10px",
-              padding: "10px",
-              backgroundColor: "#f4ecf7",
-              borderRadius: "8px",
-              border: "1px solid #8e44ad",
-            }}>
-              {/* Step 1: Max length + Compute Voltages */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-                <ValidatedInput
-                  value={maxLength}
-                  onChange={(v) => {
-                    setMaxLength(v);
-                    setReachableVoltages([]);
-                    setSelectedTargetVoltageKey(null);
-                    if (minLength > v) setMinLength(v);
-                  }}
-                  min={2}
-                  max={9999}
-                  label="Max steps"
-                  disabled={solvingLoop || computingVoltages}
-                />
-                <ValidatedInput
-                  value={minLength}
-                  onChange={setMinLength}
-                  min={0}
-                  max={maxLength}
-                  label="Min steps"
-                  disabled={solvingLoop || computingVoltages}
-                />
-                <button
-                  onClick={handleComputeVoltages}
-                  disabled={solvingLoop || computingVoltages}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    border: "1px solid #8e44ad",
-                    backgroundColor: computingVoltages ? "#d5d8dc" : "#e8daef",
-                    cursor: computingVoltages ? "not-allowed" : "pointer",
-                    fontSize: "13px",
-                  }}
-                >
-                  {computingVoltages ? "Computing…" : "Compute Voltages"}
-                </button>
-                <button
-                  onClick={handleCancelLoopFind}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    border: "1px solid #e74c3c",
-                    backgroundColor: "#fadbd8",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-
-              {/* Step 2: Voltage selector + Solve */}
-              {reachableVoltages.length > 0 && (
-                <div style={{ marginBottom: "8px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                    <label style={{ fontSize: "13px" }}>Target voltage:</label>
-                    <select
-                      value={selectedTargetVoltageKey ?? ""}
-                      onChange={(e) => setSelectedTargetVoltageKey(e.target.value)}
-                      disabled={solvingLoop}
-                      style={{
-                        padding: "4px 8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                        fontSize: "12px",
-                        fontFamily: "monospace",
-                        maxWidth: "300px",
-                      }}
-                    >
-                      {reachableVoltages.map((v) => {
-                        const m = v.matrix;
-                        const label = `[[${m[0].join(",")}],[${m[1].join(",")}],[${m[2].join(",")}]]`;
-                        return (
-                          <option key={v.key} value={v.key}>{label}</option>
-                        );
-                      })}
-                    </select>
-                    <button
-                      onClick={handleSolveLoop}
-                      disabled={solvingLoop || !selectedTargetVoltageKey}
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: "4px",
-                        border: "1px solid #27ae60",
-                        backgroundColor: solvingLoop ? "#d5d8dc" : "#d5f5e3",
-                        cursor: solvingLoop || !selectedTargetVoltageKey ? "not-allowed" : "pointer",
-                        fontSize: "13px",
-                      }}
-                    >
-                      {solvingLoop ? "Solving…" : "Solve"}
-                    </button>
-                  </div>
-                  <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                    {reachableVoltages.length} reachable voltage{reachableVoltages.length !== 1 ? "s" : ""} found
-                  </p>
-                </div>
-              )}
-
-              {loopSatStats && (
-                <p style={{ fontSize: "11px", color: "#666", marginTop: "6px" }}>
-                  SAT: {loopSatStats.numVars} vars, {loopSatStats.numClauses} clauses
-                </p>
-              )}
-              {rootNodeId && (
-                <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                  Root: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{rootNodeId}</code>
-                </p>
-              )}
-              {!rootNodeId && (
-                <p style={{ fontSize: "11px", color: "#e74c3c", marginTop: "4px" }}>
-                  ⚠️ Set a root node first (use 📌 Root tool)
-                </p>
-              )}
-            </div>
+          {loopFinder.showLoopFinder && (
+            <LoopFinderPanel
+              maxLength={loopFinder.maxLength}
+              onMaxLengthChange={(v) => {
+                loopFinder.setMaxLength(v);
+                loopFinder.setReachableVoltages([]);
+                loopFinder.setSelectedTargetVoltageKey(null);
+                if (loopFinder.minLength > v) loopFinder.setMinLength(v);
+              }}
+              minLength={loopFinder.minLength}
+              onMinLengthChange={loopFinder.setMinLength}
+              solvingLoop={loopFinder.solvingLoop}
+              computingVoltages={loopFinder.computingVoltages}
+              onComputeVoltages={loopFinder.handleComputeVoltages}
+              onCancel={loopFinder.handleCancelLoopFind}
+              reachableVoltages={loopFinder.reachableVoltages}
+              selectedTargetVoltageKey={loopFinder.selectedTargetVoltageKey}
+              onSelectedTargetVoltageKeyChange={loopFinder.setSelectedTargetVoltageKey}
+              onSolveLoop={loopFinder.handleSolveLoop}
+              loopSatStats={loopFinder.loopSatStats}
+              rootNodeId={rootNodeId}
+            />
           )}
           
           {/* Find Loops (plural) Panel */}
-          {showLoopsFinder && (
-            <div style={{
-              marginBottom: "10px",
-              padding: "10px",
-              backgroundColor: "#d6eaf8",
-              borderRadius: "8px",
-              border: "1px solid #2980b9",
-            }}>
-              {/* Max length + Find Loops button */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-                <ValidatedInput
-                  value={maxLengthLoops}
-                  onChange={(v) => {
-                    setMaxLengthLoops(v);
-                    resetLoopsFinderState();
-                    if (minLengthLoops > v) setMinLengthLoops(v);
-                  }}
-                  min={2}
-                  max={9999}
-                  label="Max steps"
-                  disabled={solvingAllLoops}
-                />
-                <ValidatedInput
-                  value={minLengthLoops}
-                  onChange={(v) => {
-                    setMinLengthLoops(v);
-                    resetLoopsFinderState();
-                  }}
-                  min={0}
-                  max={maxLengthLoops}
-                  label="Min steps"
-                  disabled={solvingAllLoops}
-                />
-                <button
-                  onClick={handleFindAllLoops}
-                  disabled={solvingAllLoops}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    border: "1px solid #2980b9",
-                    backgroundColor: solvingAllLoops ? "#d5d8dc" : "#aed6f1",
-                    cursor: solvingAllLoops ? "not-allowed" : "pointer",
-                    fontSize: "13px",
-                  }}
-                >
-                  {solvingAllLoops ? "Searching…" : "Find All Loops"}
-                </button>
-                {solvingAllLoops && (
-                  <button
-                    onClick={handleCancelLoopsFind}
-                    style={{
-                      padding: "4px 12px",
-                      borderRadius: "4px",
-                      border: "1px solid #e74c3c",
-                      backgroundColor: "#fadbd8",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-
-              {/* Progress bar */}
-              {solvingAllLoops && solveAllProgress && (
-                <div style={{ marginBottom: "8px" }}>
-                  <div style={{
-                    width: "100%",
-                    height: "20px",
-                    backgroundColor: "#e0e0e0",
-                    borderRadius: "4px",
-                    overflow: "hidden",
-                  }}>
-                    <div style={{
-                      width: `${(solveAllProgress.current / solveAllProgress.total) * 100}%`,
-                      height: "100%",
-                      backgroundColor: "#2980b9",
-                      transition: "width 0.3s ease",
-                    }} />
-                  </div>
-                  <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                    Testing voltage {solveAllProgress.current} / {solveAllProgress.total}…
-                  </p>
-                </div>
-              )}
-
-              {/* Results: voltage selector from SAT-satisfiable voltages */}
-              {solveAllResults && solveAllResults.length > 0 && (
-                <div style={{ marginBottom: "8px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                    <label style={{ fontSize: "13px" }}>SAT voltage:</label>
-                    <select
-                      value={selectedLoopsVoltageKey ?? ""}
-                      onChange={(e) => {
-                        setSelectedLoopsVoltageKey(e.target.value);
-                        setPendingLoopResult(null);
-                      }}
-                      style={{
-                        padding: "4px 8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                        fontSize: "12px",
-                        fontFamily: "monospace",
-                        maxWidth: "300px",
-                      }}
-                    >
-                      {solveAllResults.map((v) => {
-                        const m = v.matrix;
-                        const label = `[[${m[0].join(",")}],[${m[1].join(",")}],[${m[2].join(",")}]]`;
-                        return (
-                          <option key={v.key} value={v.key}>{label}</option>
-                        );
-                      })}
-                    </select>
-                    <button
-                      onClick={handlePreviewLoopsResult}
-                      disabled={!selectedLoopsVoltageKey}
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: "4px",
-                        border: "1px solid #27ae60",
-                        backgroundColor: !selectedLoopsVoltageKey ? "#d5d8dc" : "#d5f5e3",
-                        cursor: !selectedLoopsVoltageKey ? "not-allowed" : "pointer",
-                        fontSize: "13px",
-                      }}
-                    >
-                      Preview
-                    </button>
-                    <button
-                      onClick={handleDismissLoops}
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: "4px",
-                        border: "1px solid #e74c3c",
-                        backgroundColor: "#fadbd8",
-                        color: "#c0392b",
-                        cursor: "pointer",
-                        fontSize: "13px",
-                      }}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                  <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                    {solveAllResults.length} satisfiable voltage{solveAllResults.length !== 1 ? "s" : ""} found
-                  </p>
-                </div>
-              )}
-
-              {rootNodeId && (
-                <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
-                  Root: <code style={{ backgroundColor: "#fff", padding: "1px 4px" }}>{rootNodeId}</code>
-                </p>
-              )}
-              {!rootNodeId && (
-                <p style={{ fontSize: "11px", color: "#e74c3c", marginTop: "4px" }}>
-                  ⚠️ Set a root node first (use 📌 Root tool)
-                </p>
-              )}
-            </div>
+          {loopFinder.showLoopsFinder && (
+            <LoopsFinderPanel
+              maxLengthLoops={loopFinder.maxLengthLoops}
+              onMaxLengthLoopsChange={(v) => {
+                loopFinder.setMaxLengthLoops(v);
+                loopFinder.resetLoopsFinderState();
+                if (loopFinder.minLengthLoops > v) loopFinder.setMinLengthLoops(v);
+              }}
+              minLengthLoops={loopFinder.minLengthLoops}
+              onMinLengthLoopsChange={(v) => {
+                loopFinder.setMinLengthLoops(v);
+                loopFinder.resetLoopsFinderState();
+              }}
+              solvingAllLoops={loopFinder.solvingAllLoops}
+              onFindAllLoops={loopFinder.handleFindAllLoops}
+              onCancel={loopFinder.handleCancelLoopsFind}
+              solveAllProgress={loopFinder.solveAllProgress}
+              solveAllResults={loopFinder.solveAllResults}
+              selectedLoopsVoltageKey={loopFinder.selectedLoopsVoltageKey}
+              onSelectedLoopsVoltageKeyChange={(key) => {
+                loopFinder.setSelectedLoopsVoltageKey(key);
+                loopFinder.setPendingLoopResult(null);
+              }}
+              onPreview={loopFinder.handlePreviewLoopsResult}
+              onDismiss={loopFinder.handleDismissLoops}
+              rootNodeId={rootNodeId}
+            />
           )}
 
           {/* Loop Result Preview (Accept/Reject) */}
-          {pendingLoopResult && rootNodeId && (
+          {loopFinder.pendingLoopResult && rootNodeId && (
             <LoopResultRenderer
               n={size}
               grid={orbifoldGrid}
-              pathNodeIds={pendingLoopResult.pathNodeIds}
+              pathNodeIds={loopFinder.pendingLoopResult.pathNodeIds}
               rootNodeId={rootNodeId}
               onAccept={handleAcceptLoop}
-              onReject={handleRejectLoop}
+              onReject={loopFinder.handleRejectLoop}
               wallpaperGroup={wallpaperGroup}
-              initialEdgeIds={pendingLoopResult.pathEdgeIds}
+              initialEdgeIds={loopFinder.pendingLoopResult.pathEdgeIds}
             />
           )}
           
@@ -1315,238 +405,37 @@ export function OrbifoldsExplorer() {
           
           {/* Inspection Info Panel */}
           {inspectionInfo && (
-            <div style={{ 
-              marginTop: "16px", 
-              padding: "12px", 
-              backgroundColor: "#ebf5fb",
-              borderRadius: "8px",
-              border: "1px solid #3498db",
-              maxWidth: "400px",
-            }}>
-              <h4 style={{ marginBottom: "8px", color: "#2980b9" }}>
-                🔍 Node Inspection
-              </h4>
-              <p style={{ fontSize: "13px", marginBottom: "8px" }}>
-                <strong>Node ID:</strong> <code style={{ backgroundColor: "#fff", padding: "2px 4px" }}>{inspectionInfo.nodeId}</code>
-              </p>
-              <p style={{ fontSize: "13px", marginBottom: "8px" }}>
-                <strong>Coordinates:</strong> ({inspectionInfo.coord[0]}, {inspectionInfo.coord[1]})
-              </p>
-              <p style={{ fontSize: "13px", marginBottom: "4px" }}>
-                <strong>Edges ({inspectionInfo.edges.length}):</strong>
-              </p>
-              <div style={{ 
-                maxHeight: "200px", 
-                overflowY: "auto",
-                fontSize: "12px",
-                fontFamily: "monospace",
-              }}>
-                {inspectionInfo.edges.map((edge, idx) => (
-                  <div 
-                    key={idx} 
-                    style={{ 
-                      marginBottom: "8px", 
-                      padding: "6px",
-                      backgroundColor: "white",
-                      borderRadius: "4px",
-                    }}
-                  >
-                    <div><strong>Edge ID:</strong> <code style={{ backgroundColor: "#f0f0f0", padding: "1px 3px", fontSize: "11px" }}>{edge.edgeId}</code></div>
-                    <div><strong>→ Target:</strong> {edge.targetNodeId} ({edge.targetCoord[0]},{edge.targetCoord[1]})</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-                      <strong>Linestyle:</strong>
-                      <button
-                        onClick={() => handleEdgeLinestyleToggle(edge.edgeId)}
-                        style={{
-                          padding: "2px 8px",
-                          fontSize: "11px",
-                          borderRadius: "4px",
-                          border: "1px solid #3498db",
-                          backgroundColor: edge.linestyle === "dashed" ? "#ebf5fb" : "white",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
-                        }}
-                      >
-                        <svg width="24" height="8" style={{ verticalAlign: "middle" }}>
-                          <line
-                            x1="2"
-                            y1="4"
-                            x2="22"
-                            y2="4"
-                            stroke="#3498db"
-                            strokeWidth="2"
-                            strokeDasharray={edge.linestyle === "dashed" ? "4,3" : undefined}
-                          />
-                        </svg>
-                        {edge.linestyle}
-                      </button>
-                    </div>
-                    <div><strong>Voltage:</strong></div>
-                    {formatVoltageRows(edge.voltage).map((row, rowIdx) => (
-                      <div key={rowIdx} style={{ marginLeft: "10px" }}>{row}</div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <InspectionPanel
+              inspectionInfo={inspectionInfo}
+              onEdgeLinestyleToggle={handleEdgeLinestyleToggle}
+            />
           )}
         </div>
         
         {/* Lifted Graph */}
-        <div>
-          <h3 style={{ marginBottom: "10px" }}>Lifted Graph{(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
-          <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
-            Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
-            {inspectionInfo && (
-              <span style={{ color: "#3498db", marginLeft: "8px" }}>
-                (highlighted: {inspectionInfo.nodeId})
-              </span>
-            )}
-          </p>
-          
-          {/* Display options */}
-          <div style={{ 
-            display: "flex", 
-            flexWrap: "wrap",
-            gap: "16px", 
-            marginBottom: "10px",
-            fontSize: "12px",
-            alignItems: "center",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <label>Background:</label>
-              <select
-                value={backgroundMode}
-                onChange={(e) => setBackgroundMode(e.target.value as "none" | "domain" | "component")}
-                style={{
-                  padding: "2px 4px",
-                  borderRadius: "4px",
-                  border: "1px solid #ccc",
-                  fontSize: "12px",
-                }}
-              >
-                <option value="none">No background</option>
-                <option value="domain">Color by fundamental domain</option>
-                <option value="component">Color by connected component</option>
-              </select>
-            </div>
-            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={showDashedLines}
-                onChange={(e) => setShowDashedLines(e.target.checked)}
-              />
-              Show dashed lines
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={showNodes}
-                onChange={(e) => setShowNodes(e.target.checked)}
-              />
-              Show nodes
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={showWalls}
-                onChange={(e) => setShowWalls(e.target.checked)}
-              />
-              Show walls
-            </label>
-            <button
-              onClick={handleExportSvg}
-              style={{
-                padding: "4px 10px",
-                borderRadius: "4px",
-                border: "1px solid #3498db",
-                backgroundColor: "#ebf5fb",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-              title="Download lifted graph as SVG file"
-            >
-              💾 Save SVG
-            </button>
-          </div>
-          
-          <LiftedGraphRenderer
-            liftedGraph={liftedGraph}
-            orbifoldGrid={orbifoldGrid}
-            highlightOrbifoldNodeId={inspectionInfo?.nodeId}
-            useAxialTransform={(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform}
-            selectedVoltageKey={selectedVoltageKey}
-            onNodeClick={handleLiftedNodeClick}
-            showDomains={backgroundMode}
-            showDashedLines={showDashedLines}
-            showNodes={showNodes}
-            showWalls={showWalls}
-            svgRef={liftedGraphSvgRef}
-            wallpaperGroup={wallpaperGroup}
-          />
-          
-          {/* Legend */}
-          <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-            <p>
-              {showNodes && (
-                <>
-                  <span style={{ color: "#27ae60" }}>●</span> Interior nodes
-                  <span style={{ marginLeft: "16px", color: "#e74c3c" }}>○</span> Exterior nodes
-                  {inspectionInfo && (
-                    <>
-                      <span style={{ marginLeft: "16px", color: "#3498db" }}>◉</span> Highlighted
-                    </>
-                  )}
-                </>
-              )}
-              {selectedVoltageKey && (
-                <>
-                  <span style={{ marginLeft: showNodes ? "16px" : "0" }}>▢</span> Selected domain (click node to highlight)
-                </>
-              )}
-            </p>
-            {showNodes && (
-              <p style={{ marginTop: "4px" }}>
-                Click on a lifted node to highlight its fundamental domain.
-              </p>
-            )}
-          </div>
-        </div>
+        <LiftedGraphSection
+          wallpaperGroup={wallpaperGroup}
+          useAxialTransform={useAxialTransform}
+          liftedGraph={liftedGraph}
+          orbifoldGrid={orbifoldGrid}
+          inspectedNodeId={inspectionInfo?.nodeId ?? null}
+          selectedVoltageKey={selectedVoltageKey}
+          onNodeClick={handleLiftedNodeClick}
+          backgroundMode={backgroundMode}
+          onBackgroundModeChange={setBackgroundMode}
+          showDashedLines={showDashedLines}
+          onShowDashedLinesChange={setShowDashedLines}
+          showNodes={showNodes}
+          onShowNodesChange={setShowNodes}
+          showWalls={showWalls}
+          onShowWallsChange={setShowWalls}
+          onExportSvg={handleExportSvg}
+          svgRef={liftedGraphSvgRef}
+        />
       </div>
       
       {/* Help text */}
-      <div style={{ 
-        marginTop: "30px", 
-        padding: "16px", 
-        backgroundColor: "#e8f4f8", 
-        borderRadius: "8px",
-        fontSize: "14px",
-      }}>
-        <h4 style={{ marginBottom: "8px" }}>About Orbifolds</h4>
-        <p>
-          An <strong>orbifold</strong> is a generalization of a surface that captures symmetry.
-          The <strong>lifted graph</strong> shows how the fundamental domain tiles under the symmetry group.
-        </p>
-        <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>
-          <li><strong>P1:</strong> Simple torus wrapping (translations only)</li>
-          <li><strong>P2:</strong> Includes 180° rotations at boundaries</li>
-          <li><strong>pgg:</strong> Includes glide reflections at boundaries (no pure rotations)</li>
-          <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
-          <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
-          <li><strong>P4g:</strong> Like P4, but folded across the NW-SE diagonal (requires n &ge; 4)</li>
-        </ul>
-        <p style={{ marginTop: "8px" }}>
-          Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
-        </p>
-        {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
-          <p style={{ marginTop: "8px", color: "#666" }}>
-            <strong>Note:</strong> {wallpaperGroup} uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
-            may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
-          </p>
-        )}
-      </div>
+      <HelpSection wallpaperGroup={wallpaperGroup} />
 
       {/* Show Examples toggle */}
       <div style={{ marginTop: "30px" }}>
