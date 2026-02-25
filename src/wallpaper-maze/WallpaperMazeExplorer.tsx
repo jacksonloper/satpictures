@@ -1,19 +1,21 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import WallpaperMazeWorker from "../problem/wallpaper-maze.worker?worker";
 import type { WallpaperMazeRequest, WallpaperMazeResponse } from "../problem/wallpaper-maze.worker";
-import {
-  buildTiledGraph,
-  getRootColor,
-  computeWallSegments,
-  findEquivalentNodes,
-} from "./TiledGraph";
+import { buildTiledGraph } from "./TiledGraph";
 import type { TiledGraph, TiledNode } from "./TiledGraph";
-import { buildP3TiledGraph, getP3RootColor } from "./P3TiledGraph";
+import { buildP3TiledGraph } from "./P3TiledGraph";
 import type { P3TiledGraph, P3TiledNode } from "./P3TiledGraph";
 import { getWallpaperGroup, DIRECTION_DELTA } from "./WallpaperGroups";
 import type { WallpaperGroupName } from "./WallpaperGroups";
 import { P3RhombusRenderer } from "./P3RhombusRenderer";
 import { downloadSvg } from "../polyform-explorer/downloadUtils";
+import { ToolSelector } from "./ToolSelector";
+import { Sketchpad } from "./Sketchpad";
+import { SolutionMazeView } from "./SolutionMazeView";
+import { SolutionGraphView } from "./SolutionGraphView";
+import { P3GraphView } from "./P3GraphView";
+import type { GridCell, MazeSolution, SolutionSelectedNode, SolutionViewMode, SketchpadTool } from "./types";
+import { DEFAULT_LENGTH, DEFAULT_MULTIPLIER, CELL_SIZE } from "./types";
 import "../App.css";
 
 /**
@@ -22,46 +24,6 @@ import "../App.css";
  * Creates mazes on a square grid with wallpaper group symmetry.
  * Currently supports P1 (torus/regular wrapping) and P2 (180° rotation wrapping).
  */
-
-// Constants
-const DEFAULT_LENGTH = 4;
-const DEFAULT_MULTIPLIER = 2;
-const CELL_SIZE = 40;
-const GRID_PADDING = 20;
-
-// Types
-interface GridCell {
-  row: number;
-  col: number;
-}
-
-// Selected node in solution viewer (includes copy position)
-interface SolutionSelectedNode {
-  // For square grids
-  copyRow: number;
-  copyCol: number;
-  fundamentalRow: number;
-  fundamentalCol: number;
-  // For P3, also need hexagon and rhombus info
-  hexRow?: number;
-  hexCol?: number;
-  rhombusIdx?: number;
-}
-
-interface MazeSolution {
-  parentOf: Map<string, GridCell | null>;
-  distanceFromRoot: Map<string, number>;
-  wallpaperGroup: WallpaperGroupName; // Store the wallpaper group used for this solution
-  vacantCells: Set<string>; // Store which cells were vacant at solve time
-  rootRow: number; // Store the root row used for this solution
-  rootCol: number; // Store the root col used for this solution
-}
-
-// View mode type for solution
-type SolutionViewMode = "maze" | "graph";
-
-// Tool types for interacting with the sketchpad
-type SketchpadTool = "rootSetter" | "neighborhoodViewer" | "blockSetter";
 
 export function WallpaperMazeExplorer() {
   const [length, setLength] = useState(DEFAULT_LENGTH);
@@ -78,7 +40,7 @@ export function WallpaperMazeExplorer() {
   const [graphSelectedNode, setGraphSelectedNode] = useState<TiledNode | null>(null);
   const [p3GraphSelectedNode, setP3GraphSelectedNode] = useState<P3TiledNode | null>(null);
   
-  // State for solution neighbor viewer - now tracks specific node, not just fundamental cell
+  // State for solution neighbor viewer
   const [solutionSelectedNode, setSolutionSelectedNode] = useState<SolutionSelectedNode | null>(null);
   const [showSolutionNeighbors, setShowSolutionNeighbors] = useState(false);
   
@@ -93,7 +55,6 @@ export function WallpaperMazeExplorer() {
   const mazeSvgRef = useRef<SVGSVGElement | null>(null);
   
   const cellSize = CELL_SIZE;
-  const padding = GRID_PADDING;
   
   // Cleanup worker on unmount
   useEffect(() => {
@@ -104,27 +65,25 @@ export function WallpaperMazeExplorer() {
     };
   }, []);
   
-  // Reset root when grid size changes (not when wallpaper group changes)
+  // Reset root when grid size changes
   useEffect(() => {
     setGraphSelectedNode(null);
-    // Always set root to (0,0) when length changes
-    // This ensures a valid root exists even if previous state was corrupted
     setRootRow(0);
     setRootCol(0);
-    setVacantCells(new Set()); // Reset vacant cells when grid size changes
+    setVacantCells(new Set());
   }, [length]);
   
-  // Build the tiled graph when solution changes (uses solution's stored wallpaper group and root)
+  // Build the tiled graph when solution changes
   const tiledGraph = useMemo<TiledGraph | null>(() => {
     if (!solution) return null;
     return buildTiledGraph(
       length,
       multiplier,
-      solution.wallpaperGroup, // Use the wallpaper group stored in the solution
-      solution.rootRow, // Use the root stored in the solution
+      solution.wallpaperGroup,
+      solution.rootRow,
       solution.rootCol,
       solution.parentOf,
-      solution.vacantCells // Pass vacant cells to the tiled graph builder
+      solution.vacantCells
     );
   }, [solution, length, multiplier]);
   
@@ -135,47 +94,29 @@ export function WallpaperMazeExplorer() {
       length,
       multiplier,
       cellSize,
-      solution.rootRow, // Use the root stored in the solution
+      solution.rootRow,
       solution.rootCol,
       solution.parentOf,
       solution.vacantCells
     );
   }, [solution, length, multiplier, cellSize]);
   
-  // Get neighbor info for selected cell in fundamental domain (for sketchpad)
-  const neighborInfo = useMemo(() => {
-    if (!selectedCell) return null;
-    const wpg = getWallpaperGroup(wallpaperGroup);
-    return {
-      N: wpg.getWrappedNeighbor(selectedCell.row, selectedCell.col, "N", length),
-      S: wpg.getWrappedNeighbor(selectedCell.row, selectedCell.col, "S", length),
-      E: wpg.getWrappedNeighbor(selectedCell.row, selectedCell.col, "E", length),
-      W: wpg.getWrappedNeighbor(selectedCell.row, selectedCell.col, "W", length),
-    };
-  }, [selectedCell, length, wallpaperGroup]);
-  
-  // Compute the actual adjacent neighbors for a selected node in the solution viewer
-  // Returns the specific (copyRow, copyCol, fundamentalRow, fundamentalCol) for each neighbor
+  // Compute adjacent neighbors for selected node in solution viewer
   const solutionAdjacentNeighbors = useMemo(() => {
     if (!solutionSelectedNode || !solution) return null;
     const wpg = getWallpaperGroup(solution.wallpaperGroup);
     
     const { copyRow, copyCol, fundamentalRow, fundamentalCol } = solutionSelectedNode;
     
-    // For each direction, compute the actual adjacent neighbor position
     const computeNeighbor = (dir: "N" | "S" | "E" | "W") => {
       const neighborFund = wpg.getWrappedNeighbor(fundamentalRow, fundamentalCol, dir, length);
-      
-      // Check if we wrapped around the boundary
       const delta = DIRECTION_DELTA[dir];
       const rawRow = fundamentalRow + delta.dRow;
       const rawCol = fundamentalCol + delta.dCol;
       
-      // If raw position is out of bounds, we wrapped - need to adjust copy coordinates
       let neighborCopyRow = copyRow;
       let neighborCopyCol = copyCol;
       
-      // Check if we need to move to a different copy
       if (rawRow < 0) neighborCopyRow = copyRow - 1;
       else if (rawRow >= length) neighborCopyRow = copyRow + 1;
       
@@ -202,7 +143,6 @@ export function WallpaperMazeExplorer() {
   const handleSolutionCellClick = useCallback((copyRow: number, copyCol: number, fundamentalRow: number, fundamentalCol: number) => {
     if (!showSolutionNeighbors) return;
     
-    // Check if clicking the same node - toggle off
     if (solutionSelectedNode &&
         solutionSelectedNode.copyRow === copyRow &&
         solutionSelectedNode.copyCol === copyCol &&
@@ -218,7 +158,6 @@ export function WallpaperMazeExplorer() {
   const handleP3CellClick = useCallback((hexRow: number, hexCol: number, rhombusIdx: number, row: number, col: number) => {
     if (!showSolutionNeighbors) return;
     
-    // Check if clicking the same node - toggle off
     if (solutionSelectedNode &&
         solutionSelectedNode.hexRow === hexRow &&
         solutionSelectedNode.hexCol === hexCol &&
@@ -228,8 +167,8 @@ export function WallpaperMazeExplorer() {
       setSolutionSelectedNode(null);
     } else {
       setSolutionSelectedNode({
-        copyRow: 0, // Not used for P3
-        copyCol: 0, // Not used for P3
+        copyRow: 0,
+        copyCol: 0,
         fundamentalRow: row,
         fundamentalCol: col,
         hexRow,
@@ -245,11 +184,9 @@ export function WallpaperMazeExplorer() {
       workerRef.current.terminate();
     }
     
-    // Ensure root is within bounds and not vacant
     let safeRootRow = rootRow >= length ? 0 : rootRow;
     let safeRootCol = rootCol >= length ? 0 : rootCol;
     
-    // If current root is vacant, find a non-vacant cell
     if (vacantCells.has(`${safeRootRow},${safeRootCol}`)) {
       let found = false;
       for (let r = 0; r < length && !found; r++) {
@@ -275,7 +212,6 @@ export function WallpaperMazeExplorer() {
     setSatStats(null);
     setGraphSelectedNode(null);
     
-    // Store a snapshot of current settings to be stored with the solution
     const currentWallpaperGroup = wallpaperGroup;
     const currentVacantCells = new Set(vacantCells);
     
@@ -351,10 +287,7 @@ export function WallpaperMazeExplorer() {
     
     switch (activeTool) {
       case "rootSetter":
-        // Don't set root on vacant cells
-        if (vacantCells.has(cellKey)) {
-          return;
-        }
+        if (vacantCells.has(cellKey)) return;
         setRootRow(row);
         setRootCol(col);
         break;
@@ -368,11 +301,7 @@ export function WallpaperMazeExplorer() {
         break;
         
       case "blockSetter":
-        // Toggle vacancy state (but don't allow blocking the root)
-        if (row === rootRow && col === rootCol) {
-          // Don't allow blocking the root - move root first
-          return;
-        }
+        if (row === rootRow && col === rootCol) return;
         setVacantCells(prev => {
           const next = new Set(prev);
           if (next.has(cellKey)) {
@@ -386,535 +315,6 @@ export function WallpaperMazeExplorer() {
     }
   }, [activeTool, selectedCell, vacantCells, rootRow, rootCol]);
   
-  // Compute wall segments from tiled graph
-  const wallSegments = useMemo(() => {
-    if (!tiledGraph) return [];
-    return computeWallSegments(tiledGraph, cellSize);
-  }, [tiledGraph, cellSize]);
-  
-  // Render solution maze view using tiled graph
-  const renderSolutionMazeView = () => {
-    if (!tiledGraph || !solution) {
-      return null;
-    }
-    
-    const cells: React.ReactNode[] = [];
-    const walls: React.ReactNode[] = [];
-    const highlights: React.ReactNode[] = [];
-    
-    // Create a set of neighbor keys for quick lookup (only the 4 specific adjacent neighbors)
-    const neighborNodeKeys = new Set<string>();
-    if (showSolutionNeighbors && solutionSelectedNode && solutionAdjacentNeighbors) {
-      for (const neighbor of Object.values(solutionAdjacentNeighbors)) {
-        neighborNodeKeys.add(`${neighbor.copyRow},${neighbor.copyCol},${neighbor.fundamentalRow},${neighbor.fundamentalCol}`);
-      }
-    }
-    
-    // Render cells from tiled graph
-    for (const node of tiledGraph.nodes) {
-      const x = padding + node.absCol * cellSize;
-      const y = padding + node.absRow * cellSize;
-      
-      // Check if this cell was vacant at solve time
-      const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
-      const isVacant = solution.vacantCells.has(cellKey);
-      
-      // Check if this specific node is selected (not all copies)
-      const isSelected = showSolutionNeighbors && solutionSelectedNode &&
-        node.copyRow === solutionSelectedNode.copyRow && 
-        node.copyCol === solutionSelectedNode.copyCol &&
-        node.fundamentalRow === solutionSelectedNode.fundamentalRow &&
-        node.fundamentalCol === solutionSelectedNode.fundamentalCol;
-      
-      // Check if this specific node is one of the 4 adjacent neighbors
-      const nodeKey = `${node.copyRow},${node.copyCol},${node.fundamentalRow},${node.fundamentalCol}`;
-      const isNeighbor = neighborNodeKeys.has(nodeKey);
-      
-      // Color: vacant cells are black, others colored by root connection
-      const fillColor = isVacant ? "#000" : getRootColor(node.rootIndex);
-      
-      cells.push(
-        <rect
-          key={`cell-${node.id}`}
-          x={x}
-          y={y}
-          width={cellSize}
-          height={cellSize}
-          fill={fillColor}
-          stroke="none"
-          style={{ cursor: showSolutionNeighbors ? "pointer" : "default" }}
-          onClick={() => handleSolutionCellClick(node.copyRow, node.copyCol, node.fundamentalRow, node.fundamentalCol)}
-        />
-      );
-      
-      // Highlight selected cell
-      if (isSelected) {
-        highlights.push(
-          <rect
-            key={`selected-${node.id}`}
-            x={x + 2}
-            y={y + 2}
-            width={cellSize - 4}
-            height={cellSize - 4}
-            fill="none"
-            stroke="#000"
-            strokeWidth={3}
-          />
-        );
-      }
-      
-      // Highlight neighbor cells
-      if (isNeighbor && !isSelected) {
-        highlights.push(
-          <rect
-            key={`neighbor-${node.id}`}
-            x={x + 2}
-            y={y + 2}
-            width={cellSize - 4}
-            height={cellSize - 4}
-            fill="none"
-            stroke="#ff4081"
-            strokeWidth={3}
-            strokeDasharray="4,2"
-          />
-        );
-      }
-      
-      // Root indicator (only for non-vacant cells)
-      if (node.isRoot && !isVacant) {
-        cells.push(
-          <circle
-            key={`root-${node.id}`}
-            cx={x + cellSize / 2}
-            cy={y + cellSize / 2}
-            r={cellSize / 6}
-            fill="#000"
-          />
-        );
-      }
-    }
-    
-    // Render walls from precomputed segments
-    for (let i = 0; i < wallSegments.length; i++) {
-      const wall = wallSegments[i];
-      walls.push(
-        <line
-          key={`wall-${i}`}
-          x1={padding + wall.x1}
-          y1={padding + wall.y1}
-          x2={padding + wall.x2}
-          y2={padding + wall.y2}
-          stroke="#000"
-          strokeWidth={3}
-          strokeLinecap="round"
-        />
-      );
-    }
-    
-    const totalSize = tiledGraph.totalSize * cellSize + padding * 2;
-    
-    return (
-      <svg ref={mazeSvgRef} width={totalSize} height={totalSize}>
-        {cells}
-        {walls}
-        {highlights}
-      </svg>
-    );
-  };
-  
-  // Render sketchpad (always visible, editable)
-  const renderSketchpad = () => {
-    const cells: React.ReactNode[] = [];
-    const highlights: React.ReactNode[] = [];
-    
-    // Determine which cells are neighbors of selected (when using neighborhood viewer)
-    const neighborCells = new Set<string>();
-    if (activeTool === "neighborhoodViewer" && selectedCell && neighborInfo) {
-      neighborCells.add(`${neighborInfo.N.row},${neighborInfo.N.col}`);
-      neighborCells.add(`${neighborInfo.S.row},${neighborInfo.S.col}`);
-      neighborCells.add(`${neighborInfo.E.row},${neighborInfo.E.col}`);
-      neighborCells.add(`${neighborInfo.W.row},${neighborInfo.W.col}`);
-    }
-    
-    for (let row = 0; row < length; row++) {
-      for (let col = 0; col < length; col++) {
-        const x = padding + col * cellSize;
-        const y = padding + row * cellSize;
-        const cellKey = `${row},${col}`;
-        const isRoot = row === rootRow && col === rootCol;
-        const isSelected = activeTool === "neighborhoodViewer" && selectedCell && selectedCell.row === row && selectedCell.col === col;
-        const isNeighbor = neighborCells.has(cellKey);
-        const isVacant = vacantCells.has(cellKey);
-        
-        // Determine fill color: vacant cells are black, root is orange, others are gray
-        let fillColor = "#e0e0e0";
-        if (isVacant) {
-          fillColor = "#000";
-        } else if (isRoot) {
-          fillColor = "#ffa726";
-        }
-        
-        cells.push(
-          <rect
-            key={`cell-${row}-${col}`}
-            x={x}
-            y={y}
-            width={cellSize}
-            height={cellSize}
-            fill={fillColor}
-            stroke="#ccc"
-            strokeWidth={1}
-            style={{ cursor: "pointer" }}
-            onClick={() => handleCellClick(row, col)}
-          />
-        );
-        
-        if (isSelected) {
-          highlights.push(
-            <rect
-              key={`selected-${row}-${col}`}
-              x={x + 2}
-              y={y + 2}
-              width={cellSize - 4}
-              height={cellSize - 4}
-              fill="none"
-              stroke="#000"
-              strokeWidth={3}
-            />
-          );
-        }
-        
-        // Highlight neighbors with pink
-        if (isNeighbor && !isSelected) {
-          highlights.push(
-            <rect
-              key={`neighbor-${row}-${col}`}
-              x={x + 2}
-              y={y + 2}
-              width={cellSize - 4}
-              height={cellSize - 4}
-              fill="none"
-              stroke="#ff4081"
-              strokeWidth={3}
-              strokeDasharray="4,2"
-            />
-          );
-        }
-        
-        // Root indicator (only for non-vacant cells)
-        if (isRoot && !isVacant) {
-          cells.push(
-            <circle
-              key={`root-${row}-${col}`}
-              cx={x + cellSize / 2}
-              cy={y + cellSize / 2}
-              r={cellSize / 6}
-              fill="#000"
-            />
-          );
-        }
-      }
-    }
-    
-    const totalSize = length * cellSize + padding * 2;
-    
-    return (
-      <svg width={totalSize} height={totalSize}>
-        {cells}
-        {highlights}
-      </svg>
-    );
-  };
-  
-  // Render solution graph view
-  const renderSolutionGraphView = () => {
-    if (!tiledGraph || !solution) return null;
-    
-    const dotRadius = 4;
-    const graphCellSize = 30;
-    const graphPadding = 20;
-    
-    const totalSize = tiledGraph.totalSize * graphCellSize + graphPadding * 2;
-    
-    const dots: React.ReactNode[] = [];
-    const edges: React.ReactNode[] = [];
-    const highlights: React.ReactNode[] = [];
-    const gridLines: React.ReactNode[] = [];
-    
-    // Find equivalent nodes if one is selected
-    const equivalentNodes = graphSelectedNode ? findEquivalentNodes(tiledGraph, graphSelectedNode) : [];
-    
-    // Draw faint grid lines
-    for (let i = 0; i <= tiledGraph.totalSize; i++) {
-      gridLines.push(
-        <line
-          key={`vline-${i}`}
-          x1={graphPadding + i * graphCellSize}
-          y1={graphPadding}
-          x2={graphPadding + i * graphCellSize}
-          y2={totalSize - graphPadding}
-          stroke="#eee"
-          strokeWidth={1}
-        />
-      );
-      gridLines.push(
-        <line
-          key={`hline-${i}`}
-          x1={graphPadding}
-          y1={graphPadding + i * graphCellSize}
-          x2={totalSize - graphPadding}
-          y2={graphPadding + i * graphCellSize}
-          stroke="#eee"
-          strokeWidth={1}
-        />
-      );
-    }
-    
-    // Draw edges (from each node to its parent) - skip edges involving vacant cells
-    for (const edge of tiledGraph.edges) {
-      const fromNode = tiledGraph.nodes[edge.fromId];
-      const toNode = tiledGraph.nodes[edge.toId];
-      
-      // Skip edges involving vacant cells
-      const fromKey = `${fromNode.fundamentalRow},${fromNode.fundamentalCol}`;
-      const toKey = `${toNode.fundamentalRow},${toNode.fundamentalCol}`;
-      if (solution.vacantCells.has(fromKey) || solution.vacantCells.has(toKey)) {
-        continue;
-      }
-      
-      const x1 = graphPadding + fromNode.absCol * graphCellSize + graphCellSize / 2;
-      const y1 = graphPadding + fromNode.absRow * graphCellSize + graphCellSize / 2;
-      const x2 = graphPadding + toNode.absCol * graphCellSize + graphCellSize / 2;
-      const y2 = graphPadding + toNode.absRow * graphCellSize + graphCellSize / 2;
-      
-      edges.push(
-        <line
-          key={`edge-${edge.fromId}-${edge.toId}`}
-          x1={x1}
-          y1={y1}
-          x2={x2}
-          y2={y2}
-          stroke={getRootColor(fromNode.rootIndex)}
-          strokeWidth={2}
-        />
-      );
-    }
-    
-    // Draw dots for each node - skip vacant cells (they are "empty squares" - no dot)
-    for (const node of tiledGraph.nodes) {
-      const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
-      if (solution.vacantCells.has(cellKey)) {
-        continue; // Skip vacant cells - they render as empty (no dot)
-      }
-      
-      const cx = graphPadding + node.absCol * graphCellSize + graphCellSize / 2;
-      const cy = graphPadding + node.absRow * graphCellSize + graphCellSize / 2;
-      
-      dots.push(
-        <circle
-          key={`dot-${node.id}`}
-          cx={cx}
-          cy={cy}
-          r={node.isRoot ? dotRadius * 1.5 : dotRadius}
-          fill={getRootColor(node.rootIndex)}
-          stroke={node.isRoot ? "#000" : "none"}
-          strokeWidth={node.isRoot ? 2 : 0}
-          style={{ cursor: "pointer" }}
-          onClick={() => {
-            if (graphSelectedNode?.id === node.id) {
-              setGraphSelectedNode(null);
-            } else {
-              setGraphSelectedNode(node);
-            }
-          }}
-        />
-      );
-    }
-    
-    // Highlight equivalent nodes and draw parent arrows
-    if (graphSelectedNode) {
-      for (const node of equivalentNodes) {
-        const cx = graphPadding + node.absCol * graphCellSize + graphCellSize / 2;
-        const cy = graphPadding + node.absRow * graphCellSize + graphCellSize / 2;
-        
-        // Highlight circle
-        highlights.push(
-          <circle
-            key={`highlight-${node.id}`}
-            cx={cx}
-            cy={cy}
-            r={dotRadius * 2}
-            fill="none"
-            stroke="#ff00ff"
-            strokeWidth={2}
-          />
-        );
-        
-        // Parent arrow
-        if (node.visualParentDirection && !node.isRoot) {
-          const delta = DIRECTION_DELTA[node.visualParentDirection];
-          const arrowLen = graphCellSize * 0.6;
-          const ax2 = cx + delta.dCol * arrowLen;
-          const ay2 = cy + delta.dRow * arrowLen;
-          
-          highlights.push(
-            <line
-              key={`arrow-${node.id}`}
-              x1={cx}
-              y1={cy}
-              x2={ax2}
-              y2={ay2}
-              stroke="#ff00ff"
-              strokeWidth={2}
-              markerEnd="url(#arrowhead)"
-            />
-          );
-        }
-      }
-    }
-    
-    return (
-      <svg width={totalSize} height={totalSize}>
-        <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="6"
-            markerHeight="6"
-            refX="5"
-            refY="3"
-            orient="auto"
-          >
-            <polygon points="0 0, 6 3, 0 6" fill="#ff00ff" />
-          </marker>
-        </defs>
-        {gridLines}
-        {edges}
-        {dots}
-        {highlights}
-      </svg>
-    );
-  };
-  
-  // Render P3-specific graph view
-  const renderP3GraphView = () => {
-    if (!p3TiledGraph || !solution || solution.wallpaperGroup !== "P3") return null;
-    
-    const dotRadius = 4;
-    // Use the SAME padding as the maze view for consistent positioning
-    const graphPadding = 60;
-    
-    // Use the same dimensions as P3RhombusRenderer
-    const SHEAR_X = 0.5;
-    const SHEAR_Y = Math.sqrt(3) / 2;
-    const rhombusWidth = length * cellSize * (1 + SHEAR_X);
-    const rhombusHeight = length * cellSize * SHEAR_Y;
-    const totalWidth = (multiplier + 1) * rhombusWidth;
-    const totalHeight = (multiplier + 1) * (2 * rhombusHeight);
-    
-    const svgWidth = totalWidth + graphPadding * 2;
-    const svgHeight = totalHeight + graphPadding * 2;
-    // Use the same offset as the maze (just the padding, no bounds-based offset)
-    const offsetX = graphPadding;
-    const offsetY = graphPadding;
-    
-    const dots: React.ReactNode[] = [];
-    const edges: React.ReactNode[] = [];
-    const highlights: React.ReactNode[] = [];
-    
-    // Draw edges (from each node to its parent) - skip edges involving vacant cells
-    for (const edge of p3TiledGraph.edges) {
-      const fromNode = p3TiledGraph.nodes[edge.fromId];
-      const toNode = p3TiledGraph.nodes[edge.toId];
-      
-      const fromKey = `${fromNode.fundamentalRow},${fromNode.fundamentalCol}`;
-      const toKey = `${toNode.fundamentalRow},${toNode.fundamentalCol}`;
-      if (solution.vacantCells.has(fromKey) || solution.vacantCells.has(toKey)) {
-        continue;
-      }
-      
-      const x1 = fromNode.x + offsetX;
-      const y1 = fromNode.y + offsetY;
-      const x2 = toNode.x + offsetX;
-      const y2 = toNode.y + offsetY;
-      
-      edges.push(
-        <line
-          key={`edge-${edge.fromId}-${edge.toId}`}
-          x1={x1}
-          y1={y1}
-          x2={x2}
-          y2={y2}
-          stroke={getP3RootColor(fromNode.rootIndex)}
-          strokeWidth={2}
-        />
-      );
-    }
-    
-    // Draw dots for each node - skip vacant cells
-    for (const node of p3TiledGraph.nodes) {
-      const cellKey = `${node.fundamentalRow},${node.fundamentalCol}`;
-      if (solution.vacantCells.has(cellKey)) {
-        continue;
-      }
-      
-      const cx = node.x + offsetX;
-      const cy = node.y + offsetY;
-      
-      dots.push(
-        <circle
-          key={`dot-${node.id}`}
-          cx={cx}
-          cy={cy}
-          r={node.isRoot ? dotRadius * 1.5 : dotRadius}
-          fill={getP3RootColor(node.rootIndex)}
-          stroke={node.isRoot ? "#000" : "none"}
-          strokeWidth={node.isRoot ? 2 : 0}
-          style={{ cursor: "pointer" }}
-          onClick={() => {
-            if (p3GraphSelectedNode?.id === node.id) {
-              setP3GraphSelectedNode(null);
-            } else {
-              setP3GraphSelectedNode(node);
-            }
-          }}
-        />
-      );
-    }
-    
-    // Highlight equivalent nodes (same fundamental coordinates)
-    if (p3GraphSelectedNode) {
-      const equivalentNodes = p3TiledGraph.nodes.filter(
-        n => n.fundamentalRow === p3GraphSelectedNode.fundamentalRow &&
-             n.fundamentalCol === p3GraphSelectedNode.fundamentalCol
-      );
-      
-      for (const node of equivalentNodes) {
-        const cx = node.x + offsetX;
-        const cy = node.y + offsetY;
-        
-        highlights.push(
-          <circle
-            key={`highlight-${node.id}`}
-            cx={cx}
-            cy={cy}
-            r={dotRadius * 2}
-            fill="none"
-            stroke="#ff00ff"
-            strokeWidth={2}
-          />
-        );
-      }
-    }
-    
-    return (
-      <svg width={svgWidth} height={svgHeight}>
-        {edges}
-        {dots}
-        {highlights}
-      </svg>
-    );
-  };
-  
   return (
     <div className="wallpaper-maze-explorer">
       <h2>Wallpaper Maze Explorer</h2>
@@ -924,54 +324,19 @@ export function WallpaperMazeExplorer() {
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           <h3 style={{ margin: 0 }}>Sketchpad ({wallpaperGroup})</h3>
           
-          {/* Tool selector */}
-          <div style={{ display: "flex", gap: "5px", marginBottom: "10px" }}>
-            <button
-              onClick={() => setActiveTool("rootSetter")}
-              style={{
-                padding: "5px 10px",
-                backgroundColor: activeTool === "rootSetter" ? "#4caf50" : "#e0e0e0",
-                color: activeTool === "rootSetter" ? "white" : "black",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
-              title="Click to set the root cell"
-            >
-              🎯 Root Setter
-            </button>
-            <button
-              onClick={() => setActiveTool("neighborhoodViewer")}
-              style={{
-                padding: "5px 10px",
-                backgroundColor: activeTool === "neighborhoodViewer" ? "#2196f3" : "#e0e0e0",
-                color: activeTool === "neighborhoodViewer" ? "white" : "black",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
-              title="Click to view neighbors (highlights in pink)"
-            >
-              🔍 Neighborhood Viewer
-            </button>
-            <button
-              onClick={() => setActiveTool("blockSetter")}
-              style={{
-                padding: "5px 10px",
-                backgroundColor: activeTool === "blockSetter" ? "#f44336" : "#e0e0e0",
-                color: activeTool === "blockSetter" ? "white" : "black",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
-              title="Click to toggle vacant/blocked cells"
-            >
-              ⬛ Block Setter
-            </button>
-          </div>
+          <ToolSelector activeTool={activeTool} onToolChange={setActiveTool} />
           
-          {/* Sketchpad grid */}
-          {renderSketchpad()}
+          <Sketchpad
+            length={length}
+            cellSize={cellSize}
+            rootRow={rootRow}
+            rootCol={rootCol}
+            wallpaperGroup={wallpaperGroup}
+            activeTool={activeTool}
+            selectedCell={selectedCell}
+            vacantCells={vacantCells}
+            onCellClick={handleCellClick}
+          />
           
           {/* Tool info */}
           <div style={{ fontSize: "12px", color: "#666", maxWidth: "200px" }}>
@@ -999,10 +364,7 @@ export function WallpaperMazeExplorer() {
               min={2}
               max={10}
               value={length}
-              onChange={(e) => {
-                const newLength = parseInt(e.target.value);
-                setLength(newLength);
-              }}
+              onChange={(e) => setLength(parseInt(e.target.value))}
               style={{ marginLeft: "10px", width: "60px" }}
             />
           </label>
@@ -1011,9 +373,7 @@ export function WallpaperMazeExplorer() {
             Wallpaper Group:
             <select
               value={wallpaperGroup}
-              onChange={(e) => {
-                setWallpaperGroup(e.target.value as WallpaperGroupName);
-              }}
+              onChange={(e) => setWallpaperGroup(e.target.value as WallpaperGroupName)}
               style={{ marginLeft: "10px" }}
             >
               <option value="P1">P1 (Torus)</option>
@@ -1050,12 +410,11 @@ export function WallpaperMazeExplorer() {
           )}
         </div>
         
-        {/* Right panel: Solution View (always shown once we have a solution) */}
+        {/* Right panel: Solution View */}
         {solution && (
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <h3 style={{ margin: 0 }}>Solution ({solution.wallpaperGroup})</h3>
             
-            {/* Multiplier control (affects solution display) */}
             <label>
               Multiplier:
               <input
@@ -1063,9 +422,7 @@ export function WallpaperMazeExplorer() {
                 min={1}
                 max={5}
                 value={multiplier}
-                onChange={(e) => {
-                  setMultiplier(parseInt(e.target.value));
-                }}
+                onChange={(e) => setMultiplier(parseInt(e.target.value))}
                 style={{ marginLeft: "10px", width: "60px" }}
               />
             </label>
@@ -1121,7 +478,7 @@ export function WallpaperMazeExplorer() {
               🔍 Show Neighbors
             </button>
             
-            {/* Save to SVG button (only in maze view mode) */}
+            {/* Save to SVG button */}
             {solutionViewMode === "maze" && (
               <button
                 onClick={handleDownloadSvg}
@@ -1151,7 +508,7 @@ export function WallpaperMazeExplorer() {
               </div>
             )}
             
-            {/* Solution view - use P3RhombusRenderer for P3 maze view, graph view for both */}
+            {/* Solution view */}
             {solution.wallpaperGroup === "P3" ? (
               solutionViewMode === "maze" ? (
                 <P3RhombusRenderer
@@ -1169,11 +526,37 @@ export function WallpaperMazeExplorer() {
                   onCellClick={handleP3CellClick}
                   svgRef={mazeSvgRef}
                 />
-              ) : (
-                renderP3GraphView()
-              )
+              ) : p3TiledGraph ? (
+                <P3GraphView
+                  p3TiledGraph={p3TiledGraph}
+                  solution={solution}
+                  length={length}
+                  multiplier={multiplier}
+                  cellSize={cellSize}
+                  p3GraphSelectedNode={p3GraphSelectedNode}
+                  onNodeSelect={setP3GraphSelectedNode}
+                />
+              ) : null
             ) : (
-              solutionViewMode === "maze" ? renderSolutionMazeView() : renderSolutionGraphView()
+              solutionViewMode === "maze" && tiledGraph ? (
+                <SolutionMazeView
+                  tiledGraph={tiledGraph}
+                  solution={solution}
+                  cellSize={cellSize}
+                  showSolutionNeighbors={showSolutionNeighbors}
+                  solutionSelectedNode={solutionSelectedNode}
+                  solutionAdjacentNeighbors={solutionAdjacentNeighbors}
+                  onCellClick={handleSolutionCellClick}
+                  svgRef={mazeSvgRef}
+                />
+              ) : solutionViewMode === "graph" && tiledGraph ? (
+                <SolutionGraphView
+                  tiledGraph={tiledGraph}
+                  solution={solution}
+                  graphSelectedNode={graphSelectedNode}
+                  onNodeSelect={setGraphSelectedNode}
+                />
+              ) : null
             )}
             
             {/* Selected node info for graph view */}

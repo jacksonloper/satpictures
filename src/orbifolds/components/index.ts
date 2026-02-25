@@ -4,3 +4,10 @@ export { LiftedGraphRenderer, type BackgroundMode } from "./LiftedGraphRenderer"
 export { OrbifoldGridTools, type ToolType, type EdgeInfo, type InspectionInfo } from "./OrbifoldGridTools";
 export { LoopResultRenderer } from "./LoopResultRenderer";
 export { WeaveThreeRenderer } from "./WeaveThreeRenderer";
+export { ControlsPanel } from "./ControlsPanel";
+export { ToolSelector } from "./ToolSelector";
+export { LoopFinderPanel } from "./LoopFinderPanel";
+export { LoopsFinderPanel } from "./LoopsFinderPanel";
+export { InspectionPanel } from "./InspectionPanel";
+export { LiftedGraphSection } from "./LiftedGraphSection";
+export { HelpSection } from "./HelpSection";
