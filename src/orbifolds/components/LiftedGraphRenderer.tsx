@@ -138,7 +138,7 @@ export function LiftedGraphRenderer({
   wallpaperGroup?: string;
 }) {
   // Groups with doubled coordinate systems need halved visual scale
-  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g" || wallpaperGroup === "P6";
+  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g" || wallpaperGroup === "P6" || wallpaperGroup === "P2hex";
   const cellSize = isDoubled ? LIFTED_CELL_SIZE / 2 : LIFTED_CELL_SIZE;
   
   // Compute positions and bounds

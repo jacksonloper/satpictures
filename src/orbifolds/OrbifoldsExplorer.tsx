@@ -106,7 +106,7 @@ export function OrbifoldsExplorer() {
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
-    if (nextGroup === "P2" && nextSize % 2 !== 0) nextSize++;
+    if ((nextGroup === "P2" || nextGroup === "P2hex") && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);
