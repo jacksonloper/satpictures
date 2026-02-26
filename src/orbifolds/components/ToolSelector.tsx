@@ -8,6 +8,8 @@ interface ToolSelectorProps {
   showLoopFinder: boolean;
   onToggleLoopsFinder: () => void;
   showLoopsFinder: boolean;
+  onTogglePathFinder: () => void;
+  showPathFinder: boolean;
   onClear: () => void;
 }
 
@@ -19,6 +21,8 @@ export function ToolSelector({
   showLoopFinder,
   onToggleLoopsFinder,
   showLoopsFinder,
+  onTogglePathFinder,
+  showPathFinder,
   onClear,
 }: ToolSelectorProps) {
   return (
@@ -108,6 +112,20 @@ export function ToolSelector({
           title="Find all non-self-intersecting loops across all voltages via SAT solver"
         >
           🔄 Find Loops
+        </button>
+        <button
+          onClick={onTogglePathFinder}
+          style={{
+            padding: "6px 12px",
+            borderRadius: "4px",
+            border: showPathFinder ? "2px solid #e67e22" : "1px solid #e67e22",
+            backgroundColor: showPathFinder ? "#fdf2e9" : "#fef5e7",
+            cursor: "pointer",
+            fontWeight: showPathFinder ? "bold" : "normal",
+          }}
+          title="Find nonbranching paths where every node has exactly 0 or 2 solid edges"
+        >
+          🛤️ Find Nonbranching Paths
         </button>
         <button
           onClick={onClear}

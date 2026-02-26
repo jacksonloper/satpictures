@@ -17,3 +17,5 @@ export { WeaveLoopFinderPanel, type WeaveLoopFinderPanelProps } from "./WeaveLoo
 export { WeaveLoopsFinderPanel, type WeaveLoopsFinderPanelProps, type SolveAllResult } from "./WeaveLoopsFinderPanel";
 export { PendingLoopPanel, type PendingLoopPanelProps, type PendingLoopResult } from "./PendingLoopPanel";
 export { AcceptedLoopPanel, type AcceptedLoopPanelProps } from "./AcceptedLoopPanel";
+export { PathFinderPanel } from "./PathFinderPanel";
+export { PathResultRenderer } from "./PathResultRenderer";
