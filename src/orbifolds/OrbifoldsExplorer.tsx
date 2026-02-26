@@ -328,6 +328,8 @@ export function OrbifoldsExplorer() {
               }}
               minLength={loopFinder.minLength}
               onMinLengthChange={loopFinder.setMinLength}
+              loopMethod={loopFinder.loopMethod}
+              onLoopMethodChange={loopFinder.setLoopMethod}
               solvingLoop={loopFinder.solvingLoop}
               computingVoltages={loopFinder.computingVoltages}
               onComputeVoltages={loopFinder.handleComputeVoltages}
@@ -355,6 +357,8 @@ export function OrbifoldsExplorer() {
                 loopFinder.setMinLengthLoops(v);
                 loopFinder.resetLoopsFinderState();
               }}
+              loopMethodLoops={loopFinder.loopMethodLoops}
+              onLoopMethodLoopsChange={loopFinder.setLoopMethodLoops}
               solvingAllLoops={loopFinder.solvingAllLoops}
               onFindAllLoops={loopFinder.handleFindAllLoops}
               onCancel={loopFinder.handleCancelLoopsFind}

@@ -27,6 +27,7 @@
 
 import { CadicalSolver } from "../solvers";
 import type { CadicalClass } from "../solvers";
+import { solveLoopFinderDegree } from "./loop-finder-degree";
 
 /** A 3x3 integer matrix stored row-major (same as Matrix3x3 in orbifoldbasics). */
 export type VoltageMatrix = readonly [
@@ -46,6 +47,9 @@ export interface OrbifoldEdgeInfo {
    */
   halfEdgeVoltages: Record<string, VoltageMatrix>;
 }
+
+/** Loop method: "nodeAtMostOnce" (standard) or "degreeConstraint" (new: each node has 0 or 2 incident edges) */
+export type LoopMethod = "nodeAtMostOnce" | "degreeConstraint";
 
 export interface LoopFinderRequest {
   /** Mode: "computeVoltages" to BFS reachable voltages, "solve" to find a loop, "solveAll" to find loops for all voltages */
@@ -68,6 +72,8 @@ export interface LoopFinderRequest {
   targetVoltageKey?: string;
   /** Set of reachable voltage keys and their matrices (required for "solve" mode, ignored for "computeVoltages") */
   reachableVoltages?: Array<{ key: string; matrix: VoltageMatrix }>;
+  /** Loop method: "nodeAtMostOnce" (standard) or "degreeConstraint" (each node has 0 or 2 incident used edges). Default: "nodeAtMostOnce" */
+  loopMethod?: LoopMethod;
 }
 
 export interface LoopFinderResponse {
@@ -787,7 +793,9 @@ self.onmessage = async (event: MessageEvent<LoopFinderRequest>) => {
           reachableVoltages: voltages,
         };
 
-        const result = solveLoopFinder(solveReq, solver);
+        const result = req.loopMethod === "degreeConstraint"
+          ? solveLoopFinderDegree(solveReq, solver)
+          : solveLoopFinder(solveReq, solver);
         cadical.release();
 
         if (result.success && result.pathNodeIds && result.loopEdgeIds) {
@@ -814,7 +822,9 @@ self.onmessage = async (event: MessageEvent<LoopFinderRequest>) => {
     const cadical = new Cadical(module);
     const solver = new CadicalSolver(cadical);
 
-    const response = solveLoopFinder(req, solver);
+    const response = req.loopMethod === "degreeConstraint"
+      ? solveLoopFinderDegree(req, solver, (msg) => self.postMessage(msg))
+      : solveLoopFinder(req, solver);
     cadical.release();
     self.postMessage(response);
   } catch (error) {

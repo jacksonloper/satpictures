@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { ColorData, EdgeStyleData } from "../createOrbifolds";
 import type { OrbifoldGrid, OrbifoldNodeId } from "../orbifoldbasics";
 import LoopFinderWorker from "../loop-finder.worker?worker";
-import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "../loop-finder.worker";
+import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix, LoopMethod } from "../loop-finder.worker";
 
 export interface LoopResult {
   pathNodeIds: string[];
@@ -110,6 +110,7 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
   const [showLoopFinder, setShowLoopFinder] = useState(false);
   const [maxLength, setMaxLength] = useState(10);
   const [minLength, setMinLength] = useState(0);
+  const [loopMethod, setLoopMethod] = useState<LoopMethod>("nodeAtMostOnce");
   const [solvingLoop, setSolvingLoop] = useState(false);
   const [computingVoltages, setComputingVoltages] = useState(false);
   const [loopSatStats, setLoopSatStats] = useState<{ numVars: number; numClauses: number } | null>(null);
@@ -122,6 +123,7 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
   const [showLoopsFinder, setShowLoopsFinder] = useState(false);
   const [maxLengthLoops, setMaxLengthLoops] = useState(10);
   const [minLengthLoops, setMinLengthLoops] = useState(0);
+  const [loopMethodLoops, setLoopMethodLoops] = useState<LoopMethod>("nodeAtMostOnce");
   const [solvingAllLoops, setSolvingAllLoops] = useState(false);
   const [solveAllProgress, setSolveAllProgress] = useState<{ current: number; total: number } | null>(null);
   const [solveAllResults, setSolveAllResults] = useState<SolveAllResult[] | null>(null);
@@ -303,6 +305,7 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
       blackNodeIds,
       targetVoltageKey: selectedTargetVoltageKey,
       reachableVoltages,
+      loopMethod,
     };
 
     const worker = new LoopFinderWorker();
@@ -339,7 +342,7 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
     };
 
     worker.postMessage(request);
-  }, [maxLength, minLength, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, onError]);
+  }, [maxLength, minLength, loopMethod, rootNodeId, orbifoldGrid, selectedTargetVoltageKey, reachableVoltages, onError]);
 
   const handleFindAllLoops = useCallback(() => {
     if (!rootNodeId) {
@@ -380,6 +383,7 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
       adjacency: adj,
       edges: edgesData,
       blackNodeIds,
+      loopMethod: loopMethodLoops,
     };
 
     const worker = new LoopFinderWorker();
@@ -420,7 +424,7 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
     };
 
     worker.postMessage(request);
-  }, [maxLengthLoops, minLengthLoops, rootNodeId, orbifoldGrid, onError, resetLoopsFinderState]);
+  }, [maxLengthLoops, minLengthLoops, loopMethodLoops, rootNodeId, orbifoldGrid, onError, resetLoopsFinderState]);
 
   const handlePreviewLoopsResult = useCallback(() => {
     if (!solveAllResults || !selectedLoopsVoltageKey) return;
@@ -464,6 +468,8 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
     setMaxLength,
     minLength,
     setMinLength,
+    loopMethod,
+    setLoopMethod,
     solvingLoop,
     computingVoltages,
     loopSatStats,
@@ -484,6 +490,8 @@ export function useLoopFinder({ orbifoldGrid, rootNodeId, onError }: UseLoopFind
     setMaxLengthLoops,
     minLengthLoops,
     setMinLengthLoops,
+    loopMethodLoops,
+    setLoopMethodLoops,
     solvingAllLoops,
     solveAllProgress,
     solveAllResults,

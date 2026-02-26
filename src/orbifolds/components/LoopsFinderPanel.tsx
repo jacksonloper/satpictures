@@ -1,5 +1,5 @@
 import { ValidatedInput } from "./ValidatedInput";
-import type { VoltageMatrix } from "../loop-finder.worker";
+import type { VoltageMatrix, LoopMethod } from "../loop-finder.worker";
 import type { OrbifoldNodeId } from "../orbifoldbasics";
 
 interface LoopsFinderPanelProps {
@@ -7,6 +7,8 @@ interface LoopsFinderPanelProps {
   onMaxLengthLoopsChange: (value: number) => void;
   minLengthLoops: number;
   onMinLengthLoopsChange: (value: number) => void;
+  loopMethodLoops: LoopMethod;
+  onLoopMethodLoopsChange: (method: LoopMethod) => void;
   solvingAllLoops: boolean;
   onFindAllLoops: () => void;
   onCancel: () => void;
@@ -30,6 +32,8 @@ export function LoopsFinderPanel({
   onMaxLengthLoopsChange,
   minLengthLoops,
   onMinLengthLoopsChange,
+  loopMethodLoops,
+  onLoopMethodLoopsChange,
   solvingAllLoops,
   onFindAllLoops,
   onCancel,
@@ -96,6 +100,30 @@ export function LoopsFinderPanel({
             Cancel
           </button>
         )}
+      </div>
+
+      {/* Loop method radio */}
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px", fontSize: "13px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="loopMethodAll"
+            checked={loopMethodLoops === "nodeAtMostOnce"}
+            onChange={() => onLoopMethodLoopsChange("nodeAtMostOnce")}
+            disabled={solvingAllLoops}
+          />
+          Each node at most once
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="loopMethodAll"
+            checked={loopMethodLoops === "degreeConstraint"}
+            onChange={() => onLoopMethodLoopsChange("degreeConstraint")}
+            disabled={solvingAllLoops}
+          />
+          Each node has 0 or 2 edges
+        </label>
       </div>
 
       {/* Progress bar */}
