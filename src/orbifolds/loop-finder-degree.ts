@@ -23,7 +23,7 @@
  */
 
 import type { CadicalSolver } from "../solvers";
-import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix, OrbifoldEdgeInfo } from "./loop-finder.worker";
+import type { LoopFinderRequest, LoopFinderResponse, VoltageMatrix } from "./loop-finder.worker";
 
 /** A 3x3 matrix multiply (same as in the worker). */
 function matMulV(A: VoltageMatrix, B: VoltageMatrix): VoltageMatrix {
