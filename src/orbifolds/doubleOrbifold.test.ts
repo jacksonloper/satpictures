@@ -30,7 +30,7 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
-function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "P6" | "pgg" | "pmm", n: number): void {
+function testDoubling(groupType: "P1" | "P2" | "P3" | "P4" | "P4g" | "P6" | "cmm" | "pgg" | "pmm", n: number): void {
   console.log(`\nTesting doubleOrbifold for ${groupType} (n=${n}):`);
 
   const grid = createOrbifoldGrid(groupType, n);
@@ -172,6 +172,7 @@ testDoubling("pgg", 3);
 testDoubling("P3", 3);
 testDoubling("P4g", 4);
 testDoubling("P6", 4);
+testDoubling("cmm", 4);
 testDoubling("pmm", 3);
 
 console.log(`\n${"=".repeat(40)}`);

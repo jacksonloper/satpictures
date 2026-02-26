@@ -91,7 +91,7 @@ export function OrbifoldWeaveExplorer() {
   const [beadSpeed, setBeadSpeed] = useState(1.0);
   const [useAxialTransform, setUseAxialTransform] = useState(false);
 
-  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
+  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" || wallpaperGroup === "cmm" ? 4 : 2;
 
   // Create the undoubled orbifold (used for voltage computation)
   const [undoubledGrid, setUndoubledGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -142,7 +142,7 @@ export function OrbifoldWeaveExplorer() {
   }, [resetLoopsFinderState]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    const nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
+    const nextSize = (nextGroup === "P4g" || nextGroup === "P6" || nextGroup === "cmm") && size < 4 ? 4 : size;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
     resetGrid(nextGroup, nextSize);

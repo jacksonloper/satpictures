@@ -393,7 +393,7 @@ export function OrbifoldColorsExplorer() {
   const meshRef = useRef<THREE.Mesh | null>(null);
   const wallsRef = useRef<THREE.LineSegments | null>(null);
 
-  const minSize = wallpaperGroup === "P4g" ? 4 : 2;
+  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "cmm" ? 4 : 2;
 
   // Keep a mutable ref to the current orbifold grid
   const gridRef = useRef<OrbifoldGrid<ColorData, EdgeStyleData> | null>(null);
@@ -625,6 +625,7 @@ export function OrbifoldColorsExplorer() {
             <option value="P2hex">P2hex</option>
             <option value="pgg">pgg</option>
             <option value="pmm">pmm</option>
+            <option value="cmm">cmm</option>
             <option value="P3">P3</option>
             <option value="P4">P4</option>
             <option value="P4g">P4g</option>

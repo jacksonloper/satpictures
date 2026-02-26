@@ -37,7 +37,7 @@ export function PathResultRenderer({
   wallpaperGroup?: string;
 }) {
   // Groups with doubled coordinate systems need halved visual scale
-  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g" || wallpaperGroup === "P6";
+  const isDoubled = wallpaperGroup === "P3" || wallpaperGroup === "P4" || wallpaperGroup === "P4g" || wallpaperGroup === "P6" || wallpaperGroup === "cmm";
 
   // Compute bounding box
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
