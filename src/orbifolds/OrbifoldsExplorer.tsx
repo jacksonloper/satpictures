@@ -221,7 +221,7 @@ export function OrbifoldsExplorer() {
           newNodes.set(nodeId, { ...node, data: { ...node.data, color: "black", loopStep: null } });
         } else {
           const steps = nodeLoopSteps.get(nodeId) ?? null;
-          newNodes.set(nodeId, { ...node, data: { ...node.data, loopStep: steps } });
+          newNodes.set(nodeId, { ...node, data: { color: "white", ...node.data, loopStep: steps } });
         }
       }
       return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
