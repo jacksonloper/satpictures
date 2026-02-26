@@ -63,10 +63,19 @@ export function usePathFinder({ orbifoldGrid, onError }: UsePathFinderProps) {
     const nodeIds = Array.from(grid.nodes.keys());
     const edgesData = buildPathEdgeData(grid);
 
+    // Collect black-colored node IDs
+    const blackNodeIds: string[] = [];
+    for (const [, node] of grid.nodes) {
+      if (node.data?.color === "black") {
+        blackNodeIds.push(node.id);
+      }
+    }
+
     const request: PathFinderRequest = {
       nodeIds,
       edges: edgesData,
       minNodes,
+      blackNodeIds,
     };
 
     const worker = new PathFinderWorker();

@@ -37,6 +37,8 @@ export interface PathFinderRequest {
   edges: PathEdgeInfo[];
   /** Minimum number of nodes that must be on a path (k) */
   minNodes: number;
+  /** Node IDs that are black-colored and must have empty_n status */
+  blackNodeIds?: string[];
 }
 
 export interface PathFinderResponse {
@@ -207,7 +209,7 @@ function addSinzAtLeastK(solver: CadicalSolver, lits: number[], k: number): void
 // ---- SAT encoding ----
 
 function solveNonbranchingPaths(req: PathFinderRequest, solver: CadicalSolver): PathFinderResponse {
-  const { nodeIds, edges, minNodes } = req;
+  const { nodeIds, edges, minNodes, blackNodeIds } = req;
   const N = nodeIds.length;
   const E = edges.length;
 
@@ -223,6 +225,9 @@ function solveNonbranchingPaths(req: PathFinderRequest, solver: CadicalSolver): 
   for (let i = 0; i < N; i++) {
     nodeIndex.set(nodeIds[i], i);
   }
+
+  // Build set of black node indices
+  const blackSet = new Set(blackNodeIds ?? []);
 
   // Build incidence: for each node, which edge indices are incident
   const incidentEdges: number[][] = Array.from({ length: N }, () => []);
@@ -310,6 +315,13 @@ function solveNonbranchingPaths(req: PathFinderRequest, solver: CadicalSolver): 
   // Assert: empty_n ∨ endless_n for each node
   for (let n = 0; n < N; n++) {
     solver.addClause([empty[n], endless[n]]);
+  }
+
+  // Colored (black) nodes must have empty_n status
+  for (let n = 0; n < N; n++) {
+    if (blackSet.has(nodeIds[n])) {
+      solver.addClause([empty[n]]);
+    }
   }
 
   // Sinz sequential counter: sum(endless_n) ≥ minNodes

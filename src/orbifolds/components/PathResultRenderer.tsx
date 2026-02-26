@@ -1,11 +1,13 @@
 /**
  * PathResultRenderer — Renders the orbifold grid with proposed solid/dashed
  * edge styles from the nonbranching path SAT solver.
- * Shows which edges are solid (thick dark) vs dashed (thin gray).
+ * Shows walls (thick black lines on polygon sides for dashed edges),
+ * matching the OrbifoldGridTools wall rendering.
  * Allows the user to Accept or Reject the result.
  */
 import {
   type OrbifoldGrid,
+  type OrbifoldNodeId,
   type NodePolygon,
 } from "../orbifoldbasics";
 import {
@@ -16,26 +18,6 @@ import {
 // Constants (matching OrbifoldGridTools)
 const CELL_SIZE = 40;
 const GRID_PADDING = 20;
-
-/** Compute centroid of a polygon. */
-function polygonCentroid(polygon: NodePolygon): { x: number; y: number } {
-  let cx = 0, cy = 0;
-  for (const [x, y] of polygon) {
-    cx += x;
-    cy += y;
-  }
-  return { x: cx / polygon.length, y: cy / polygon.length };
-}
-
-/** Compute midpoint of a polygon side (from vertex i to vertex i+1). */
-function polygonSideMidpoint(polygon: NodePolygon, sideIndex: number): { x: number; y: number } {
-  const i = sideIndex % polygon.length;
-  const j = (sideIndex + 1) % polygon.length;
-  return {
-    x: (polygon[i][0] + polygon[j][0]) / 2,
-    y: (polygon[i][1] + polygon[j][1]) / 2,
-  };
-}
 
 export function PathResultRenderer({
   grid,
@@ -96,48 +78,20 @@ export function PathResultRenderer({
     }
   }
 
-  // Build edge line segments for visualization
-  const edgeLines: Array<{
-    edgeId: string;
-    x1: number; y1: number;
-    x2: number; y2: number;
-    style: "solid" | "dashed";
-  }> = [];
-
-  for (const [edgeId, edge] of grid.edges) {
-    const style = edgeStyles[edgeId] ?? "dashed";
-    const entries = Array.from(edge.halfEdges.entries());
-
-    if (entries.length === 1) {
-      // Self-edge: draw from centroid through polygon side midpoints
-      const [nodeId, halfEdge] = entries[0];
-      const node = grid.nodes.get(nodeId);
-      if (!node) continue;
-      const centroid = polygonCentroid(node.polygon);
-      const cx = toSvgX(centroid.x);
-      const cy = toSvgY(centroid.y);
-      // Draw to the first polygon side midpoint
-      if (halfEdge.polygonSides.length > 0) {
-        const mid = polygonSideMidpoint(node.polygon, halfEdge.polygonSides[0]);
-        edgeLines.push({ edgeId, x1: cx, y1: cy, x2: toSvgX(mid.x), y2: toSvgY(mid.y), style });
+  // Collect dashed-edge polygon sides (walls) — same pattern as OrbifoldGridTools
+  const dashedSides = new Map<OrbifoldNodeId, Set<number>>();
+  for (const edge of grid.edges.values()) {
+    const style = edgeStyles[edge.id] ?? "dashed";
+    if (style !== "dashed") continue;
+    for (const [nodeId, halfEdge] of edge.halfEdges) {
+      let set = dashedSides.get(nodeId);
+      if (!set) {
+        set = new Set();
+        dashedSides.set(nodeId, set);
       }
-    } else if (entries.length === 2) {
-      // Regular edge: draw between centroids
-      const [nodeIdA] = entries[0];
-      const [nodeIdB] = entries[1];
-      const nodeA = grid.nodes.get(nodeIdA);
-      const nodeB = grid.nodes.get(nodeIdB);
-      if (!nodeA || !nodeB) continue;
-      const centA = polygonCentroid(nodeA.polygon);
-      const centB = polygonCentroid(nodeB.polygon);
-      edgeLines.push({
-        edgeId,
-        x1: toSvgX(centA.x),
-        y1: toSvgY(centA.y),
-        x2: toSvgX(centB.x),
-        y2: toSvgY(centB.y),
-        style,
-      });
+      for (const side of halfEdge.polygonSides) {
+        set.add(side);
+      }
     }
   }
 
@@ -153,7 +107,7 @@ export function PathResultRenderer({
         🛤️ Nonbranching Paths Found ({pathNodeCount} nodes)
       </h4>
       <p style={{ fontSize: "12px", color: "#555", marginBottom: "8px" }}>
-        Solid edges form nonbranching paths/cycles. Click Accept to apply or Reject to discard.
+        Walls show dashed edges. Click Accept to apply or Reject to discard.
       </p>
 
       <svg
@@ -164,29 +118,36 @@ export function PathResultRenderer({
         {/* Draw nodes */}
         {Array.from(grid.nodes.values()).map((node) => {
           const isOnPath = pathNodes.has(node.id);
+          const color = node.data?.color ?? "white";
           return (
             <g key={node.id}>
               <polygon
                 points={polygonPoints(node.polygon)}
-                fill={isOnPath ? "#f5b041" : "white"}
+                fill={color === "black" ? "#2c3e50" : (isOnPath ? "#f5b041" : "white")}
                 stroke={isOnPath ? "#e67e22" : "#bdc3c7"}
                 strokeWidth={isOnPath ? 2 : 1}
               />
+              {/* Thick black lines for dashed-edge polygon sides (walls) */}
+              {dashedSides.has(node.id) &&
+                Array.from(dashedSides.get(node.id)!).map((sideIdx) => {
+                  const p1 = node.polygon[sideIdx];
+                  const p2 = node.polygon[(sideIdx + 1) % node.polygon.length];
+                  return (
+                    <line
+                      key={`wall-${node.id}-${sideIdx}`}
+                      x1={toSvgX(p1[0])}
+                      y1={toSvgY(p1[1])}
+                      x2={toSvgX(p2[0])}
+                      y2={toSvgY(p2[1])}
+                      stroke="black"
+                      strokeWidth={3}
+                      strokeLinecap="round"
+                    />
+                  );
+                })}
             </g>
           );
         })}
-
-        {/* Draw edges */}
-        {edgeLines.map((edge, idx) => (
-          <line
-            key={`${edge.edgeId}-${idx}`}
-            x1={edge.x1} y1={edge.y1}
-            x2={edge.x2} y2={edge.y2}
-            stroke={edge.style === "solid" ? "#2c3e50" : "#bdc3c7"}
-            strokeWidth={edge.style === "solid" ? 3 : 1}
-            strokeDasharray={edge.style === "dashed" ? "4,3" : undefined}
-          />
-        ))}
       </svg>
 
       <div style={{ display: "flex", gap: "8px" }}>
