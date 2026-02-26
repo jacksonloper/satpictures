@@ -266,12 +266,15 @@ export function solveLoopFinderDegree(
     solver.addClause([-nl[t]]);
   }
 
-  // Early termination: root at t >= 1 => null at t+1
+  // Last non-null step must be at root:
+  // For t in 1..L-2: ¬nl[t] ∧ nl[t+1] → x[t][rootIdx]
   for (let t = 1; t < L - 1; t++) {
-    solver.addClause([-x[t][rootIdx], nl[t + 1]]);
+    solver.addClause([nl[t], -nl[t + 1], x[t][rootIdx]]);
   }
+  // For t = L-1: ¬nl[L-1] → x[L-1][rootIdx]
+  solver.addClause([nl[L - 1], x[L - 1][rootIdx]]);
 
-  // Must return to root
+  // Must return to root (at least one non-step-0 visit)
   {
     const rootSteps: number[] = [];
     for (let t = 1; t < L; t++) {
@@ -299,14 +302,7 @@ export function solveLoopFinderDegree(
   }
 
   // NO at-most-once constraint for non-root nodes (key difference from standard method)
-  // Root still appears at step 0 and must return exactly once
-  {
-    const rootLits: number[] = [];
-    for (let t = 1; t < L; t++) {
-      rootLits.push(x[t][rootIdx]);
-    }
-    addSinzAtMostOne(solver, rootLits);
-  }
+  // Root may also be revisited multiple times in the degree-constraint encoding.
 
   // ---- Voltage tracking (same as standard) ----
 
@@ -358,10 +354,13 @@ export function solveLoopFinderDegree(
     }
   }
 
-  // Target voltage at return-to-root step
-  for (let t = 1; t < L; t++) {
-    solver.addClause([-x[t][rootIdx], volt[t][targetVoltIdx]]);
+  // Target voltage only at the LAST non-null step (which is constrained to be at root):
+  // For t in 1..L-2: ¬nl[t] ∧ nl[t+1] → volt[t][targetVoltIdx]
+  for (let t = 1; t < L - 1; t++) {
+    solver.addClause([nl[t], -nl[t + 1], volt[t][targetVoltIdx]]);
   }
+  // For t = L-1: ¬nl[L-1] → volt[L-1][targetVoltIdx]
+  solver.addClause([nl[L - 1], volt[L - 1][targetVoltIdx]]);
 
   // ---- Edge step variables ----
 

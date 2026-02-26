@@ -225,10 +225,13 @@ function solveLoopDegree(
     solver.addClause([-nl[t]]);
   }
 
-  // Early termination: root at t >= 1 => null at t+1
+  // Last non-null step must be at root:
+  // For t in 1..L-2: ¬nl[t] ∧ nl[t+1] → x[t][rootIdx]
   for (let t = 1; t < L - 1; t++) {
-    solver.addClause([-x[t][rootIdx], nl[t + 1]]);
+    solver.addClause([nl[t], -nl[t + 1], x[t][rootIdx]]);
   }
+  // For t = L-1: ¬nl[L-1] → x[L-1][rootIdx]
+  solver.addClause([nl[L - 1], x[L - 1][rootIdx]]);
 
   // Must return to root
   {
@@ -258,13 +261,7 @@ function solveLoopDegree(
   }
 
   // Root at most once in steps 1..L-1 (NO at-most-once for non-root nodes)
-  {
-    const rootLits: number[] = [];
-    for (let t = 1; t < L; t++) {
-      rootLits.push(x[t][rootIdx]);
-    }
-    addSinzAtMostOne(solver, rootLits);
-  }
+  // Root may also be revisited multiple times in the degree-constraint encoding.
 
   // Voltage tracking
   for (let t = 1; t < L; t++) {
@@ -313,10 +310,13 @@ function solveLoopDegree(
     }
   }
 
-  // Target voltage at return-to-root step
-  for (let t = 1; t < L; t++) {
-    solver.addClause([-x[t][rootIdx], volt[t][targetVoltIdx]]);
+  // Target voltage only at the LAST non-null step (which is constrained to be at root):
+  // For t in 1..L-2: ¬nl[t] ∧ nl[t+1] → volt[t][targetVoltIdx]
+  for (let t = 1; t < L - 1; t++) {
+    solver.addClause([nl[t], -nl[t + 1], volt[t][targetVoltIdx]]);
   }
+  // For t = L-1: ¬nl[L-1] → volt[L-1][targetVoltIdx]
+  solver.addClause([nl[L - 1], volt[L - 1][targetVoltIdx]]);
 
   // ---- Edge step constraints ----
 
@@ -613,6 +613,66 @@ console.log("\nTest 6: Black root returns error");
   );
   assert(ctx, !result.satisfiable, "Black root returns UNSAT/error");
   assert(ctx, result.error === "Root node must not be black-colored", "Error message correct");
+}
+
+// Test 7: PMM 3×3 degree constraint should find non-identity voltage loops
+// In pmm n=3, a loop like (3,3)→(1,3)→(1,3)→(3,3)→(5,3)→(5,3)→(3,3)
+// passes through root (3,3) mid-path, collecting non-identity voltage from the
+// mirror self-edges. The degree-constraint encoding must allow root revisiting.
+console.log("\nTest 7: PMM 3×3 non-identity voltage loop (root revisiting)");
+{
+  const pmmGrid = createOrbifoldGrid("pmm", 3);
+  buildAdjacency(pmmGrid);
+  const pmmNodeIds = Array.from(pmmGrid.nodes.keys());
+  const pmmAdj = buildAdjFromGrid(pmmGrid);
+  const pmmEdges = buildEdgeInfoFromGrid(pmmGrid);
+  const pmmRoot = "3,3"; // center node
+
+  assert(ctx, pmmNodeIds.includes(pmmRoot), "PMM grid has node 3,3");
+
+  const pmmReachable = computeReachableVoltagesBFS(10, pmmRoot, pmmNodeIds, pmmEdges);
+  console.log(`    PMM reachable voltages: ${pmmReachable.length}`);
+
+  // There should be non-identity voltages reachable
+  const nonIdentityVoltages = pmmReachable.filter(v => v.key !== identityK);
+  assert(ctx, nonIdentityVoltages.length > 0, "PMM has non-identity reachable voltages");
+
+  // Try to solve for a non-identity voltage
+  if (nonIdentityVoltages.length > 0) {
+    const target = nonIdentityVoltages[0];
+    console.log(`    Target voltage: ${target.key}`);
+
+    const result = solveLoopDegree(
+      10, pmmRoot, pmmNodeIds, pmmAdj, pmmEdges,
+      target.key, pmmReachable
+    );
+    assert(ctx, result.satisfiable, "PMM non-identity voltage loop is SAT with degree constraint");
+    if (result.pathNodeIds) {
+      console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+      assert(ctx, result.pathNodeIds[0] === pmmRoot, "Path starts at root");
+      assert(ctx, result.pathNodeIds[result.pathNodeIds.length - 1] === pmmRoot, "Path ends at root");
+
+      // Verify degree constraint
+      if (result.loopEdgeIds) {
+        const usedEdgeSet = new Set(result.loopEdgeIds);
+        let degreeOk = true;
+        for (const nodeId of pmmNodeIds) {
+          let degree = 0;
+          for (const edge of pmmEdges) {
+            if (!usedEdgeSet.has(edge.edgeId)) continue;
+            if (edge.endpoints[0] === nodeId || edge.endpoints[1] === nodeId) {
+              degree++;
+            }
+          }
+          if (degree !== 0 && degree !== 2) {
+            console.log(`    ❌ Node ${nodeId} has degree ${degree}`);
+            degreeOk = false;
+          }
+        }
+        assert(ctx, degreeOk, "Degree constraint satisfied for PMM non-identity loop");
+      }
+    }
+  }
 }
 
 reportResults(ctx);
