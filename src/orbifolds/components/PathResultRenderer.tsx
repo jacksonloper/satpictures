@@ -91,7 +91,7 @@ export function PathResultRenderer({
     }
   }
   for (const [nodeId, count] of nodeEdgeCount) {
-    if (count >= 2) {
+    if (count === 2) {
       pathNodes.add(nodeId);
     }
   }
