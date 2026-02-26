@@ -463,7 +463,18 @@ export function solveLoopWithVoltage(
     }
   }
 
-  // Non-self-intersecting
+  // Identify nodes with self-edges
+  const hasSelfEdge = new Set<number>();
+  for (const edge of edges) {
+    if (edge.endpoints[0] === edge.endpoints[1]) {
+      const idx = nodeIndex.get(edge.endpoints[0]);
+      if (idx !== undefined) hasSelfEdge.add(idx);
+    }
+  }
+
+  // Non-self-intersecting constraints.
+  // For nodes WITHOUT self-edges: at most once in steps 1..L-1.
+  // For non-root nodes WITH self-edges: "consecutive block" constraint.
   for (let v = 0; v < N; v++) {
     const isBlack = blackSet.has(nodeIds[v]);
     if (isBlack) {
@@ -476,6 +487,24 @@ export function solveLoopWithVoltage(
         rootLits.push(x[t][rootIdx]);
       }
       addSinzAtMostOne(solver, rootLits);
+    } else if (hasSelfEdge.has(v)) {
+      // Consecutive block: allow consecutive visits for self-edge traversal
+      // but prevent returning after leaving.
+      const prevVisited: number[] = [];
+      for (let t = 1; t < L; t++) {
+        prevVisited.push(solver.newVariable());
+      }
+      // v != root so x[0][v] is forced false, so prevVisited[0] = false
+      solver.addClause([-prevVisited[0]]);
+
+      for (let ti = 0; ti < prevVisited.length; ti++) {
+        const t = ti + 1;
+        if (ti + 1 < prevVisited.length) {
+          solver.addClause([-x[t][v], prevVisited[ti + 1]]);
+          solver.addClause([-prevVisited[ti], prevVisited[ti + 1]]);
+        }
+        solver.addClause([-prevVisited[ti], x[t - 1][v], -x[t][v]]);
+      }
     } else {
       const lits: number[] = [];
       for (let t = 1; t < L; t++) {

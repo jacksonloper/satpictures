@@ -536,8 +536,27 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
     }
   }
 
-  // Non-self-intersecting: each non-root node used at most once across ALL steps
-  // (excluding null steps). Black nodes excluded entirely.
+  // Identify nodes with self-edges (needed to allow self-edge traversal)
+  const hasSelfEdge = new Set<number>();
+  for (const edge of edges) {
+    if (edge.endpoints[0] === edge.endpoints[1]) {
+      const idx = nodeIndex.get(edge.endpoints[0]);
+      if (idx !== undefined) hasSelfEdge.add(idx);
+    }
+  }
+
+  // Non-self-intersecting constraints.
+  // Black nodes excluded entirely.
+  // For nodes WITHOUT self-edges: at most once in steps 1..L-1.
+  // For non-root nodes WITH self-edges: "consecutive block" constraint —
+  //   the node may appear at consecutive steps (to traverse self-edges) but
+  //   once the path leaves the node it cannot return. This is encoded with
+  //   auxiliary prevVisited[t][v] variables:
+  //     prevVisited[t][v] = "node v was visited at some step before t"
+  //   Constraints:
+  //     x[t][v]            => prevVisited[t+1][v]   (visiting now → visited in future)
+  //     prevVisited[t][v]  => prevVisited[t+1][v]   (once visited, stays visited)
+  //     prevVisited[t][v] ∧ ¬x[t-1][v] => ¬x[t][v] (if visited before but wasn't here last step, can't return)
   for (let v = 0; v < N; v++) {
     const isBlack = blackSet.has(nodeIds[v]);
     if (isBlack) {
@@ -546,8 +565,6 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
       }
     } else if (v === rootIdx) {
       // Root can appear at step 0, and at most one step t >= 1 (the return step).
-      // At intermediate steps (between start and return), root should not appear.
-      // Actually, root appears at step 0 and exactly once more at a later step.
       // The "if root at t>=1 then null at t+1" constraint handles early termination.
       // We need: root appears at most once in steps 1..L-1
       const rootLits: number[] = [];
@@ -555,7 +572,37 @@ function solveLoopFinder(req: LoopFinderRequest, solver: CadicalSolver): LoopFin
         rootLits.push(x[t][rootIdx]);
       }
       addSinzAtMostOne(solver, rootLits);
+    } else if (hasSelfEdge.has(v)) {
+      // Consecutive block constraint: allow self-edge traversal (consecutive visits)
+      // but prevent returning after leaving.
+      // prevVisited[t] = "v was visited at some step in 1..t-1"
+      const prevVisited: number[] = [];
+      for (let t = 1; t < L; t++) {
+        prevVisited.push(solver.newVariable());
+      }
+      // prevVisited[0] corresponds to step 1: was v visited at step 0?
+      // v != root so x[0][v] is forced false, so prevVisited[0] = false
+      solver.addClause([-prevVisited[0]]);
+
+      for (let ti = 0; ti < prevVisited.length; ti++) {
+        const t = ti + 1; // actual step index
+
+        // x[t][v] => prevVisited[ti+1] (if ti+1 exists)
+        if (ti + 1 < prevVisited.length) {
+          solver.addClause([-x[t][v], prevVisited[ti + 1]]);
+        }
+
+        // prevVisited[ti] => prevVisited[ti+1] (propagation)
+        if (ti + 1 < prevVisited.length) {
+          solver.addClause([-prevVisited[ti], prevVisited[ti + 1]]);
+        }
+
+        // prevVisited[ti] ∧ ¬x[t-1][v] => ¬x[t][v]
+        // Clause: ¬prevVisited[ti] ∨ x[t-1][v] ∨ ¬x[t][v]
+        solver.addClause([-prevVisited[ti], x[t - 1][v], -x[t][v]]);
+      }
     } else {
+      // No self-edges: standard at-most-once
       const lits: number[] = [];
       for (let t = 1; t < L; t++) {
         lits.push(x[t][v]);

@@ -197,4 +197,75 @@ console.log("\nTest 16: Black nodes excluded in new encoding");
   }
 }
 
+// Test 17: PMM n=3 nodeAtMostOnce should find non-trivial voltage loops (self-edge traversal)
+console.log("\nTest 17: PMM 3×3 nodeAtMostOnce finds non-trivial voltage loops via self-edges");
+{
+  const pmmGrid = createOrbifoldGrid("pmm", 3);
+  buildAdjacency(pmmGrid);
+  const pmmNodeIds = Array.from(pmmGrid.nodes.keys());
+  const pmmAdj = buildAdjFromGrid(pmmGrid);
+  const pmmEdges = buildEdgeInfoFromGrid(pmmGrid);
+  const pmmRoot = "3,3"; // center node
+
+  assert(ctx, pmmNodeIds.includes(pmmRoot), "PMM grid has node 3,3");
+
+  const pmmReachable = computeReachableVoltagesBFS(10, pmmRoot, pmmNodeIds, pmmEdges);
+  console.log(`    PMM reachable voltages: ${pmmReachable.length}`);
+
+  const identityK = voltageKey(I3);
+  const nonIdentityVoltages = pmmReachable.filter(v => v.key !== identityK);
+  assert(ctx, nonIdentityVoltages.length > 0, "PMM has non-identity reachable voltages");
+
+  // Try to find a loop for a non-identity voltage using nodeAtMostOnce mode
+  if (nonIdentityVoltages.length > 0) {
+    const target = nonIdentityVoltages[0];
+    console.log(`    Target voltage: ${target.key}`);
+
+    const result = solveLoopWithVoltage(
+      10, pmmRoot, pmmNodeIds, pmmAdj, pmmEdges,
+      target.key, pmmReachable
+    );
+    assert(ctx, result.satisfiable, "PMM non-identity voltage loop is SAT with nodeAtMostOnce");
+    if (result.pathNodeIds) {
+      console.log(`    Path: ${result.pathNodeIds.join(" → ")}`);
+      assert(ctx, result.pathNodeIds[0] === pmmRoot, "Path starts at root");
+      assert(ctx, result.pathNodeIds[result.pathNodeIds.length - 1] === pmmRoot, "Path ends at root");
+
+      // Verify accumulated voltage
+      let accum = I3;
+      for (let t = 0; t < result.pathNodeIds.length - 1; t++) {
+        const from = result.pathNodeIds[t];
+        const to = result.pathNodeIds[t + 1];
+        for (const edge of pmmEdges) {
+          const hv = edge.halfEdgeVoltages[from];
+          if (!hv) continue;
+          let edgeTo: string;
+          if (edge.endpoints[0] === edge.endpoints[1]) {
+            edgeTo = edge.endpoints[0];
+          } else {
+            edgeTo = edge.endpoints[0] === from ? edge.endpoints[1] : edge.endpoints[0];
+          }
+          if (edgeTo === to) {
+            accum = matMul(accum, hv);
+            break;
+          }
+        }
+      }
+      assert(ctx, matEq(accum, target.matrix), "Accumulated voltage matches target");
+    }
+  }
+
+  // Count total SAT for all non-identity voltages
+  let satCount = 0;
+  for (const target of nonIdentityVoltages) {
+    const result = solveLoopWithVoltage(
+      10, pmmRoot, pmmNodeIds, pmmAdj, pmmEdges,
+      target.key, pmmReachable
+    );
+    if (result.satisfiable) satCount++;
+  }
+  console.log(`    SAT for non-identity voltages: ${satCount}/${nonIdentityVoltages.length}`);
+  assert(ctx, satCount > 0, "At least one non-identity voltage loop is SAT");
+}
+
 reportResults(ctx);
