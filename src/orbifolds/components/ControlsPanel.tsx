@@ -48,6 +48,7 @@ export function ControlsPanel({
         >
           <option value="P1">P1 (Torus)</option>
           <option value="P2">P2 (180° rotation)</option>
+          <option value="P2hex">P2hex (180° rotation - axial hex)</option>
           <option value="pgg">pgg (glide reflections)</option>
           <option value="pmm">pmm (mirrors)</option>
           <option value="P3">P3 (120° rotation - axial)</option>
@@ -64,7 +65,7 @@ export function ControlsPanel({
         min={minSize}
         max={10}
         label="Size (n)"
-        extraValidate={wallpaperGroup === "P2" ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
+        extraValidate={(wallpaperGroup === "P2" || wallpaperGroup === "P2hex") ? (n) => n % 2 !== 0 ? "must be even" : null : undefined}
       />
       
       {/* Expansion Input */}
@@ -76,19 +77,17 @@ export function ControlsPanel({
         label="Expansion (m)"
       />
       
-      {/* Axial Transform Checkbox (only visible for P3/P6) */}
-      {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={useAxialTransform}
-              onChange={(e) => onUseAxialTransformChange(e.target.checked)}
-            />
-            Show axial coordinates
-          </label>
-        </div>
-      )}
+      {/* Axial Transform Checkbox */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={useAxialTransform}
+            onChange={(e) => onUseAxialTransformChange(e.target.checked)}
+          />
+          Apply axial-to-screen transform
+        </label>
+      </div>
     </div>
   );
 }

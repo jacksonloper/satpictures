@@ -381,6 +381,7 @@ export function OrbifoldColorsExplorer() {
   const [expansion, setExpansion] = useState(DEFAULT_M);
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<string>("");
+  const [useAxialTransform, setUseAxialTransform] = useState(false);
 
   // Three.js refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -513,8 +514,7 @@ export function OrbifoldColorsExplorer() {
           wallsRef.current = null;
         }
 
-        const useAxial = wallpaperGroup === "P3" || wallpaperGroup === "P6";
-        const { mesh, walls } = buildSceneObjects(lifted, grid, useAxial);
+        const { mesh, walls } = buildSceneObjects(lifted, grid, useAxialTransform);
         scene.add(mesh);
         scene.add(walls);
         meshRef.current = mesh;
@@ -557,7 +557,7 @@ export function OrbifoldColorsExplorer() {
         setBusy(false);
       });
     },
-    [expansion, wallpaperGroup],
+    [expansion, wallpaperGroup, useAxialTransform],
   );
 
   // Random Tree handler
@@ -589,7 +589,7 @@ export function OrbifoldColorsExplorer() {
     (raw: string) => {
       const n = Number(raw);
       if (!Number.isFinite(n) || n < minSize || n > 200 || n !== Math.floor(n)) return;
-      if (wallpaperGroup === "P2" && n % 2 !== 0) return;
+      if ((wallpaperGroup === "P2" || wallpaperGroup === "P2hex") && n % 2 !== 0) return;
       setSize(n);
     },
     [minSize, wallpaperGroup],
@@ -622,6 +622,7 @@ export function OrbifoldColorsExplorer() {
           >
             <option value="P1">P1</option>
             <option value="P2">P2</option>
+            <option value="P2hex">P2hex</option>
             <option value="pgg">pgg</option>
             <option value="pmm">pmm</option>
             <option value="P3">P3</option>
@@ -716,6 +717,16 @@ export function OrbifoldColorsExplorer() {
         >
           🌿 Shallow Tree
         </button>
+
+        {/* Axial Transform Checkbox */}
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={useAxialTransform}
+            onChange={(e) => setUseAxialTransform(e.target.checked)}
+          />
+          Apply axial-to-screen transform
+        </label>
       </div>
 
       {/* Stats */}

@@ -3,7 +3,7 @@
  */
 
 import type { OrbifoldGrid, LiftedGraph } from "../orbifoldbasics";
-import type { ColorData, EdgeStyleData, WallpaperGroupType } from "../createOrbifolds";
+import type { ColorData, EdgeStyleData } from "../createOrbifolds";
 import { DoubledOrbifoldLoopDisplay } from "./DoubledOrbifoldLoopDisplay";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { WeaveThreeRenderer } from "./WeaveThreeRenderer";
@@ -14,7 +14,7 @@ export interface AcceptedLoopPanelProps {
   highlightedNodeId: string | null;
   onNodeClick: (nodeId: string) => void;
   liftedGraph: LiftedGraph<ColorData, EdgeStyleData>;
-  wallpaperGroup: WallpaperGroupType;
+  useAxialTransform: boolean;
   levelHeight: number;
   tubeRadius: number;
   beadSpeed: number;
@@ -29,7 +29,7 @@ export function AcceptedLoopPanel({
   highlightedNodeId,
   onNodeClick,
   liftedGraph,
-  wallpaperGroup,
+  useAxialTransform,
   levelHeight,
   tubeRadius,
   beadSpeed,
@@ -96,7 +96,7 @@ export function AcceptedLoopPanel({
         <WeaveThreeRenderer
           liftedGraph={liftedGraph}
           orbifoldGrid={doubledGrid}
-          useAxialTransform={wallpaperGroup === "P3" || wallpaperGroup === "P6"}
+          useAxialTransform={useAxialTransform}
           highlightedOrbifoldNodeId={highlightedNodeId}
           levelSpacing={levelHeight}
           tubeRadius={tubeRadius}

@@ -1,10 +1,4 @@
-import type { WallpaperGroupType } from "../createOrbifolds";
-
-interface HelpSectionProps {
-  wallpaperGroup: WallpaperGroupType;
-}
-
-export function HelpSection({ wallpaperGroup }: HelpSectionProps) {
+export function HelpSection() {
   return (
     <div style={{ 
       marginTop: "30px", 
@@ -21,6 +15,7 @@ export function HelpSection({ wallpaperGroup }: HelpSectionProps) {
       <ul style={{ marginTop: "8px", paddingLeft: "20px" }}>
         <li><strong>P1:</strong> Simple torus wrapping (translations only)</li>
         <li><strong>P2:</strong> Includes 180° rotations at boundaries</li>
+        <li><strong>P2hex:</strong> Like P2, but with hexagonal nodes in axial coordinates (6 neighbors per node)</li>
         <li><strong>pgg:</strong> Includes glide reflections at boundaries (no pure rotations)</li>
         <li><strong>P3:</strong> Includes 120° rotations at boundaries (3-fold symmetry, uses axial coordinates)</li>
         <li><strong>P4:</strong> Includes 90° rotations at boundaries (4-fold symmetry)</li>
@@ -29,12 +24,9 @@ export function HelpSection({ wallpaperGroup }: HelpSectionProps) {
       <p style={{ marginTop: "8px" }}>
         Use <strong>🎨 Color</strong> tool to paint cells, or <strong>🔍 Inspect</strong> tool to see node coordinates, edges, and voltage matrices.
       </p>
-      {(wallpaperGroup === "P3" || wallpaperGroup === "P6") && (
-        <p style={{ marginTop: "8px", color: "#666" }}>
-          <strong>Note:</strong> {wallpaperGroup} uses axial coordinates for 120° rotations. Neighbor distances in the lifted graph 
-          may appear non-uniform in Cartesian display. Check "Show axial coordinates" for the transformed view.
-        </p>
-      )}
+      <p style={{ marginTop: "8px", color: "#666" }}>
+        <strong>Tip:</strong> Use "Apply axial-to-screen transform" to view the lifted graph with a sheared coordinate system that shows proper hexagonal structure.
+      </p>
     </div>
   );
 }

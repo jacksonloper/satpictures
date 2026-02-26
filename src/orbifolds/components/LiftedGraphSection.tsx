@@ -45,7 +45,7 @@ export function LiftedGraphSection({
 }: LiftedGraphSectionProps) {
   return (
     <div>
-      <h3 style={{ marginBottom: "10px" }}>Lifted Graph{(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
+      <h3 style={{ marginBottom: "10px" }}>Lifted Graph{useAxialTransform ? " (Axial → Cartesian)" : ""}</h3>
       <p style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>
         Nodes: {liftedGraph.nodes.size} | Edges: {liftedGraph.edges.size}
         {inspectedNodeId && (
@@ -125,7 +125,7 @@ export function LiftedGraphSection({
         liftedGraph={liftedGraph}
         orbifoldGrid={orbifoldGrid}
         highlightOrbifoldNodeId={inspectedNodeId ?? undefined}
-        useAxialTransform={(wallpaperGroup === "P3" || wallpaperGroup === "P6") && useAxialTransform}
+        useAxialTransform={useAxialTransform}
         selectedVoltageKey={selectedVoltageKey}
         onNodeClick={onNodeClick}
         showDomains={backgroundMode}

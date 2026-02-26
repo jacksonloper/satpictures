@@ -89,6 +89,7 @@ export function OrbifoldWeaveExplorer() {
   const [levelHeight, setLevelHeight] = useState(3);
   const [tubeRadius, setTubeRadius] = useState(0.25);
   const [beadSpeed, setBeadSpeed] = useState(1.0);
+  const [useAxialTransform, setUseAxialTransform] = useState(false);
 
   const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
 
@@ -541,9 +542,11 @@ export function OrbifoldWeaveExplorer() {
         size={size}
         expansion={expansion}
         minSize={minSize}
+        useAxialTransform={useAxialTransform}
         onWallpaperGroupChange={handleWallpaperGroupChange}
         onSizeChange={handleSizeChange}
         onExpansionChange={setExpansion}
+        onUseAxialTransformChange={setUseAxialTransform}
       />
 
       {/* Error message */}
@@ -671,7 +674,7 @@ export function OrbifoldWeaveExplorer() {
           highlightedNodeId={highlightedNodeId}
           onNodeClick={(nodeId) => setHighlightedNodeId(prev => prev === nodeId ? null : nodeId)}
           liftedGraph={liftedGraph}
-          wallpaperGroup={wallpaperGroup}
+          useAxialTransform={useAxialTransform}
           levelHeight={levelHeight}
           tubeRadius={tubeRadius}
           beadSpeed={beadSpeed}
