@@ -39,6 +39,8 @@ import {
   ToolSelector,
   LoopFinderPanel,
   LoopsFinderPanel,
+  PathFinderPanel,
+  PathResultRenderer,
   InspectionPanel,
   LiftedGraphSection,
   HelpSection,
@@ -46,7 +48,7 @@ import {
   type InspectionInfo,
   type BackgroundMode,
 } from "./components";
-import { useLoopFinder } from "./hooks";
+import { useLoopFinder, usePathFinder } from "./hooks";
 import "../App.css";
 
 // Constants
@@ -92,6 +94,12 @@ export function OrbifoldsExplorer() {
     onError: setErrorMessage,
   });
 
+  // Use the path finder hook
+  const pathFinder = usePathFinder({
+    orbifoldGrid,
+    onError: setErrorMessage,
+  });
+
   // Recreate grid and reset dependent state when wallpaper group or size changes
   const resetGrid = useCallback((nextGroup: WallpaperGroupType, nextSize: number) => {
     const grid = createOrbifoldGrid(nextGroup, nextSize);
@@ -102,7 +110,8 @@ export function OrbifoldsExplorer() {
     const firstNodeId = grid.nodes.keys().next().value as OrbifoldNodeId;
     setRootNodeId(firstNodeId ?? null);
     loopFinder.resetAllLoopState();
-  }, [loopFinder]);
+    pathFinder.resetPathFinderState();
+  }, [loopFinder, pathFinder]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
     let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
@@ -206,6 +215,24 @@ export function OrbifoldsExplorer() {
     loopFinder.setPendingLoopResult(null);
     loopFinder.resetLoopsFinderState();
   }, [loopFinder]);
+
+  const handleAcceptPath = useCallback(() => {
+    if (!pathFinder.pendingPathResult) return;
+
+    const proposedStyles = pathFinder.pendingPathResult.edgeStyles;
+
+    setOrbifoldGrid((prev) => {
+      const newEdges = new Map(prev.edges);
+      for (const [edgeId, edge] of newEdges) {
+        const linestyle = proposedStyles[edgeId] ?? "dashed";
+        newEdges.set(edgeId, { ...edge, data: { linestyle } });
+      }
+      return { nodes: prev.nodes, edges: newEdges, adjacency: prev.adjacency };
+    });
+
+    setInspectionInfo(null);
+    pathFinder.setPendingPathResult(null);
+  }, [pathFinder]);
 
   const handleClear = useCallback(() => {
     setOrbifoldGrid((prev) => {
@@ -313,6 +340,8 @@ export function OrbifoldsExplorer() {
             showLoopFinder={loopFinder.showLoopFinder}
             onToggleLoopsFinder={loopFinder.handleToggleLoopsFinder}
             showLoopsFinder={loopFinder.showLoopsFinder}
+            onTogglePathFinder={pathFinder.handleTogglePathFinder}
+            showPathFinder={pathFinder.showPathFinder}
             onClear={handleClear}
           />
           
@@ -382,6 +411,30 @@ export function OrbifoldsExplorer() {
               onReject={loopFinder.handleRejectLoop}
               wallpaperGroup={wallpaperGroup}
               initialEdgeIds={loopFinder.pendingLoopResult.pathEdgeIds}
+            />
+          )}
+
+          {/* Path Finder Panel */}
+          {pathFinder.showPathFinder && (
+            <PathFinderPanel
+              minNodes={pathFinder.minNodes}
+              onMinNodesChange={pathFinder.setMinNodes}
+              solvingPath={pathFinder.solvingPath}
+              onSolvePath={pathFinder.handleSolvePath}
+              onCancel={pathFinder.handleCancelPathFind}
+              pathSatStats={pathFinder.pathSatStats}
+            />
+          )}
+
+          {/* Path Result Preview (Accept/Reject) */}
+          {pathFinder.pendingPathResult && (
+            <PathResultRenderer
+              grid={orbifoldGrid}
+              edgeStyles={pathFinder.pendingPathResult.edgeStyles}
+              pathNodeCount={pathFinder.pendingPathResult.pathNodeCount}
+              onAccept={handleAcceptPath}
+              onReject={pathFinder.handleRejectPath}
+              wallpaperGroup={wallpaperGroup}
             />
           )}
           
