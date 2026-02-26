@@ -1,0 +1,59 @@
+name: Test Write Permissions
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  check-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check token permissions via API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Checking GITHUB_TOKEN permissions ==="
+          echo ""
+
+          # The installations endpoint returns the actual permissions granted
+          RESPONSE=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}")
+
+          echo "=== Repo permissions on token ==="
+          echo "$RESPONSE" | jq '.permissions // "no permissions field"'
+
+          echo ""
+          echo "=== Now checking via a dry-run-style test ==="
+
+          # Try to list refs (read operation) - should always work
+          HTTP_READ=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/git/refs/heads/main")
+          echo "GET refs/heads/main -> HTTP $HTTP_READ"
+
+          # Check if we *could* create a ref by trying to create a dummy one
+          # that points to an invalid SHA - the 422 means we have write access
+          # but the payload is bad; 403 means no write access.
+          HTTP_WRITE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -X POST \
+            -d '{"ref":"refs/tags/__permission_test_do_not_create__","sha":"0000000000000000000000000000000000000000"}' \
+            "https://api.github.com/repos/${{ github.repository }}/git/refs")
+          echo "POST git/refs (invalid SHA) -> HTTP $HTTP_WRITE"
+
+          echo ""
+          if [ "$HTTP_WRITE" = "403" ]; then
+            echo "RESULT: Token does NOT have write access to contents."
+          elif [ "$HTTP_WRITE" = "422" ]; then
+            echo "RESULT: Token DOES have write access to contents! (422 = understood request but invalid SHA, meaning auth passed)"
+          else
+            echo "RESULT: Unexpected status $HTTP_WRITE - check logs above."
+          fi
