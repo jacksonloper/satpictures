@@ -274,7 +274,7 @@ export function solveLoopFinderDegree(
   // For t = L-1: ¬nl[L-1] → x[L-1][rootIdx]
   solver.addClause([nl[L - 1], x[L - 1][rootIdx]]);
 
-  // Must return to root (at least one non-step-0 visit)
+  // Must return to root at some step after step 0
   {
     const rootSteps: number[] = [];
     for (let t = 1; t < L; t++) {

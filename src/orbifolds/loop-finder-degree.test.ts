@@ -260,7 +260,7 @@ function solveLoopDegree(
     }
   }
 
-  // Root at most once in steps 1..L-1 (NO at-most-once for non-root nodes)
+  // NO at-most-once constraint for any node (key difference from standard method)
   // Root may also be revisited multiple times in the degree-constraint encoding.
 
   // Voltage tracking
