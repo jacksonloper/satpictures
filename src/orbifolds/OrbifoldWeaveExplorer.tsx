@@ -458,12 +458,12 @@ export function OrbifoldWeaveExplorer() {
       edgeLoopSteps.get(edgeId)!.push({ startStep: t, startNode: pathNodeIds[t] });
     }
 
-    // Build loopStep per node
-    const nodeLoopStep = new Map<string, number>();
+    // Build loopStep per node: array of all step indices
+    const nodeLoopStep = new Map<string, number[]>();
     for (let i = 0; i < pathNodeIds.length; i++) {
-      if (!nodeLoopStep.has(pathNodeIds[i])) {
-        nodeLoopStep.set(pathNodeIds[i], i);
-      }
+      const id = pathNodeIds[i];
+      if (!nodeLoopStep.has(id)) nodeLoopStep.set(id, []);
+      nodeLoopStep.get(id)!.push(i);
     }
 
     // Validate: each orbifold node should have exactly 2 solid edges

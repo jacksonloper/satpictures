@@ -20,6 +20,7 @@ import {
   type ColorData,
   type EdgeStyleData,
   type EdgeLinestyle,
+  type LoopStep,
 } from "./createOrbifolds";
 import {
   constructLiftedGraphFromOrbifold,
@@ -184,19 +185,43 @@ export function OrbifoldsExplorer() {
   const handleAcceptLoop = useCallback((selectedEdgeIds: string[]) => {
     if (!loopFinder.pendingLoopResult) return;
 
+    const pathNodeIds = loopFinder.pendingLoopResult.pathNodeIds;
     const chosenEdges = new Set(selectedEdgeIds);
-    const loopNodeIds = new Set(loopFinder.pendingLoopResult.pathNodeIds);
+    const loopNodeIds = new Set(pathNodeIds);
+
+    // Build loopStep per node: array of all step indices where this node appears
+    // (excluding the final return-to-root which duplicates step 0)
+    const nodeLoopSteps = new Map<string, number[]>();
+    for (let t = 0; t < pathNodeIds.length - 1; t++) {
+      const id = pathNodeIds[t];
+      if (!nodeLoopSteps.has(id)) nodeLoopSteps.set(id, []);
+      nodeLoopSteps.get(id)!.push(t);
+    }
+
+    // Build loopSteps per edge: for each step t, selectedEdgeIds[t] is the
+    // edge used from pathNodeIds[t] to pathNodeIds[t+1]
+    const edgeLoopSteps = new Map<string, LoopStep[]>();
+    for (let t = 0; t < selectedEdgeIds.length; t++) {
+      const edgeId = selectedEdgeIds[t];
+      if (!edgeId) continue;
+      if (!edgeLoopSteps.has(edgeId)) edgeLoopSteps.set(edgeId, []);
+      edgeLoopSteps.get(edgeId)!.push({ startStep: t, startNode: pathNodeIds[t] });
+    }
 
     setOrbifoldGrid((prev) => {
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
         const linestyle = chosenEdges.has(edgeId) ? "solid" : "dashed";
-        newEdges.set(edgeId, { ...edge, data: { linestyle } });
+        const loopSteps = edgeLoopSteps.get(edgeId) ?? [];
+        newEdges.set(edgeId, { ...edge, data: { linestyle, loopSteps } });
       }
       const newNodes = new Map(prev.nodes);
       for (const [nodeId, node] of newNodes) {
         if (!loopNodeIds.has(nodeId)) {
-          newNodes.set(nodeId, { ...node, data: { ...node.data, color: "black" } });
+          newNodes.set(nodeId, { ...node, data: { ...node.data, color: "black", loopStep: null } });
+        } else {
+          const steps = nodeLoopSteps.get(nodeId) ?? null;
+          newNodes.set(nodeId, { ...node, data: { ...node.data, loopStep: steps } });
         }
       }
       return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
@@ -211,11 +236,11 @@ export function OrbifoldsExplorer() {
     setOrbifoldGrid((prev) => {
       const newNodes = new Map(prev.nodes);
       for (const [nodeId, node] of newNodes) {
-        newNodes.set(nodeId, { ...node, data: { ...node.data, color: "white" } });
+        newNodes.set(nodeId, { ...node, data: { ...node.data, color: "white", loopStep: null } });
       }
       const newEdges = new Map(prev.edges);
       for (const [edgeId, edge] of newEdges) {
-        newEdges.set(edgeId, { ...edge, data: { ...edge.data, linestyle: "solid" } });
+        newEdges.set(edgeId, { ...edge, data: { ...edge.data, linestyle: "solid", loopSteps: undefined } });
       }
       return { nodes: newNodes, edges: newEdges, adjacency: prev.adjacency };
     });

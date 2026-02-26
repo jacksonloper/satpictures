@@ -269,6 +269,22 @@ export function OrbifoldGridTools({
             >
               {node.coord[0]},{node.coord[1]}
             </text>
+            {/* Loop step label (shown when node has accepted loop step data) */}
+            {node.data?.loopStep && node.data.loopStep.length > 0 && (
+              <text
+                x={cx}
+                y={cy + (node.polygon.length < 4 ? 10 : 12)}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={node.polygon.length < 4 ? 7 : 9}
+                fill="#27ae60"
+                fontWeight="bold"
+                fontFamily="monospace"
+                style={{ pointerEvents: "none" }}
+              >
+                [{node.data.loopStep.join(",")}]
+              </text>
+            )}
           </g>
         );
       })}

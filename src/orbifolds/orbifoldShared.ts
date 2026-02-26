@@ -23,7 +23,7 @@ export interface LoopStep {
 
 export interface ColorData extends ExtraData {
   color: "black" | "white";
-  loopStep?: number | null;
+  loopStep?: number[] | null;
 }
 
 export interface EdgeStyleData extends ExtraData {

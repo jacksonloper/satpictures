@@ -26,14 +26,17 @@ export function DoubledOrbifoldLoopDisplay({
   onNodeClick,
   highlightedNodeId,
 }: DoubledOrbifoldLoopDisplayProps) {
-  // Build a map from nodeId → step number (1-based)
+  // Build a map from nodeId → step numbers (comma-separated)
   const nodeStep = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, string>();
+    const stepMap = new Map<string, number[]>();
     for (let i = 0; i < pathNodeIds.length; i++) {
-      // If a node appears more than once (start == end), keep the first
-      if (!map.has(pathNodeIds[i])) {
-        map.set(pathNodeIds[i], i + 1);
-      }
+      const id = pathNodeIds[i];
+      if (!stepMap.has(id)) stepMap.set(id, []);
+      stepMap.get(id)!.push(i + 1);
+    }
+    for (const [id, steps] of stepMap) {
+      map.set(id, steps.join(","));
     }
     return map;
   }, [pathNodeIds]);
@@ -41,7 +44,7 @@ export function DoubledOrbifoldLoopDisplay({
   // Collect nodes per level
   const levelNodes = useMemo(() => {
     const byLevel: [typeof nodes0, typeof nodes1] = [[], []];
-    type NodeInfo = { id: string; x: number; y: number; step: number | null };
+    type NodeInfo = { id: string; x: number; y: number; step: string | null };
     const nodes0: NodeInfo[] = [];
     const nodes1: NodeInfo[] = [];
     byLevel[0] = nodes0;

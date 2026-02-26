@@ -157,12 +157,14 @@ export function LoopResultRenderer({
     [steps],
   );
 
-  // Build a map from nodeId -> step index (first occurrence, excluding the final root)
-  const nodeStep = new Map<string, number>();
+  // Build a map from nodeId -> list of step indices (all occurrences, excluding the final root)
+  const nodeSteps = new Map<string, number[]>();
   for (let t = 0; t < pathNodeIds.length - 1; t++) {
-    if (!nodeStep.has(pathNodeIds[t])) {
-      nodeStep.set(pathNodeIds[t], t);
+    const id = pathNodeIds[t];
+    if (!nodeSteps.has(id)) {
+      nodeSteps.set(id, []);
     }
+    nodeSteps.get(id)!.push(t);
   }
 
   // Compute bounding box of all polygon vertices (sketchpad layout)
@@ -210,8 +212,8 @@ export function LoopResultRenderer({
       >
         {Array.from(grid.nodes.values()).map((node) => {
           const color = node.data?.color ?? "white";
-          const stepIndex = nodeStep.get(node.id);
-          const isInPath = stepIndex !== undefined;
+          const steps = nodeSteps.get(node.id);
+          const isInPath = steps !== undefined && steps.length > 0;
           const isRoot = node.id === rootNodeId;
           const centroid = polygonCentroid(node.polygon);
           const cx = toSvgX(centroid.x);
@@ -232,10 +234,10 @@ export function LoopResultRenderer({
                 <text
                   x={cx} y={cy}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={node.polygon.length < 4 ? 10 : 14} fontWeight="bold" fill="white"
+                  fontSize={node.polygon.length < 4 ? 10 : (steps.length > 1 ? 10 : 14)} fontWeight="bold" fill="white"
                   style={{ pointerEvents: "none" }}
                 >
-                  {stepIndex}
+                  {steps.join(",")}
                 </text>
               )}
             </g>
