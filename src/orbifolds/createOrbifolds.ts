@@ -1,5 +1,5 @@
 /**
- * Orbifold creation routines for P1, P2, P2hex, P3, P4, P4g, P6, pgg, and pmm wallpaper groups.
+ * Orbifold creation routines for P1, P2, P2hex, P3, P4, P4g, P6, cmm, pgg, and pmm wallpaper groups.
  */
 
 import { type Int, type OrbifoldGrid } from "./orbifoldbasics";
@@ -10,6 +10,7 @@ import { createP3Grid } from "./p3";
 import { createP4Grid } from "./p4";
 import { createP4gGrid } from "./p4g";
 import { createP6Grid } from "./p6";
+import { createCmmGrid } from "./cmm";
 import { createPggGrid } from "./pgg";
 import { createPmmGrid } from "./pmm";
 import { type ColorData, type EdgeStyleData, type WallpaperGroupType } from "./orbifoldShared";
@@ -17,7 +18,7 @@ import { type ColorData, type EdgeStyleData, type WallpaperGroupType } from "./o
 /**
  * Create an orbifold grid for the given wallpaper group and size.
  * 
- * @param groupType - "P1", "P2", "P2hex", "P3", "P4", "P4g", "P6", "pgg", or "pmm"
+ * @param groupType - "P1", "P2", "P2hex", "P3", "P4", "P4g", "P6", "cmm", "pgg", or "pmm"
  * @param n - Grid size (results in n×n nodes). Must be at least 2.
  * @param initialColors - Optional initial colors for each cell (row-major, n×n array)
  */
@@ -41,6 +42,8 @@ export function createOrbifoldGrid(
       return createP4gGrid(n, initialColors);
     case "P6":
       return createP6Grid(n, initialColors);
+    case "cmm":
+      return createCmmGrid(n, initialColors);
     case "pgg":
       return createPggGrid(n, initialColors);
     case "pmm":

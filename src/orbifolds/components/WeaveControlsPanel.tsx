@@ -49,6 +49,7 @@ export function WeaveControlsPanel({
           <option value="P2">P2 (180° rotation)</option>
           <option value="pgg">pgg (glide reflections)</option>
           <option value="pmm">pmm (mirrors)</option>
+          <option value="cmm">cmm (mirrors + diagonal flip)</option>
           <option value="P3">P3 (120° rotation - axial)</option>
           <option value="P4">P4 (90° rotation)</option>
           <option value="P4g">P4g (90° rotation + diagonal flip)</option>

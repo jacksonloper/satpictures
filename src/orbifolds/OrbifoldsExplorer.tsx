@@ -78,7 +78,7 @@ export function OrbifoldsExplorer() {
     return firstNodeId ?? null;
   });
 
-  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" ? 4 : 2;
+  const minSize = wallpaperGroup === "P4g" || wallpaperGroup === "P6" || wallpaperGroup === "cmm" ? 4 : 2;
   const liftedGraphSvgRef = useRef<SVGSVGElement>(null);
   
   const [orbifoldGrid, setOrbifoldGrid] = useState<OrbifoldGrid<ColorData, EdgeStyleData>>(() => {
@@ -114,7 +114,7 @@ export function OrbifoldsExplorer() {
   }, [loopFinder, pathFinder]);
 
   const handleWallpaperGroupChange = (nextGroup: WallpaperGroupType) => {
-    let nextSize = (nextGroup === "P4g" || nextGroup === "P6") && size < 4 ? 4 : size;
+    let nextSize = (nextGroup === "P4g" || nextGroup === "P6" || nextGroup === "cmm") && size < 4 ? 4 : size;
     if ((nextGroup === "P2" || nextGroup === "P2hex") && nextSize % 2 !== 0) nextSize++;
     if (nextSize !== size) setSize(nextSize);
     setWallpaperGroup(nextGroup);
