@@ -41,6 +41,7 @@ import {
   LoopsFinderPanel,
   PathFinderPanel,
   PathResultRenderer,
+  ParallelizablePanel,
   InspectionPanel,
   LiftedGraphSection,
   HelpSection,
@@ -71,6 +72,7 @@ export function OrbifoldsExplorer() {
   const [showNodes, setShowNodes] = useState(false);
   const [showWalls, setShowWalls] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
+  const [showParallelizable, setShowParallelizable] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootNodeId, setRootNodeId] = useState<OrbifoldNodeId | null>(() => {
     const grid = createOrbifoldGrid("P1", DEFAULT_SIZE);
@@ -342,6 +344,8 @@ export function OrbifoldsExplorer() {
             showLoopsFinder={loopFinder.showLoopsFinder}
             onTogglePathFinder={pathFinder.handleTogglePathFinder}
             showPathFinder={pathFinder.showPathFinder}
+            onToggleParallelizable={() => setShowParallelizable((p) => !p)}
+            showParallelizable={showParallelizable}
             onClear={handleClear}
           />
           
@@ -434,6 +438,14 @@ export function OrbifoldsExplorer() {
               pathNodeCount={pathFinder.pendingPathResult.pathNodeCount}
               onAccept={handleAcceptPath}
               onReject={pathFinder.handleRejectPath}
+              wallpaperGroup={wallpaperGroup}
+            />
+          )}
+
+          {/* Parallelizable Check Panel */}
+          {showParallelizable && (
+            <ParallelizablePanel
+              grid={orbifoldGrid}
               wallpaperGroup={wallpaperGroup}
             />
           )}

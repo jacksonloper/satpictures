@@ -10,6 +10,8 @@ interface ToolSelectorProps {
   showLoopsFinder: boolean;
   onTogglePathFinder: () => void;
   showPathFinder: boolean;
+  onToggleParallelizable: () => void;
+  showParallelizable: boolean;
   onClear: () => void;
 }
 
@@ -23,6 +25,8 @@ export function ToolSelector({
   showLoopsFinder,
   onTogglePathFinder,
   showPathFinder,
+  onToggleParallelizable,
+  showParallelizable,
   onClear,
 }: ToolSelectorProps) {
   return (
@@ -126,6 +130,20 @@ export function ToolSelector({
           title="Find nonbranching paths where every node has exactly 0 or 2 solid edges"
         >
           🛤️ Find Nonbranching Paths
+        </button>
+        <button
+          onClick={onToggleParallelizable}
+          style={{
+            padding: "6px 12px",
+            borderRadius: "4px",
+            border: showParallelizable ? "2px solid #27ae60" : "1px solid #27ae60",
+            backgroundColor: showParallelizable ? "#eafaf1" : "#f9fefe",
+            cursor: "pointer",
+            fontWeight: showParallelizable ? "bold" : "normal",
+          }}
+          title="Check if the current path is parallelizable and display the region partition"
+        >
+          🔲 Parallelizable
         </button>
         <button
           onClick={onClear}
