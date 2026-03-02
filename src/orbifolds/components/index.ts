@@ -19,3 +19,4 @@ export { PendingLoopPanel, type PendingLoopPanelProps, type PendingLoopResult } 
 export { AcceptedLoopPanel, type AcceptedLoopPanelProps } from "./AcceptedLoopPanel";
 export { PathFinderPanel } from "./PathFinderPanel";
 export { PathResultRenderer } from "./PathResultRenderer";
+export { ParallelizablePanel } from "./ParallelizablePanel";
